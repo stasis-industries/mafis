@@ -6,8 +6,7 @@ A fault resilience observatory for lifelong multi-agent pathfinding — 29K line
 
 `5 solvers` `5 topologies` `4 fault scenarios` `364 tests` `29K LOC Rust` `WASM 3D` `Deterministic replay`
 
-**[Live Simulator](https://stasisai.dev/simulator) &middot; [Results](#findings) &middot; [GitHub](https://github.com/stasis-industry/mafis)**
-
+**[Live Simulator](https://stasis-website.vercel.app/simulator) &middot; [GitHub](https://github.com/stasis-industry/mafis)**
 ---
 
 ## What It Does
@@ -15,24 +14,6 @@ A fault resilience observatory for lifelong multi-agent pathfinding — 29K line
 MAFIS runs lifelong MAPF simulations in 3D, injects faults (crash failures, mechanical wear, zone outages, intermittent glitches), and measures how the system degrades and recovers — compared against a deterministic fault-free baseline.
 
 Every simulation is seeded and reproducible. Every metric is differential: faulted vs baseline, same seed, same agents.
-
----
-
-## Findings
-
-2,520 experiment runs (30 seeds x 4 experiments), all metrics audited for scientific reliability.
-
-### Task scheduling impacts fault recovery 3.8x more than solver choice
-
-Closest-first scheduling completes **3.8x more tasks** than Random under a 20% burst failure (29.6 vs 7.8 tasks, n=30, p<0.001). The scheduling strategy — not the pathfinding algorithm — determines how quickly a warehouse recovers from faults.
-
-### High-throughput solvers degrade hardest
-
-Token Passing produces **9x more tasks** than PIBT in normal operation (70.2 vs 7.8). But under sustained wear (Weibull, 90% fleet dead by tick 500), Token Passing's fault tolerance drops to **FT=0.14** — it retains only 14% of baseline throughput. PIBT retains 100%. More capacity means more to lose.
-
-### Dense layouts exhibit Braess's paradox
-
-In the compact grid (Ocado-style micro-fulfillment), killing 20% of agents **improves throughput 8x** (FT=8.10). Removing agents relieves congestion bottlenecks — the classic Braess's paradox, observed in multi-agent systems.
 
 ---
 
