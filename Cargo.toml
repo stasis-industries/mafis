@@ -49,6 +49,7 @@ directories = "6"
 
 [features]
 default = []
+mapf-pilot = []
 
 [profile.dev.package."*"]
 opt-level = 3
