@@ -45,13 +45,16 @@ jobs:
       - name: Build WASM (release)
         run: cargo build --release --target wasm32-unknown-unknown
 
+      - name: Build topology manifest
+        run: sh topologies/build-manifest.sh
+
       - name: Generate JS bindings
         run: |
-          wasm-bindgen --out-dir wasm-dist --target web \
+          wasm-bindgen --out-dir web --target web \
             target/wasm32-unknown-unknown/release/mafis.wasm
 
       - name: Package WASM artifacts
-        run: tar -czf mafis-wasm.tar.gz -C wasm-dist .
+        run: tar -czf mafis-wasm.tar.gz -C web .
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
