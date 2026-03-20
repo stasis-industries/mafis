@@ -6,7 +6,6 @@ A fault resilience observatory for lifelong multi-agent pathfinding — 29K line
 
 `5 solvers` `5 topologies` `4 fault scenarios` `364 tests` `29K LOC Rust` `WASM 3D` `Deterministic replay`
 
-**[Live Simulator](https://stasis-website.vercel.app/simulator) &middot; [GitHub](https://github.com/stasis-industry/mafis)**
 ---
 
 ## What It Does
