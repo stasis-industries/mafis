@@ -1,0 +1,65 @@
+[
+  {
+    "label": "Build",
+    "command": "cargo build",
+    "use_new_terminal": false,
+    "allow_concurrent_runs": false,
+    "reveal": "no_focus",
+    "hide": "on_success",
+    "show_command": false
+  },
+  {
+    "label": "Check",
+    "command": "cargo check",
+    "use_new_terminal": false,
+    "allow_concurrent_runs": false,
+    "reveal": "no_focus",
+    "hide": "on_success",
+    "show_command": false
+  },
+  {
+    "label": "Run",
+    "command": "sh topologies/build-manifest.sh && cargo run",
+    "use_new_terminal": false,
+    "allow_concurrent_runs": false,
+    "reveal": "no_focus",
+    "hide": "never",
+    "show_command": false
+  },  
+  {
+    "label": "Run [Release]",
+    "command": "sh topologies/build-manifest.sh && cargo run --release",
+    "use_new_terminal": false,
+    "allow_concurrent_runs": false,
+    "reveal": "no_focus",
+    "hide": "never",
+    "show_command": false
+  },  
+  {
+    "label": "Build + Run WASM",
+    "command": "sh topologies/build-manifest.sh && cargo build --release --target wasm32-unknown-unknown && wasm-bindgen --out-dir web --target web target/wasm32-unknown-unknown/release/mafis.wasm && basic-http-server web",
+    "use_new_terminal": false,
+    "allow_concurrent_runs": false,
+    "reveal": "no_focus",
+    "hide": "never",
+    "show_command": false
+  },
+  {
+    "label": "Test",
+    "command": "cargo test",
+    "use_new_terminal": false,
+    "allow_concurrent_runs": false,
+    "reveal": "no_focus",
+    "hide": "never",
+    "show_command": false
+  },
+  {
+    "label": "Test",
+    "command": "cargo test",
+    "use_new_terminal": false,
+    "allow_concurrent_runs": false,
+    "reveal": "no_focus",
+    "hide": "never",
+    "show_command": false
+  }
+]

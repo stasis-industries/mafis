@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MAFIS — Map Maker</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Inter:wght@300;400;500&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+</head>
+
+<body class="mapmaker-body">
+    <!-- Header -->
+    <header class="mm-header">
+        <div class="mm-header-left">
+            <span class="mm-header-title">MAFIS</span>
+            <span class="mm-header-sep">/</span>
+            <span class="mm-header-subtitle">Map Maker</span>
+        </div>
+        <div class="mm-header-right">
+            <button class="btn-theme" id="btn-theme" title="Toggle dark mode">&#9789;</button>
+            <a href="index.html" class="mm-header-back">Back to Simulator</a>
+        </div>
+    </header>
+
+    <div class="mm-layout">
+        <!-- Left Panel: Tools -->
+        <aside class="mm-panel mm-panel-left">
+            <section>
+                <div class="mm-section-title">TOOLS</div>
+                <div class="mm-tool-grid">
+                    <button class="mm-tool-btn active" data-tool="wall" title="Wall — impassable obstacle [1]">
+                        <span class="mm-tool-swatch" style="background:#1a1a1c"></span>
+                        <span>Wall</span>
+                        <kbd>1</kbd>
+                    </button>
+                    <button class="mm-tool-btn" data-tool="walkable" title="Walkable — open corridor [2]">
+                        <span class="mm-tool-swatch" style="background:#2a2a2e"></span>
+                        <span>Walkable</span>
+                        <kbd>2</kbd>
+                    </button>
+                    <button class="mm-tool-btn" data-tool="pickup" title="Pickup zone — loading area [3]">
+                        <span class="mm-tool-swatch" style="background:#d98d26"></span>
+                        <span>Pickup</span>
+                        <kbd>3</kbd>
+                    </button>
+                    <button class="mm-tool-btn" data-tool="delivery" title="Delivery zone [4]">
+                        <span class="mm-tool-swatch" style="background:#40b873"></span>
+                        <span>Delivery</span>
+                        <kbd>4</kbd>
+                    </button>
+                    <button class="mm-tool-btn" data-tool="recharging" title="Recharging zone [5]">
+                        <span class="mm-tool-swatch" style="background:#4d8cd9"></span>
+                        <span>Recharging</span>
+                        <kbd>5</kbd>
+                    </button>
+                    <button class="mm-tool-btn" data-tool="robot" title="Place robot [6]">
+                        <span class="mm-tool-swatch mm-tool-robot"></span>
+                        <span>Robot</span>
+                        <kbd>6</kbd>
+                    </button>
+                </div>
+            </section>
+
+            <section>
+                <div class="mm-section-title">DRAW MODE</div>
+                <div class="mm-mode-row">
+                    <button class="mm-mode-btn active" data-mode="click" title="Click — single cell [Q]">Click <kbd>Q</kbd></button>
+                    <button class="mm-mode-btn" data-mode="paint" title="Paint — drag to paint [W]">Paint <kbd>W</kbd></button>
+                    <button class="mm-mode-btn" data-mode="rect" title="Rectangle — drag to fill area [E]">Rect <kbd>E</kbd></button>
+                </div>
+            </section>
+
+            <section>
+                <div class="mm-section-title">HISTORY</div>
+                <div class="mm-history-row">
+                    <button class="btn-secondary" id="btn-undo" disabled title="Undo [Ctrl+Z]">Undo</button>
+                    <button class="btn-secondary" id="btn-redo" disabled title="Redo [Ctrl+Shift+Z]">Redo</button>
+                </div>
+            </section>
+
+            <section>
+                <div class="mm-section-title">VIEW</div>
+                <button class="btn-secondary" id="btn-center" title="Center grid in viewport [C]">Center Grid</button>
+            </section>
+        </aside>
+
+        <!-- Center: Canvas -->
+        <main class="mm-canvas-area">
+            <canvas id="mm-canvas"></canvas>
+            <!-- Toast container -->
+            <div id="mm-toasts" class="mm-toasts"></div>
+        </main>
+
+        <!-- Right Panel: Properties + Import/Export -->
+        <aside class="mm-panel mm-panel-right">
+            <section>
+                <div class="mm-section-title">PROPERTIES</div>
+                <div class="mm-prop-group">
+                    <label class="mm-prop-label">Map Name</label>
+                    <input type="text" class="mm-prop-input" id="input-map-name" placeholder="e.g. Exotec Warehouse" value="">
+                </div>
+                <div class="mm-prop-group">
+                    <label class="mm-prop-label">Grid Width</label>
+                    <input type="number" class="mm-prop-input" id="input-grid-w" min="8" max="512" value="32">
+                </div>
+                <div class="mm-prop-group">
+                    <label class="mm-prop-label">Grid Height</label>
+                    <input type="number" class="mm-prop-input" id="input-grid-h" min="8" max="512" value="32">
+                </div>
+                <div class="mm-prop-group">
+                    <label class="mm-prop-label">Seed</label>
+                    <input type="number" class="mm-prop-input" id="input-seed" min="0" max="9999" value="42">
+                </div>
+            </section>
+
+            <section>
+                <div class="mm-section-title">ROBOTS</div>
+                <div class="mm-prop-group">
+                    <label class="mm-prop-label">Generate count</label>
+                    <input type="number" class="mm-prop-input" id="input-robot-count" min="1" max="1000" value="10">
+                </div>
+                <div class="mm-gen-row">
+                    <button class="btn-secondary" id="btn-gen-replace">Replace All</button>
+                    <button class="btn-secondary" id="btn-gen-add">Add</button>
+                </div>
+            </section>
+
+            <section>
+                <div class="mm-section-title">IMPORT</div>
+                <div class="mm-import-row">
+                    <label class="btn-secondary mm-file-btn">
+                        .map
+                        <input type="file" id="input-import-map" accept=".map" class="file-input-hidden">
+                    </label>
+                    <label class="btn-secondary mm-file-btn">
+                        .scen
+                        <input type="file" id="input-import-scen" accept=".scen" class="file-input-hidden">
+                    </label>
+                    <label class="btn-secondary mm-file-btn">
+                        JSON
+                        <input type="file" id="input-import-json" accept=".json" class="file-input-hidden">
+                    </label>
+                </div>
+            </section>
+
+            <section>
+                <div class="mm-section-title">EXPORT</div>
+                <button class="btn-secondary" id="btn-save-json" disabled>Save JSON</button>
+                <button class="btn-secondary" id="btn-save-scen" disabled style="margin-top:6px">Save .scen</button>
+                <button class="btn-secondary mm-btn-load" id="btn-load-sim" disabled style="margin-top:6px">Load into Simulator</button>
+            </section>
+
+            <section>
+                <div class="mm-section-title">VALIDATION</div>
+                <div class="mm-validation" id="mm-validation"></div>
+            </section>
+        </aside>
+    </div>
+
+    <!-- Status Bar -->
+    <footer class="mm-status-bar" id="mm-status-bar">
+        32 x 32 | 0 robots | Hover: —
+    </footer>
+
+    <script type="module" src="mapmaker.js?v=4"></script>
+</body>
+
+</html>

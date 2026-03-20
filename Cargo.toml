@@ -1,0 +1,66 @@
+[workspace]
+members = [".", "cli"]
+resolver = "3"
+
+[package]
+name = "mafis"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "mafis"
+path = "src/main.rs"
+
+[dependencies]
+bevy = { version = "0.18", default-features = false, features = [
+    "default_app",
+    "default_platform",
+    "3d_bevy_render",
+] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+csv = "1"
+rand = "0.9"
+rand_chacha = "0.9"
+smallvec = "1"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+web-sys = { version = "0.3", features = [
+    "Window", "Document", "HtmlElement",
+    "Blob", "BlobPropertyBag", "Url", "HtmlAnchorElement", "HtmlCanvasElement",
+    "console",
+] }
+wasm-bindgen = "0.2"
+js-sys = "0.3"
+getrandom = { version = "0.3", features = ["wasm_js"] }
+web-time = "1"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+bevy_egui = "0.39"
+egui_plot = "0.34"
+egui = "0.33"
+rfd = "0.17"
+rayon = "1.10"
+ron = "0.12"
+directories = "6"
+mapf-pilot-plugin = { path = "../../Open Sourced/mapf-pilot/crates/mapf-pilot-plugin", optional = true }
+
+[features]
+default = []
+mapf-pilot = ["dep:mapf-pilot-plugin"]
+
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.dev]
+opt-level = 1
+
+[profile.release]
+lto = true
+opt-level = 3
+codegen-units = 1
+incremental = false
+debug = false

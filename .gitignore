@@ -1,0 +1,10 @@
+/target
+Cargo.lock
+**/.DS_Store
+*.wasm
+web/topologies/
+results/
+settings.local.json
+.claude/settings.local.json
+.claude/launch.json
+.claude/skills/*-workspace/

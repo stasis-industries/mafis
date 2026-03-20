@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [dev, main]
+  pull_request:
+    branches: [dev, main]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  test:
+    name: Check & Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+
+      # Bevy 0.18 on Linux requires these system libraries to compile
+      # (winit, udev input, ALSA audio, XKB keyboard — pulled in by default_platform)
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libasound2-dev \
+            libudev-dev \
+            libxkbcommon-dev \
+            libwayland-dev \
+            pkg-config
+
+      # Step 1 — fast type/borrow check (~5s)
+      - name: cargo check (native)
+        run: cargo check
+
+      # Step 2 — 118 unit tests covering core, solvers, analysis (~7s)
+      - name: cargo test
+        run: cargo test
+
+      # Step 3 — WASM compile check (no wasm-bindgen, no browser — just type safety)
+      # Catches WASM-specific errors (cfg guards, wasm32 API misuse) before a full build
+      - name: cargo check (wasm32)
+        run: cargo check --target wasm32-unknown-unknown
