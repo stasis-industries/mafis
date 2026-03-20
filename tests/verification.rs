@@ -45,7 +45,6 @@ const SOLVERS: &[&str] = &[
 ];
 
 const TOPOLOGIES: &[(&str, usize)] = &[
-    ("warehouse_small", 8),
     ("warehouse_medium", 20),
     ("kiva_large", 30),
     ("sorting_center", 15),
@@ -329,8 +328,8 @@ fn deterministic_replay() {
 #[test]
 fn deterministic_across_solvers() {
     for &solver in &["rhcr_pibt", "token_passing"] {
-        let r1 = run(solver, "warehouse_small", "random", 8, None, 42);
-        let r2 = run(solver, "warehouse_small", "random", 8, None, 42);
+        let r1 = run(solver, "warehouse_medium", "random", 8, None, 42);
+        let r2 = run(solver, "warehouse_medium", "random", 8, None, 42);
         assert_eq!(
             r1.baseline_metrics.total_tasks,
             r2.baseline_metrics.total_tasks,

@@ -4245,7 +4245,7 @@ const EXPERIMENT_SCENARIOS = {
 
 const EXPERIMENT_PRESETS = {
     smoke: {
-        solvers: ['pibt'], topologies: ['warehouse-small'], schedulers: ['random'],
+        solvers: ['pibt'], topologies: ['warehouse-medium'], schedulers: ['random'],
         scenarios: ['burst_20'], agents: '8', seeds: '42, 123', ticks: 50,
     },
     solver: {

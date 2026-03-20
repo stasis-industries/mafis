@@ -198,7 +198,7 @@ Topologies are defined exclusively as JSON files in `topologies/`. No Rust-gener
 - `Topology` trait: `fn name()` + `fn generate(seed) -> TopologyOutput`
 - `TopologyOutput`: grid + ZoneMap + suggested_agents
 - `ZoneMap` resource: pickup_cells, delivery_cells, corridor_cells, queue_lines, zone_type HashMap
-- Bridge command: `set_topology "warehouse_small"|"warehouse_medium"` (any id from registry)
+- Bridge command: `set_topology "warehouse_medium"|"warehouse_medium"` (any id from registry)
 - To add a new topology: create JSON in `topologies/`, run `sh topologies/build-manifest.sh`
 
 ## Task Scheduling (`src/core/task.rs`)

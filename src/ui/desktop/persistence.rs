@@ -23,7 +23,7 @@ pub struct PersistedSettings {
 impl Default for PersistedSettings {
     fn default() -> Self {
         Self {
-            last_topology: "warehouse_small".to_string(),
+            last_topology: "warehouse_medium".to_string(),
             last_solver: "pibt".to_string(),
             last_scheduler: "random".to_string(),
             last_agent_count: 15,

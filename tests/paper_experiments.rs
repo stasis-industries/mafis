@@ -133,19 +133,6 @@ fn scheduler_effect() {
     write_experiment_results("scheduler_effect", &result);
 }
 
-/// Topology small — 25 runs.
-/// Run with: cargo test --release --test paper_experiments topology_small -- --ignored --nocapture
-#[test]
-#[ignore]
-fn topology_small() {
-    ensure_output_dir();
-    let matrices = paper::topology_effect();
-    let matrix = &matrices[0]; // warehouse_small
-    eprintln!("─── topology_small ({} runs) ───", matrix.total_runs());
-    let result = run_matrix(matrix, None);
-    write_experiment_results("topology_small", &result);
-}
-
 /// Topology medium — 25 runs.
 /// Run with: cargo test --release --test paper_experiments topology_medium -- --ignored --nocapture
 #[test]
@@ -153,7 +140,7 @@ fn topology_small() {
 fn topology_medium() {
     ensure_output_dir();
     let matrices = paper::topology_effect();
-    let matrix = &matrices[1]; // warehouse_medium
+    let matrix = &matrices[0]; // warehouse_medium
     eprintln!("─── topology_medium ({} runs) ───", matrix.total_runs());
     let result = run_matrix(matrix, None);
     write_experiment_results("topology_medium", &result);
@@ -166,7 +153,7 @@ fn topology_medium() {
 fn topology_large() {
     ensure_output_dir();
     let matrices = paper::topology_effect();
-    let matrix = &matrices[2]; // warehouse_large
+    let matrix = &matrices[1]; // kiva_large
     eprintln!("─── topology_large ({} runs) ───", matrix.total_runs());
     let result = run_matrix(matrix, None);
     write_experiment_results("topology_large", &result);

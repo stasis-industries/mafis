@@ -200,7 +200,7 @@ pub struct TopologyRegistry {
 }
 
 impl TopologyRegistry {
-    /// Find an entry by id (e.g. "warehouse_small").
+    /// Find an entry by id (e.g. "warehouse_medium").
     pub fn find(&self, id: &str) -> Option<&TopologyEntry> {
         self.entries.iter().find(|e| e.id == id)
     }

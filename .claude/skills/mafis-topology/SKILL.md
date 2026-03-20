@@ -105,7 +105,7 @@ Default: 32x32, density parameter controls obstacle percentage.
 ```rust
 pub fn from_name(name: &str) -> Self {
     match name {
-        "warehouse_small"  => WarehouseTopology::small(),
+        "warehouse_medium"  => WarehouseTopology::small(),
         "warehouse_medium" => WarehouseTopology::medium(),
         "warehouse_large"  => WarehouseTopology::large(),
         _ => WarehouseTopology::small(),  // default fallback

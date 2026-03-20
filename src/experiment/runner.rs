@@ -513,7 +513,7 @@ mod tests {
     fn single_experiment_no_faults() {
         let config = ExperimentConfig {
             solver_name: "pibt".into(),
-            topology_name: "warehouse_small".into(),
+            topology_name: "warehouse_medium".into(),
             scenario: None,
             scheduler_name: "random".into(),
             num_agents: 5,
@@ -535,7 +535,7 @@ mod tests {
     fn single_experiment_deterministic() {
         let config = ExperimentConfig {
             solver_name: "pibt".into(),
-            topology_name: "warehouse_small".into(),
+            topology_name: "warehouse_medium".into(),
             scenario: None,
             scheduler_name: "random".into(),
             num_agents: 8,
@@ -553,7 +553,7 @@ mod tests {
     fn single_experiment_with_burst_fault() {
         let config = ExperimentConfig {
             solver_name: "pibt".into(),
-            topology_name: "warehouse_small".into(),
+            topology_name: "warehouse_medium".into(),
             scenario: Some(FaultScenario {
                 enabled: true,
                 scenario_type: FaultScenarioType::BurstFailure,
@@ -588,7 +588,7 @@ mod tests {
         use crate::fault::scenario::FaultScenarioType;
         let config = ExperimentConfig {
             solver_name: "pibt".into(),
-            topology_name: "warehouse_small".into(),
+            topology_name: "warehouse_medium".into(),
             scenario: Some(FaultScenario {
                 enabled: true,
                 scenario_type: FaultScenarioType::IntermittentFault,
@@ -626,7 +626,7 @@ mod tests {
         let tick_count = 200u64;
         let solver_name = "pibt";
         let scheduler_name = "random";
-        let topology_name = "warehouse_small";
+        let topology_name = "warehouse_medium";
 
         // Path A: experiment runner (uses run_single_experiment)
         let config = ExperimentConfig {
@@ -689,7 +689,7 @@ mod tests {
         let tick_count = 200u64;
         let solver_name = "pibt";
         let scheduler_name = "random";
-        let topology_name = "warehouse_small";
+        let topology_name = "warehouse_medium";
 
         // Path A: experiment runner baseline
         let config = ExperimentConfig {
@@ -863,7 +863,7 @@ mod tests {
     fn mini_matrix() {
         let matrix = ExperimentMatrix {
             solvers: vec!["pibt".into()],
-            topologies: vec!["warehouse_small".into()],
+            topologies: vec!["warehouse_medium".into()],
             scenarios: vec![None],
             schedulers: vec!["random".into()],
             agent_counts: vec![5],

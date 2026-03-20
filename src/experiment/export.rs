@@ -668,7 +668,7 @@ mod tests {
     fn dummy_run() -> RunResult {
         crate::experiment::runner::run_single_experiment(&ExperimentConfig {
             solver_name: "pibt".into(),
-            topology_name: "warehouse_small".into(),
+            topology_name: "warehouse_medium".into(),
             scenario: None,
             scheduler_name: "random".into(),
             num_agents: 3,
@@ -697,7 +697,7 @@ mod tests {
         let result = MatrixResult {
             matrix: crate::experiment::config::ExperimentMatrix {
                 solvers: vec!["pibt".into()],
-                topologies: vec!["warehouse_small".into()],
+                topologies: vec!["warehouse_medium".into()],
                 scenarios: vec![None],
                 schedulers: vec!["random".into()],
                 agent_counts: vec![3],
@@ -720,7 +720,7 @@ mod tests {
     fn json_roundtrip_summaries() {
         let matrix = crate::experiment::config::ExperimentMatrix {
             solvers: vec!["pibt".into()],
-            topologies: vec!["warehouse_small".into()],
+            topologies: vec!["warehouse_medium".into()],
             scenarios: vec![None],
             schedulers: vec!["random".into()],
             agent_counts: vec![3],
@@ -744,7 +744,7 @@ mod tests {
     fn latex_table_output() {
         let matrix = crate::experiment::config::ExperimentMatrix {
             solvers: vec!["pibt".into()],
-            topologies: vec!["warehouse_small".into()],
+            topologies: vec!["warehouse_medium".into()],
             scenarios: vec![None],
             schedulers: vec!["random".into()],
             agent_counts: vec![3],
@@ -770,7 +770,7 @@ mod tests {
     fn typst_table_output() {
         let matrix = crate::experiment::config::ExperimentMatrix {
             solvers: vec!["pibt".into()],
-            topologies: vec!["warehouse_small".into()],
+            topologies: vec!["warehouse_medium".into()],
             scenarios: vec![None],
             schedulers: vec!["random".into()],
             agent_counts: vec![3],
@@ -795,7 +795,7 @@ mod tests {
     fn svg_chart_output() {
         let matrix = crate::experiment::config::ExperimentMatrix {
             solvers: vec!["pibt".into()],
-            topologies: vec!["warehouse_small".into()],
+            topologies: vec!["warehouse_medium".into()],
             scenarios: vec![None],
             schedulers: vec!["random".into()],
             agent_counts: vec![3],

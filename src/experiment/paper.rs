@@ -158,15 +158,6 @@ pub fn topology_effect() -> Vec<ExperimentMatrix> {
     vec![
         ExperimentMatrix {
             solvers: vec!["pibt".into()],
-            topologies: vec!["warehouse_small".into()],
-            scenarios: scenarios.clone(),
-            schedulers: vec!["random".into()],
-            agent_counts: vec![10],
-            seeds: SEEDS.to_vec(),
-            tick_count: TICK_COUNT,
-        },
-        ExperimentMatrix {
-            solvers: vec!["pibt".into()],
             topologies: vec!["warehouse_medium".into()],
             scenarios: scenarios.clone(),
             schedulers: vec!["random".into()],
@@ -293,7 +284,7 @@ pub fn all_paper_experiments() -> Vec<(&'static str, ExperimentMatrix)> {
 pub fn smoke_test() -> ExperimentMatrix {
     ExperimentMatrix {
         solvers: vec!["pibt".into()],
-        topologies: vec!["warehouse_small".into()],
+        topologies: vec!["warehouse_medium".into()],
         scenarios: vec![Some(burst_20())],
         schedulers: vec!["random".into()],
         agent_counts: vec![8],
@@ -316,7 +307,7 @@ mod tests {
     fn topology_effect_count() {
         let matrices = topology_effect();
         let total: usize = matrices.iter().map(|m| m.total_runs()).sum();
-        assert_eq!(total, 900); // 5 x (6 x 30)
+        assert_eq!(total, 720); // 4 x (6 x 30)
     }
 
     #[test]
@@ -335,7 +326,7 @@ mod tests {
     fn all_paper_total() {
         let all = all_paper_experiments();
         let total: usize = all.iter().map(|(_, m)| m.total_runs()).sum();
-        assert_eq!(total, 2700);
+        assert_eq!(total, 2520);
     }
 
     #[test]

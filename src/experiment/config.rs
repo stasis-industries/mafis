@@ -143,7 +143,7 @@ mod tests {
     fn expand_cartesian_product() {
         let matrix = ExperimentMatrix {
             solvers: vec!["pibt".into()],
-            topologies: vec!["warehouse_small".into()],
+            topologies: vec!["warehouse_medium".into()],
             scenarios: vec![None],
             schedulers: vec!["random".into()],
             agent_counts: vec![10, 20],
@@ -159,7 +159,7 @@ mod tests {
     fn expand_full_product() {
         let matrix = ExperimentMatrix {
             solvers: vec!["pibt".into(), "rhcr_pibt".into()],
-            topologies: vec!["warehouse_small".into(), "warehouse_medium".into()],
+            topologies: vec!["compact_grid".into(), "warehouse_medium".into()],
             scenarios: standard_scenarios(),
             schedulers: vec!["random".into()],
             agent_counts: vec![20],
@@ -176,7 +176,7 @@ mod tests {
     fn scenario_label() {
         let cfg = ExperimentConfig {
             solver_name: "pibt".into(),
-            topology_name: "warehouse_small".into(),
+            topology_name: "warehouse_medium".into(),
             scenario: None,
             scheduler_name: "random".into(),
             num_agents: 10,
@@ -210,7 +210,7 @@ mod tests {
     fn empty_matrix_produces_empty() {
         let matrix = ExperimentMatrix {
             solvers: vec![],
-            topologies: vec!["warehouse_small".into()],
+            topologies: vec!["warehouse_medium".into()],
             scenarios: vec![None],
             schedulers: vec!["random".into()],
             agent_counts: vec![10],

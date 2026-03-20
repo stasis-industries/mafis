@@ -100,11 +100,11 @@ pub struct ActiveTopology {
 impl ActiveTopology {
     pub fn from_name(name: &str) -> Self {
         match name {
-            "warehouse_small" => ...,
+            "warehouse_medium" => ...,
             "warehouse_medium" => ...,
             "warehouse_large" => ...,
             "open_floor" => ...,
-            _ => Self::from_name("warehouse_small"),  // fallback
+            _ => Self::from_name("warehouse_medium"),  // fallback
         }
     }
 }

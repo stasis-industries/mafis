@@ -75,7 +75,7 @@ fn preset_scheduler_effect() -> PresetConfig {
 fn preset_smoke_test() -> PresetConfig {
     PresetConfig {
         solvers: vec!["pibt".into()],
-        topologies: vec!["warehouse_small".into()],
+        topologies: vec!["warehouse_medium".into()],
         schedulers: vec!["random".into()],
         agent_counts: "8".into(),
         seeds: "42, 123".into(),

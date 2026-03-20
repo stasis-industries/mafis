@@ -86,9 +86,9 @@ Systematically vary multiple parameters:
 
 | Topology | Agents | Solver | Scheduler | Fault Scenario |
 |----------|--------|--------|-----------|----------------|
-| warehouse_small | 8 | pibt | random | None |
-| warehouse_small | 8 | pibt | random | WearBased |
-| warehouse_small | 8 | pibt | closest | None |
+| warehouse_medium | 8 | pibt | random | None |
+| warehouse_medium | 8 | pibt | random | WearBased |
+| warehouse_medium | 8 | pibt | closest | None |
 | warehouse_medium | 30 | rhcr_pibt | random | IntermittentFault |
 | warehouse_large | 80 | pibt | random | BurstFailure |
 
@@ -99,7 +99,7 @@ Systematically vary multiple parameters:
 | **Scheduler** | random, closest | Directly affects task distribution and congestion patterns |
 | **Fault scenario** | None, BurstFailure, WearBased, ZoneOutage, IntermittentFault | Different failure modes stress different aspects |
 | **Wear intensity** | Low, Medium, High (Weibull presets) | Gradual degradation curve |
-| **Topology** | warehouse_small, warehouse_medium, warehouse_large | Scale effects |
+| **Topology** | warehouse_medium, warehouse_medium, warehouse_large | Scale effects |
 | **Agent count** | 8, 30, 80 (match topology) | Density effects |
 
 ### What to Measure

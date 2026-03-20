@@ -145,7 +145,7 @@ For integration tests using `SimHarness` (in `src/sim_tests/`):
 ```rust
 #[test]
 fn solver_warehouse_lifelong_no_obstacle_violations() {
-    let mut h = SimHarness::new(8, "warehouse_small");
+    let mut h = SimHarness::new(8, "warehouse_medium");
     h.set_solver("your_solver");
     h.run_ticks(200);
 }

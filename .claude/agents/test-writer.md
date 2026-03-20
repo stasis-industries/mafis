@@ -258,7 +258,7 @@ fn action_byte_roundtrip() {
 
 // Topology
 #[test]
-fn warehouse_small_dimensions() {
+fn warehouse_medium_dimensions() {
     let wh = WarehouseTopology::small();
     let out = wh.generate(42);
     assert_eq!(out.grid.width, 25);
