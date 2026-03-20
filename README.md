@@ -2,7 +2,7 @@
 
 A fault resilience observatory for lifelong multi-agent pathfinding — 29K lines of Rust, running in your browser.
 
-**Solo project by Teddy Music — UQAC / ESGI, 2025-2026**
+**Solo project by Teddy Truong**
 
 `5 solvers` `5 topologies` `4 fault scenarios` `364 tests` `29K LOC Rust` `WASM 3D` `Deterministic replay`
 
