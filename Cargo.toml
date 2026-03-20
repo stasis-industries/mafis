@@ -46,11 +46,9 @@ rfd = "0.17"
 rayon = "1.10"
 ron = "0.12"
 directories = "6"
-mapf-pilot-plugin = { path = "../../Open Sourced/mapf-pilot/crates/mapf-pilot-plugin", optional = true }
 
 [features]
 default = []
-mapf-pilot = ["dep:mapf-pilot-plugin"]
 
 [profile.dev.package."*"]
 opt-level = 3
