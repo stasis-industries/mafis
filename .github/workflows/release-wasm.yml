@@ -39,6 +39,10 @@ jobs:
       - name: Install wasm-bindgen-cli
         run: cargo install wasm-bindgen-cli
 
+      - name: Install binaryen (wasm-opt)
+        run: |
+          sudo apt-get install -y binaryen
+
       - name: Run tests
         run: cargo test
 
@@ -52,6 +56,12 @@ jobs:
         run: |
           wasm-bindgen --out-dir web --target web \
             target/wasm32-unknown-unknown/release/mafis.wasm
+
+      - name: Optimize WASM binary (wasm-opt)
+        run: |
+          wasm-opt -Oz --enable-bulk-memory --enable-mutable-globals \
+            -o web/mafis_bg.wasm.opt web/mafis_bg.wasm
+          mv web/mafis_bg.wasm.opt web/mafis_bg.wasm
 
       - name: Package WASM artifacts
         run: tar -czf mafis-wasm.tar.gz -C web .

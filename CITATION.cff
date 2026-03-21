@@ -1,0 +1,28 @@
+cff-version: 1.2.0
+message: "If you use MAFIS in your research, please cite it as below."
+type: software
+title: "MAFIS: Multi-Agent Fault Injection Simulator"
+abstract: >-
+  A fault resilience observatory for lifelong multi-agent path finding (MAPF).
+  Measures how multi-agent warehouse robotics systems degrade, recover, and
+  adapt under real-world fault conditions in real-time 3D WebAssembly simulation.
+version: 0.1.0
+date-released: "2025-01-01"
+url: "https://stasis-website.vercel.app"
+repository-code: "https://github.com/stasis-industry/mafis"
+license: MIT
+keywords:
+  - multi-agent path finding
+  - MAPF
+  - fault injection
+  - warehouse robotics
+  - simulation
+  - fault resilience
+  - WebAssembly
+  - Bevy
+  - lifelong MAPF
+  - PIBT
+  - RHCR
+authors:
+  - name: "Stasis Industry"
+    website: "https://stasis-website.vercel.app"

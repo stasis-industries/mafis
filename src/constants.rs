@@ -17,6 +17,9 @@ pub const MIN_AGENTS: usize = 1;
 /// Default agent count on startup.
 pub const DEFAULT_AGENTS: usize = 5;
 
+/// Maximum queued JS→WASM commands before new ones are dropped.
+pub const MAX_COMMAND_QUEUE: usize = 256;
+
 /// Maximum grid dimension (width or height) the UI slider allows.
 /// Raised to 512 for MovingAI benchmark maps.
 pub const MAX_GRID_DIM: i32 = 512;

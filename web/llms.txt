@@ -1,0 +1,58 @@
+# MAFIS — Multi-Agent Fault Injection Simulator
+
+> A fault resilience observatory for lifelong multi-agent path finding (MAPF).
+> MAFIS measures how multi-agent warehouse robotics systems degrade, recover,
+> and adapt under real-world fault conditions via real-time 3D WebAssembly simulation.
+> This is NOT a solver benchmark — it measures what happens when things go wrong.
+
+MAFIS simulates up to 500 agents on configurable warehouse grid topologies.
+It supports 5 lifelong MAPF solvers: PIBT, RHCR-PBS, RHCR-PIBT-Window,
+RHCR-Priority-A*, and Token Passing. Fault injection includes heat accumulation,
+Weibull wear modeling, agent failures, and cascading disruptions. Analysis tools
+include Action Dependency Graphs (ADG), cascade BFS, resilience scorecards,
+throughput metrics, and density/traffic heatmaps.
+
+Built with Rust + Bevy 0.18, compiled to WebAssembly. Deterministic replay via
+seeded randomness ensures reproducible experiments for research.
+
+## Documentation
+
+- [Live Simulator](https://stasis-website.vercel.app): Run simulations in your browser
+- [Source Code](https://github.com/stasis-industry/mafis): Full Rust source with 188+ tests
+- [Map Maker](https://stasis-website.vercel.app/mapmaker.html): Visual topology editor for custom warehouse layouts
+- [Stasis Industry](https://stasis-website.vercel.app): Research organization behind MAFIS
+
+## Solvers
+
+- PIBT: Reactive one-step priority inheritance backtracking, replans every tick
+- RHCR-PBS: Rolling-Horizon Collision Resolution with Priority-Based Search and node limit
+- RHCR-PIBT-Window: Unrolled PIBT for H-step cooperative planning windows
+- RHCR-Priority-A*: Sequential spacetime A* for moderate density scenarios
+- Token Passing: Decentralized sequential planning via shared token, suited for up to 100 agents
+
+## Analysis Capabilities
+
+- Action Dependency Graph (ADG) construction and real-time analysis
+- Cascade failure propagation via bounded BFS (max depth 10)
+- Throughput, task completion, and idle ratio metrics
+- Density and traffic heatmaps with configurable visualization
+- Resilience scorecards with composite scoring (fault tolerance, NRR, fleet utilization, critical time)
+- Baseline comparison engine for measuring fault impact
+
+## Fault Injection System
+
+- Weibull wear model with configurable beta (shape) and eta (scale) parameters
+- Heat accumulation on grid cells based on agent traffic
+- Intermittent faults with configurable MTBF and recovery ticks
+- Fault scenarios: burst failures, zone outages, gradual degradation
+- Manual fault injection via timeline interface
+- Cascade propagation tracking across agent dependency networks
+
+## Technical Details
+
+- Runtime: WebAssembly (wasm32-unknown-unknown) via Bevy 0.18 game engine
+- Language: Rust with zero unsafe blocks in bridge layer
+- UI: HTML/CSS/JS shell with uPlot charts, no framework dependency
+- Deterministic: SeededRng for bit-exact reproducible experiments
+- Export: CSV and JSON data export for offline analysis
+- Task scheduling: Random, Closest, Balanced, and Roundtrip schedulers

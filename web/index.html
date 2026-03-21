@@ -4,18 +4,135 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+
+    <!-- Security headers -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://unpkg.com/uplot/ 'unsafe-inline'; style-src 'self' https://fonts.googleapis.com https://unpkg.com/uplot/ 'unsafe-inline'; font-src https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self'; worker-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'">
+    <meta http-equiv="X-Content-Type-Options" content="nosniff">
+    <meta name="referrer" content="strict-origin-when-cross-origin">
+
+    <!-- Primary Meta Tags -->
     <title>MAFIS — Multi-Agent Fault Injection Simulator</title>
+    <meta name="title" content="MAFIS — Multi-Agent Fault Injection Simulator">
+    <meta name="description" content="Fault resilience observatory for lifelong multi-agent path finding (MAPF). Real-time 3D WebAssembly simulation measuring how warehouse robotics systems degrade, recover, and adapt under fault conditions. 5 solvers, up to 500 agents.">
+    <meta name="keywords" content="MAPF, multi-agent path finding, fault injection, warehouse robotics, simulation, PIBT, RHCR, fault resilience, WebAssembly, Bevy, lifelong MAPF, Token Passing">
+    <meta name="author" content="Stasis Industry">
+    <meta name="robots" content="index, follow">
+    <link rel="canonical" href="https://stasis-website.vercel.app/">
+    <meta name="theme-color" content="#1a1a2e">
+
+    <!-- Academic citation metadata -->
+    <meta name="citation_title" content="MAFIS: Multi-Agent Fault Injection Simulator">
+    <meta name="citation_author" content="Stasis Industry">
+    <meta name="citation_publication_date" content="2025">
+    <meta name="citation_software_url" content="https://stasis-website.vercel.app">
+    <meta name="citation_repository_url" content="https://github.com/stasis-industry/mafis">
+
+    <!-- Open Graph / Facebook -->
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://stasis-website.vercel.app/">
+    <meta property="og:title" content="MAFIS — Multi-Agent Fault Injection Simulator">
+    <meta property="og:description" content="Fault resilience observatory for lifelong MAPF. Real-time 3D WebAssembly simulation of warehouse robotics under fault conditions. 5 solvers, up to 500 agents.">
+    <meta property="og:image" content="https://stasis-website.vercel.app/og-image.png">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="MAFIS simulator showing multi-agent warehouse simulation with fault injection visualization">
+    <meta property="og:site_name" content="MAFIS">
+    <meta property="og:locale" content="en_US">
+
+    <!-- Twitter/X Card -->
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="MAFIS — Multi-Agent Fault Injection Simulator">
+    <meta name="twitter:description" content="Fault resilience observatory for lifelong MAPF. Real-time 3D WebAssembly simulation of warehouse robotics under fault conditions.">
+    <meta name="twitter:image" content="https://stasis-website.vercel.app/og-image.png">
+    <meta name="twitter:image:alt" content="MAFIS simulator showing multi-agent warehouse simulation with fault injection visualization">
+
+    <!-- Structured Data -->
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": ["SoftwareApplication", "WebApplication"],
+        "name": "MAFIS — Multi-Agent Fault Injection Simulator",
+        "alternateName": "MAFIS",
+        "description": "A fault resilience observatory for lifelong multi-agent path finding (MAPF). Measures how multi-agent warehouse robotics systems degrade, recover, and adapt under real-world fault conditions in real-time 3D WebAssembly simulation.",
+        "url": "https://stasis-website.vercel.app",
+        "applicationCategory": "Simulation Software",
+        "applicationSubCategory": "Multi-Agent Systems Research",
+        "operatingSystem": "Web Browser (Chrome, Firefox, Safari, Edge)",
+        "browserRequirements": "Requires WebAssembly and WebGL2 support",
+        "softwareVersion": "0.1.0",
+        "programmingLanguage": ["Rust", "WebAssembly", "JavaScript"],
+        "runtimePlatform": "WebAssembly (wasm32-unknown-unknown)",
+        "featureList": [
+            "Real-time 3D multi-agent simulation (up to 500 agents)",
+            "5 lifelong MAPF solvers: PIBT, RHCR-PBS, RHCR-PIBT, RHCR-Priority-A*, Token Passing",
+            "Fault injection with heat accumulation and Weibull wear modeling",
+            "Action Dependency Graph (ADG) analysis",
+            "Cascade failure propagation via bounded BFS",
+            "Deterministic replay with seeded randomness",
+            "Resilience scorecard and throughput metrics",
+            "Configurable warehouse topologies",
+            "CSV/JSON data export for offline analysis"
+        ],
+        "screenshot": "https://stasis-website.vercel.app/og-image.png",
+        "offers": {
+            "@type": "Offer",
+            "price": "0",
+            "priceCurrency": "USD",
+            "availability": "https://schema.org/InStock"
+        },
+        "author": {
+            "@type": "Organization",
+            "name": "Stasis Industry",
+            "url": "https://stasis-website.vercel.app"
+        },
+        "datePublished": "2025-01-01",
+        "dateModified": "2026-03-20",
+        "license": "https://opensource.org/licenses/MIT",
+        "keywords": ["multi-agent path finding", "MAPF", "fault injection", "warehouse robotics", "fault resilience", "simulation", "WebAssembly", "lifelong MAPF", "PIBT", "RHCR"],
+        "isAccessibleForFree": true
+    }
+    </script>
+
+    <!-- Fonts (non-render-blocking) -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link
-        href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Inter:wght@300;400;500&family=Playfair+Display:wght@400;500&display=swap"
-        rel="stylesheet">
+    <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Inter:wght@300;400;500&family=Playfair+Display:wght@400;500&display=swap" onload="this.onload=null;this.rel='stylesheet'">
+    <noscript><link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Inter:wght@300;400;500&family=Playfair+Display:wght@400;500&display=swap" rel="stylesheet"></noscript>
     <link rel="stylesheet" href="styles.css">
-    <link rel="stylesheet" href="https://unpkg.com/uplot/dist/uPlot.min.css">
-    <script src="https://unpkg.com/uplot/dist/uPlot.iife.min.js" defer></script>
+    <link rel="stylesheet" href="https://unpkg.com/uplot/dist/uPlot.min.css" integrity="sha384-ZIQRQcbTq9PklHjLunPB6ephRzEmlllJRdG1f+ms1J1BFmqoFUjEu8D4OeG6+Wc8" crossorigin="anonymous">
+    <script src="https://unpkg.com/uplot/dist/uPlot.iife.min.js" defer integrity="sha384-tQlLmZASeVW/O+WD3FeDydVM9XVI0+eQqSaTa/QsSXX+2W70X6lbYO0x6q6ZL9c2" crossorigin="anonymous"></script>
 </head>
 
 <body>
+    <!-- SEO content — visible to crawlers, hidden after WASM loads -->
+    <article id="seo-content" style="max-width:800px;margin:2rem auto;padding:0 1rem;font-family:Inter,sans-serif;color:#d0cec4" aria-label="About MAFIS">
+        <h1 style="font-size:1.5rem;margin-bottom:0.5rem">MAFIS: Multi-Agent Fault Injection Simulator</h1>
+        <p>A fault resilience observatory for lifelong multi-agent path finding (MAPF). MAFIS measures how multi-agent warehouse robotics systems degrade, recover, and adapt under real-world fault conditions in real-time 3D simulation.</p>
+        <h2 style="font-size:1.1rem;margin-top:1rem">What MAFIS Measures</h2>
+        <ul>
+            <li>Cascade failure propagation across agent networks via Action Dependency Graphs</li>
+            <li>Recovery time and throughput degradation under configurable fault injection</li>
+            <li>Heat accumulation and Weibull wear patterns on warehouse grid cells</li>
+            <li>Comparative resilience across 5 lifelong MAPF solvers (PIBT, 3 RHCR variants, Token Passing)</li>
+        </ul>
+        <h2 style="font-size:1.1rem;margin-top:1rem">Key Features</h2>
+        <ul>
+            <li>Real-time 3D WebAssembly simulation with up to 500 agents</li>
+            <li>Deterministic replay via seeded randomness for reproducible experiments</li>
+            <li>Fault scenarios: burst failures, zone outages, gradual degradation</li>
+            <li>Analysis: ADG construction, cascade BFS, resilience scorecards, heatmaps</li>
+            <li>Multiple warehouse topologies with visual map editor</li>
+            <li>CSV/JSON export for offline analysis</li>
+        </ul>
+    </article>
+    <script>
+        // Hide SEO content once WASM app loads (it's for crawlers, not users)
+        document.addEventListener('DOMContentLoaded', () => {
+            const seo = document.getElementById('seo-content');
+            if (seo) seo.style.display = 'none';
+        });
+    </script>
+
     <!-- Demo Splash (visible before WASM loads) -->
     <div id="demo-splash">
         <div class="demo-splash-inner">
@@ -37,7 +154,7 @@
 
     <!-- Header -->
     <header id="header">
-        <span class="header-title">MAFIS</span>
+        <a href="https://stasis-website.vercel.app" target="_blank" rel="noopener noreferrer" class="header-title">MAFIS</a>
         <span class="header-status" id="header-status" style="display:none">IDLE</span>
         <button class="btn-header btn-exp-mode" id="btn-exp-mode" title="Toggle between Observatory and Experiments">EXPERIMENTS</button>
         <div class="header-spacer"></div>
@@ -449,7 +566,7 @@
                 <span class="legend-item"><span class="legend-dot" style="background:var(--leg-free)"></span>Idle</span>
                 <span class="legend-item"><span class="legend-dot" style="background:var(--leg-travel-empty)"></span>Picking</span>
                 <span class="legend-item"><span class="legend-dot" style="background:var(--leg-travel-to-queue)"></span>Delivering</span>
-                <span class="legend-item"><span class="legend-dot" style="background:rgb(56, 20, 20);box-shadow:0 0 4px rgb(230,44,2)"></span>Dead</span>
+                <span class="legend-item"><span class="legend-dot" style="background:rgb(230, 44, 2);box-shadow:0 0 6px rgb(255,80,10)"></span>Dead</span>
                 <span class="legend-item"><span class="legend-dot" style="background:rgb(128,89,184);box-shadow:0 0 4px rgb(150,76,204)"></span>Latency</span>
             </div>
             <!-- Task state color legend — Detailed mode -->
@@ -462,7 +579,7 @@
                 <span class="legend-item"><span class="legend-dot" style="background:var(--leg-travel-loaded)"></span>Travel Loaded</span>
                 <span class="legend-item"><span class="legend-dot" style="background:var(--leg-unloading)"></span>Unloading</span>
                 <span class="legend-item"><span class="legend-dot" style="background:var(--leg-charging)"></span>Charging</span>
-                <span class="legend-item"><span class="legend-dot" style="background:rgb(56, 20, 20);box-shadow:0 0 4px rgb(230,44,2)"></span>Dead</span>
+                <span class="legend-item"><span class="legend-dot" style="background:rgb(230, 44, 2);box-shadow:0 0 6px rgb(255,80,10)"></span>Dead</span>
                 <span class="legend-item"><span class="legend-dot" style="background:rgb(128,89,184);box-shadow:0 0 4px rgb(150,76,204)"></span>Latency</span>
             </div>
 
@@ -541,27 +658,15 @@
                             <div class="task-bar-idle" id="task-bar-idle" title="Idle">
                                 <span class="fleet-bar-label" id="task-bar-idle-label"></span>
                             </div>
+                            <div class="task-bar-dead" id="task-bar-dead-seg" title="Dead">
+                                <span class="fleet-bar-label" id="task-bar-dead-label"></span>
+                            </div>
                         </div>
                         <div class="fleet-bar-legend">
                             <span class="fleet-legend-item"><span class="fleet-dot" style="background:var(--state-moving)"></span>Delivering</span>
                             <span class="fleet-legend-item"><span class="fleet-dot" style="background:var(--state-delayed)"></span>Loading</span>
                             <span class="fleet-legend-item"><span class="fleet-dot" style="background:var(--state-idle)"></span>Idle</span>
-                        </div>
-                    </div>
-                    <!-- Stacked alive/dead bar -->
-                    <div class="fleet-bar-row">
-                        <span class="fleet-bar-total" id="status-total">0</span>
-                        <div class="fleet-bar-track">
-                            <div class="fleet-bar-alive" id="fleet-bar-alive" title="Alive">
-                                <span class="fleet-bar-label" id="fleet-bar-alive-label"></span>
-                            </div>
-                            <div class="fleet-bar-dead" id="fleet-bar-dead" title="Dead">
-                                <span class="fleet-bar-label" id="fleet-bar-dead-label"></span>
-                            </div>
-                        </div>
-                        <div class="fleet-bar-legend">
-                            <span class="fleet-legend-item"><span class="fleet-dot fleet-dot-alive"></span>Alive</span>
-                            <span class="fleet-legend-item"><span class="fleet-dot fleet-dot-dead"></span>Dead</span>
+                            <span class="fleet-legend-item"><span class="fleet-dot" style="background:var(--state-fault)"></span>Dead</span>
                         </div>
                     </div>
                 </div>
@@ -1255,9 +1360,12 @@
                             <li>Update your graphics drivers</li>
                         </ul>
                     </div>
-                    ${detail ? `<details class="gpu-error-detail"><summary>Error detail</summary><pre>${detail}</pre></details>` : ''}
+                    ${detail ? `<details class="gpu-error-detail"><summary>Error detail</summary><pre></pre></details>` : ''}
                 </div>
             `;
+            // Safely set error detail text (avoid innerHTML XSS)
+            const pre = overlay.querySelector('.gpu-error-detail pre');
+            if (pre && detail) pre.textContent = detail;
             container.appendChild(overlay);
         }
 

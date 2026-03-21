@@ -52,7 +52,11 @@ cargo build --release --target wasm32-unknown-unknown
 # 2. Bind (hyphens = binary target)
 wasm-bindgen --out-dir web --target web target/wasm32-unknown-unknown/release/mafis.wasm
 
-# 3. Serve
+# 3. Optimize (requires binaryen: brew install binaryen)
+wasm-opt -Oz --enable-bulk-memory --enable-mutable-globals -o web/mafis_bg.wasm.opt web/mafis_bg.wasm
+mv web/mafis_bg.wasm.opt web/mafis_bg.wasm
+
+# 4. Serve
 basic-http-server web   # port 4000
 ```
 

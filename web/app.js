@@ -9,6 +9,16 @@ window._getState = () => { try { return JSON.parse(wasmGetState()); } catch(e) {
 const POLL_INTERVAL = 100; // ms
 const CHART_MAX_POINTS = 200;
 
+// ---------------------------------------------------------------------------
+// Security: HTML escaping helper
+// ---------------------------------------------------------------------------
+
+function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+}
+
 // Performance warning thresholds
 const WASM_WARN_AGENTS = 200;
 const WASM_WARN_GRID_AREA = 128 * 128; // 16384
@@ -228,7 +238,7 @@ const DEMO_CUES = [
     { tick: 100, text: 'One failure. Cascade spreading.' },
     { tick: 150, text: 'System adapting. Paths rerouting.' },
     { tick: 220, text: null }, // clear overlay, let metrics breathe
-    { tick: 280, text: null, action: 'highlight_results' }, // pause sim, nudge user toward VIEW RESULTS
+    { tick: 280, text: null, action: 'right_panel_tour' }, // pause sim, guided tour of right panel
 ];
 
 class DemoController {
@@ -252,34 +262,185 @@ class DemoController {
         if (splash) splash.classList.add('hidden');
 
         this.state = 'CONFIGURING';
+        this._tourTimers = [];
 
-        // Find the compact-grid topology and load it
-        const topo = loadedTopologies.find(t => t.id === DEMO_CONFIG.topology);
-        if (topo) {
-            sendCommand({ type: 'load_custom_map', ...topo.data });
-        } else {
-            sendCommand({ type: 'set_topology', value: DEMO_CONFIG.topology });
+        // --- Spotlight + tooltip infrastructure ---
+        let hole = document.querySelector('.demo-spotlight-hole');
+        let tooltip = document.querySelector('.demo-tooltip');
+        if (!hole) {
+            hole = document.createElement('div');
+            hole.className = 'demo-spotlight-hole';
+            document.body.appendChild(hole);
         }
+        if (!tooltip) {
+            tooltip = document.createElement('div');
+            tooltip.className = 'demo-tooltip';
+            document.body.appendChild(tooltip);
+        }
+        this._spotHole = hole;
+        this._spotTooltip = tooltip;
 
-        // Configure simulation
-        sendCommand({ type: 'set_num_agents', value: DEMO_CONFIG.agents });
-        sendCommand({ type: 'set_solver', value: DEMO_CONFIG.solver });
-        sendCommand({ type: 'set_scheduler', value: DEMO_CONFIG.scheduler });
-        sendCommand({ type: 'set_seed', value: DEMO_CONFIG.seed });
-        sendCommand({ type: 'set_tick_hz', value: DEMO_CONFIG.tickHz });
-        sendCommand({ type: 'set_duration', value: DEMO_CONFIG.duration });
+        const spotlight = (elOrId, text, placement) => {
+            const el = typeof elOrId === 'string' ? document.getElementById(elOrId) : elOrId;
+            if (!el) { hole.style.display = 'none'; tooltip.classList.remove('visible'); return; }
 
-        // Enable burst failure: kill 20% at tick 100
-        sendCommand({ type: 'set_fault_enabled', value: true });
-        sendCommand({ type: 'set_fault_scenario_type', value: 'burst_failure' });
-        sendCommand({ type: 'set_scenario_param', key: 'burst_kill_percent', value: 20 });
-        sendCommand({ type: 'set_scenario_param', key: 'burst_at_tick', value: 100 });
+            const pad = 6;
+            const r = el.getBoundingClientRect();
+            hole.style.display = '';
+            hole.style.top = (r.top - pad) + 'px';
+            hole.style.left = (r.left - pad) + 'px';
+            hole.style.width = (r.width + pad * 2) + 'px';
+            hole.style.height = (r.height + pad * 2) + 'px';
 
-        // Camera: start top-down
-        sendCommand({ type: 'set_camera_preset', value: 'top' });
+            tooltip.innerHTML = text;
+            tooltip.classList.add('visible');
 
-        // Start
-        sendCommand({ type: 'set_state', value: 'start' });
+            // Position tooltip near the element
+            const gap = 12;
+            const tw = 320;
+            tooltip.style.maxWidth = tw + 'px';
+
+            if (placement === 'right' || (!placement && r.right + tw + gap < window.innerWidth)) {
+                tooltip.style.left = (r.right + gap) + 'px';
+                tooltip.style.top = Math.max(8, r.top) + 'px';
+                tooltip.style.removeProperty('right');
+            } else if (placement === 'left' || (!placement && r.left - tw - gap > 0)) {
+                tooltip.style.left = Math.max(8, r.left - tw - gap) + 'px';
+                tooltip.style.top = Math.max(8, r.top) + 'px';
+                tooltip.style.removeProperty('right');
+            } else {
+                // Below
+                tooltip.style.left = Math.max(8, r.left) + 'px';
+                tooltip.style.top = (r.bottom + gap) + 'px';
+                tooltip.style.removeProperty('right');
+            }
+
+            // Scroll the element into view within its panel
+            el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        };
+
+        const clearSpotlight = () => {
+            hole.style.display = 'none';
+            tooltip.classList.remove('visible');
+        };
+
+        // Helper to expand a collapsed section
+        const expandSection = (targetId) => {
+            const content = document.getElementById(targetId);
+            const toggle = document.querySelector(`[data-target="${targetId}"]`);
+            if (content && content.classList.contains('collapsed')) {
+                content.classList.remove('collapsed');
+                if (toggle) {
+                    const label = toggle.textContent.replace(/^[▸▾►▼]\s*/, '').trim();
+                    toggle.textContent = '\u25BE ' + label;
+                }
+            }
+        };
+
+        // Helper to collapse a section
+        const collapseSection = (targetId) => {
+            const content = document.getElementById(targetId);
+            const toggle = document.querySelector(`[data-target="${targetId}"]`);
+            if (content && !content.classList.contains('collapsed')) {
+                content.classList.add('collapsed');
+                if (toggle) {
+                    const label = toggle.textContent.replace(/^[▸▾►▼]\s*/, '').trim();
+                    toggle.textContent = '\u25B8 ' + label;
+                }
+            }
+        };
+
+        const delay = (ms) => new Promise(r => {
+            const t = setTimeout(r, ms);
+            this._tourTimers.push(t);
+        });
+
+        // --- Guided tour sequence ---
+        const runTour = async () => {
+            const STEP = 3000;
+
+            // 1. Topology
+            expandSection('sim-content');
+            spotlight('topology-presets', '<strong>Topology</strong> \u2014 Choose a warehouse layout. Selecting <strong>Compact Grid</strong>.');
+            const topo = loadedTopologies.find(t => t.id === DEMO_CONFIG.topology);
+            if (topo) {
+                sendCommand({ type: 'load_custom_map', ...topo.data });
+            } else {
+                sendCommand({ type: 'set_topology', value: DEMO_CONFIG.topology });
+            }
+            // Highlight the matching preset button
+            const presetBtns = document.querySelectorAll('#topology-presets .topo-preset-btn');
+            presetBtns.forEach(b => {
+                if (b.dataset.id === DEMO_CONFIG.topology) b.classList.add('active');
+            });
+            await delay(STEP);
+
+            // 2. Algorithm
+            expandSection('solver-sched-content');
+            spotlight('input-solver', '<strong>Algorithm</strong> \u2014 PIBT: reactive priority inheritance. Replans every tick.');
+            sendCommand({ type: 'set_solver', value: DEMO_CONFIG.solver });
+            const solverSel = document.getElementById('input-solver');
+            if (solverSel) solverSel.value = DEMO_CONFIG.solver;
+            await delay(STEP);
+
+            // 3. Scheduler
+            spotlight('input-scheduler', '<strong>Scheduler</strong> \u2014 Random: assigns pickups and deliveries randomly.');
+            sendCommand({ type: 'set_scheduler', value: DEMO_CONFIG.scheduler });
+            const schedSel = document.getElementById('input-scheduler');
+            if (schedSel) schedSel.value = DEMO_CONFIG.scheduler;
+            await delay(STEP);
+
+            // 4. Duration
+            spotlight('input-duration', '<strong>Duration</strong> \u2014 300 ticks. Enough time to observe fault recovery.');
+            sendCommand({ type: 'set_seed', value: DEMO_CONFIG.seed });
+            sendCommand({ type: 'set_tick_hz', value: DEMO_CONFIG.tickHz });
+            sendCommand({ type: 'set_duration', value: DEMO_CONFIG.duration });
+            const durInput = document.getElementById('input-duration');
+            if (durInput) durInput.value = DEMO_CONFIG.duration;
+            await delay(STEP);
+
+            // 5. Fault Injection
+            expandSection('fault-content');
+            const faultCb = document.getElementById('input-fault-enabled');
+            if (faultCb) faultCb.checked = true;
+            sendCommand({ type: 'set_fault_enabled', value: true });
+            sendCommand({ type: 'set_fault_scenario_type', value: 'burst_failure' });
+            sendCommand({ type: 'set_scenario_param', key: 'burst_kill_percent', value: 20 });
+            sendCommand({ type: 'set_scenario_param', key: 'burst_at_tick', value: 100 });
+            // Show the fault config panel so it's visible
+            const faultPanel = document.getElementById('fault-config-panel');
+            if (faultPanel) faultPanel.style.display = '';
+            const scenarioSel = document.getElementById('input-fault-scenario-type');
+            if (scenarioSel) scenarioSel.value = 'burst_failure';
+            spotlight('fault-config-panel', '<strong>Fault Injection</strong> \u2014 Burst failure: 20% of agents die at tick 100.');
+            await delay(STEP);
+
+            // 6. Launch
+            clearSpotlight();
+            const overlay = document.getElementById('demo-overlay');
+            if (overlay) {
+                overlay.textContent = 'Launching simulation\u2026';
+                overlay.classList.add('visible');
+            }
+            sendCommand({ type: 'set_camera_preset', value: 'top' });
+            sendCommand({ type: 'set_state', value: 'start' });
+            await delay(1500);
+            if (overlay) overlay.classList.remove('visible');
+        };
+
+        runTour().catch(() => {});
+    }
+
+    // Clean up tour elements
+    _cleanupTour() {
+        if (this._tourTimers) {
+            this._tourTimers.forEach(t => clearTimeout(t));
+            this._tourTimers = [];
+        }
+        const hole = document.querySelector('.demo-spotlight-hole');
+        const tip = document.querySelector('.demo-tooltip');
+        if (hole) hole.style.display = 'none';
+        if (tip) tip.classList.remove('visible');
     }
 
     onPoll(s) {
@@ -333,13 +494,22 @@ class DemoController {
             }
         }
 
-        // Special action: pause sim and highlight VIEW RESULTS button
-        if (cue.action === 'highlight_results') {
+        // Special action: pause sim and run guided tour of right panel
+        if (cue.action === 'right_panel_tour') {
             sendCommand({ type: 'set_state', value: 'pause' });
-            // Switch to analyze phase so VIEW RESULTS button appears
+            if (overlay) overlay.classList.remove('visible');
             setTimeout(() => {
                 setPhase('analyze');
-                // Highlight the VIEW RESULTS button and scroll to it
+                this._rightPanelTour();
+            }, 400);
+            return;
+        }
+
+        // Legacy: pause sim and highlight VIEW RESULTS button
+        if (cue.action === 'highlight_results') {
+            sendCommand({ type: 'set_state', value: 'pause' });
+            setTimeout(() => {
+                setPhase('analyze');
                 const resultsBtn = document.getElementById('btn-view-results');
                 if (resultsBtn) resultsBtn.classList.add('demo-pulse');
                 const panel = document.getElementById('panel-right');
@@ -358,6 +528,158 @@ class DemoController {
             overlay.classList.add('visible');
         } else {
             overlay.classList.remove('visible');
+        }
+    }
+
+    async _rightPanelTour() {
+        const STEP = 3000;
+        this._tourTimers = this._tourTimers || [];
+        const delay = (ms) => new Promise(r => {
+            const t = setTimeout(r, ms);
+            this._tourTimers.push(t);
+        });
+
+        // Reuse spotlight infrastructure from startDemo
+        let hole = document.querySelector('.demo-spotlight-hole');
+        let tooltip = document.querySelector('.demo-tooltip');
+        if (!hole) {
+            hole = document.createElement('div');
+            hole.className = 'demo-spotlight-hole';
+            document.body.appendChild(hole);
+        }
+        if (!tooltip) {
+            tooltip = document.createElement('div');
+            tooltip.className = 'demo-tooltip';
+            document.body.appendChild(tooltip);
+        }
+
+        const spotlight = (elOrId, text, placement) => {
+            const el = typeof elOrId === 'string' ? document.getElementById(elOrId) : elOrId;
+            if (!el) { hole.style.display = 'none'; tooltip.classList.remove('visible'); return; }
+            const pad = 6;
+            const r = el.getBoundingClientRect();
+            hole.style.display = '';
+            hole.style.top = (r.top - pad) + 'px';
+            hole.style.left = (r.left - pad) + 'px';
+            hole.style.width = (r.width + pad * 2) + 'px';
+            hole.style.height = (r.height + pad * 2) + 'px';
+
+            tooltip.innerHTML = text;
+            tooltip.classList.add('visible');
+            const gap = 12;
+            const tw = 320;
+            tooltip.style.maxWidth = tw + 'px';
+            if (placement === 'left' || r.left - tw - gap > 0) {
+                tooltip.style.left = Math.max(8, r.left - tw - gap) + 'px';
+                tooltip.style.top = Math.max(8, r.top) + 'px';
+            } else {
+                tooltip.style.left = (r.right + gap) + 'px';
+                tooltip.style.top = Math.max(8, r.top) + 'px';
+            }
+            el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        };
+
+        const clearSpotlight = () => {
+            hole.style.display = 'none';
+            tooltip.classList.remove('visible');
+        };
+
+        const expandSection = (targetId) => {
+            const content = document.getElementById(targetId);
+            const toggle = document.querySelector(`[data-target="${targetId}"]`);
+            if (content && content.classList.contains('collapsed')) {
+                content.classList.remove('collapsed');
+                if (toggle) {
+                    const label = toggle.textContent.replace(/^[▸▾►▼]\s*/, '').trim();
+                    toggle.textContent = '\u25BE ' + label;
+                }
+            }
+        };
+
+        const collapseSection = (targetId) => {
+            const content = document.getElementById(targetId);
+            const toggle = document.querySelector(`[data-target="${targetId}"]`);
+            if (content && !content.classList.contains('collapsed')) {
+                content.classList.add('collapsed');
+                if (toggle) {
+                    const label = toggle.textContent.replace(/^[▸▾►▼]\s*/, '').trim();
+                    toggle.textContent = '\u25B8 ' + label;
+                }
+            }
+        };
+
+        const panel = document.getElementById('panel-right');
+
+        try {
+            // 1. Status section — tick & task bar
+            if (panel) panel.scrollTo({ top: 0, behavior: 'smooth' });
+            expandSection('status-content');
+            await delay(400);
+            spotlight('status-content', '<strong>Status</strong> \u2014 Current tick, simulation state, and fleet composition at a glance.', 'left');
+            await delay(STEP);
+
+            // 2. Task leg bar
+            const taskBar = document.getElementById('task-leg-bar-row');
+            if (taskBar) {
+                spotlight(taskBar, '<strong>Fleet Bar</strong> \u2014 Real-time breakdown: Delivering, Loading, Idle, and Dead agents.', 'left');
+                await delay(STEP);
+            }
+
+            // 3. Resilience Scorecard
+            expandSection('scorecard-content');
+            await delay(300);
+            spotlight('scorecard-content', '<strong>Resilience Scorecard</strong> \u2014 Four metrics that grade how well the system handles faults: tolerance, recovery, utilization, critical time.', 'left');
+            await delay(STEP);
+            collapseSection('scorecard-content');
+
+            // 4. System Performance — charts
+            expandSection('system-perf-content');
+            await delay(300);
+            const throughputChart = document.getElementById('chart-throughput');
+            if (throughputChart) {
+                spotlight(throughputChart, '<strong>Throughput Chart</strong> \u2014 Tasks completed per tick. Watch for the dip at tick 100 when agents die.', 'left');
+                await delay(STEP);
+            }
+
+            // 5. Metrics cards
+            const metricThroughput = document.getElementById('metric-throughput');
+            if (metricThroughput) {
+                const metricsRow = metricThroughput.closest('.metric-row') || metricThroughput.parentElement;
+                spotlight(metricsRow, '<strong>Metrics</strong> \u2014 Throughput, completed tasks, and idle ratio. Delta indicators show change from baseline.', 'left');
+                await delay(STEP);
+            }
+            collapseSection('system-perf-content');
+
+            // 6. Fault Response
+            expandSection('fault-response-content');
+            await delay(300);
+            spotlight('fault-response-content', '<strong>Fault Response</strong> \u2014 Live verdict, MTTR/MTBF, survival rate, and a timeline of every fault event.', 'left');
+            await delay(STEP);
+            collapseSection('fault-response-content');
+
+            // 7. Fault Timeline
+            expandSection('fault-events-content');
+            await delay(300);
+            spotlight('fault-events-content', '<strong>Fault Timeline</strong> \u2014 Every fault event logged with tick, agent ID, and type.', 'left');
+            await delay(STEP);
+            collapseSection('fault-events-content');
+
+            // 8. VIEW RESULTS button
+            const resultsBtn = document.getElementById('btn-view-results');
+            if (resultsBtn) {
+                if (panel) panel.scrollTo({ top: panel.scrollHeight, behavior: 'smooth' });
+                await delay(400);
+                resultsBtn.classList.add('demo-pulse');
+                spotlight(resultsBtn, '<strong>View Results</strong> \u2014 Full analysis dashboard with exportable charts and data.', 'left');
+                await delay(STEP);
+            }
+
+            // Done — show CTA
+            clearSpotlight();
+            this._showCTA();
+        } catch (e) {
+            // Tour was interrupted (skip pressed)
+            clearSpotlight();
         }
     }
 
@@ -396,6 +718,7 @@ class DemoController {
 
     _cleanup() {
         this.state = 'DONE';
+        this._cleanupTour();
         sessionStorage.setItem('mafis-demo-seen', '1');
         document.body.classList.remove('demo-active');
 
@@ -861,26 +1184,7 @@ function updateUI(s) {
     stateEl.dataset.state = s.state;
 
     animateMetric('status-tick', s.tick + ' / ' + s.duration);
-    // Fleet bar (stacked alive/dead)
-    const total = s.total_agents || 0;
-    const alive = s.alive_agents || 0;
-    const dead = s.dead_agents || 0;
-    const totalEl = document.getElementById('status-total');
-    if (totalEl) totalEl.textContent = total;
-    const fleetAlive = document.getElementById('fleet-bar-alive');
-    const fleetDead = document.getElementById('fleet-bar-dead');
-    const fleetAliveLabel = document.getElementById('fleet-bar-alive-label');
-    const fleetDeadLabel = document.getElementById('fleet-bar-dead-label');
-    if (fleetAlive && fleetDead && total > 0) {
-        const alivePct = (alive / total * 100).toFixed(1);
-        const deadPct = (dead / total * 100).toFixed(1);
-        fleetAlive.style.width = alivePct + '%';
-        fleetDead.style.width = deadPct + '%';
-        if (fleetAliveLabel) fleetAliveLabel.textContent = alive > 0 ? alive : '';
-        if (fleetDeadLabel) fleetDeadLabel.textContent = dead > 0 ? dead : '';
-    }
-
-    // Task leg stacked bar
+    // Task leg stacked bar (includes dead agents)
     if (s.task_leg_counts && s.state !== 'idle') {
         const barRow = document.getElementById('task-leg-bar-row');
         if (barRow) {
@@ -888,21 +1192,26 @@ function updateUI(s) {
             const idle = (s.task_leg_counts.free || 0) + (s.task_leg_counts.charging || 0);
             const loading = (s.task_leg_counts.travel_empty || 0) + (s.task_leg_counts.loading || 0);
             const delivering = (s.task_leg_counts.travel_to_queue || 0) + (s.task_leg_counts.queuing || 0) + (s.task_leg_counts.travel_loaded || 0) + (s.task_leg_counts.unloading || 0);
-            const total = idle + loading + delivering;
+            const deadCount = s.dead_agents || 0;
+            const total = idle + loading + delivering + deadCount;
             document.getElementById('task-leg-total').textContent = total;
             if (total > 0) {
                 const delPct = (delivering / total * 100).toFixed(1);
                 const loadPct = (loading / total * 100).toFixed(1);
                 const idlePct = (idle / total * 100).toFixed(1);
+                const deadPct = (deadCount / total * 100).toFixed(1);
                 document.getElementById('task-bar-delivering').style.width = delPct + '%';
                 document.getElementById('task-bar-loading').style.width = loadPct + '%';
                 document.getElementById('task-bar-idle').style.width = idlePct + '%';
+                document.getElementById('task-bar-dead-seg').style.width = deadPct + '%';
                 const delLabel = document.getElementById('task-bar-delivering-label');
                 const loadLabel = document.getElementById('task-bar-loading-label');
                 const idleLabel = document.getElementById('task-bar-idle-label');
+                const deadLabel = document.getElementById('task-bar-dead-label');
                 if (delLabel) delLabel.textContent = delivering > 0 ? delivering : '';
                 if (loadLabel) loadLabel.textContent = loading > 0 ? loading : '';
                 if (idleLabel) idleLabel.textContent = idle > 0 ? idle : '';
+                if (deadLabel) deadLabel.textContent = deadCount > 0 ? deadCount : '';
             }
         }
     } else {
@@ -2955,6 +3264,12 @@ function resetChartData() {
         if (chart) chart.destroy();
     });
     chartInsts = {};
+
+    // Disconnect ResizeObserver to prevent accumulated callbacks
+    if (resizeObserver) {
+        resizeObserver.disconnect();
+        resizeObserver = null;
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -4096,17 +4411,26 @@ function bindCustomMapImport() {
         if (stored) {
             try {
                 const data = JSON.parse(stored);
-                // Delay sending until WASM has had time to process
-                // Use a small timeout to ensure the command lands after init
+                // Validate expected schema before sending
+                const w = typeof data.width === 'number' ? data.width : 0;
+                const h = typeof data.height === 'number' ? data.height : 0;
+                if (w < 8 || w > 512 || h < 8 || h > 512) throw new Error('Invalid grid dimensions');
+                const safeData = {
+                    type: 'load_custom_map',
+                    width: w,
+                    height: h,
+                    cells: Array.isArray(data.cells) ? data.cells : [],
+                    robots: Array.isArray(data.robots) ? data.robots : [],
+                    name: typeof data.name === 'string' ? data.name.slice(0, 100) : 'custom',
+                };
                 setTimeout(() => {
-                    sendCommand({ type: 'load_custom_map', ...data });
+                    sendCommand(safeData);
                     document.querySelectorAll('#topology-presets .preset-btn').forEach(b => b.classList.remove('active'));
                 }, 200);
                 if (statusEl) {
-                    const robotCount = data.robots ? data.robots.length : 0;
-                    statusEl.innerHTML = '<div class="import-ok">Loaded from Map Maker: ' +
-                        data.width + '×' + data.height + ' · ' +
-                        robotCount + ' robots</div>';
+                    const robotCount = safeData.robots.length;
+                    statusEl.textContent = 'Loaded from Map Maker: ' +
+                        w + '\u00d7' + h + ' \u00b7 ' + robotCount + ' robots';
                 }
             } catch (e) {
                 console.error('Failed to load custom map from localStorage:', e);
@@ -4610,19 +4934,30 @@ function initExperimentMode() {
 
     updateExpRunCount();
 
-    // URL param: ?results=URL
-    const params = new URLSearchParams(window.location.search);
-    const resultsUrl = params.get('results');
+    // URL param: ?results=URL (validated: same-origin or relative only)
+    const expParams = new URLSearchParams(window.location.search);
+    const resultsUrl = expParams.get('results');
     if (resultsUrl) {
-        fetch(resultsUrl)
-            .then(r => r.json())
-            .then(json => {
-                experimentData = json;
-                setPhase('experiment');
-                setExpStage('results');
-                renderExpResults();
-            })
-            .catch(err => console.error('Failed to load results:', err));
+        let isSafeOrigin = false;
+        try {
+            const parsed = new URL(resultsUrl, window.location.origin);
+            isSafeOrigin = parsed.origin === window.location.origin;
+        } catch (_) {
+            isSafeOrigin = !resultsUrl.includes('//');
+        }
+        if (isSafeOrigin) {
+            fetch(resultsUrl)
+                .then(r => r.json())
+                .then(json => {
+                    experimentData = json;
+                    setPhase('experiment');
+                    setExpStage('results');
+                    renderExpResults();
+                })
+                .catch(err => console.error('Failed to load results:', err));
+        } else {
+            console.warn('[MAFIS] Blocked cross-origin results URL:', resultsUrl);
+        }
     }
 }
 

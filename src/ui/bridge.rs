@@ -275,7 +275,10 @@ pub fn get_simulation_state() -> String {
 pub fn send_command(cmd: &str) {
     if let Some(parsed) = parse_command(cmd) {
         BRIDGE.with(|b| {
-            b.borrow_mut().incoming.push(parsed);
+            let mut inner = b.borrow_mut();
+            if inner.incoming.len() < crate::constants::MAX_COMMAND_QUEUE {
+                inner.incoming.push(parsed);
+            }
         });
     }
 }
