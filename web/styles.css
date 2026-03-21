@@ -172,6 +172,12 @@ body {
     letter-spacing: 0.6px;
     text-transform: uppercase;
     color: var(--text-header);
+    text-decoration: none;
+    cursor: pointer;
+    transition: opacity 0.15s ease;
+}
+.header-title:hover {
+    opacity: 0.7;
 }
 
 .header-status {
@@ -4441,6 +4447,14 @@ body[data-phase="results"] #panel-right > .view-results-wrapper {
     justify-content: center;
     transition: width 200ms ease;
 }
+.task-bar-dead {
+    background: var(--state-fault);
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: width 200ms ease;
+}
 
 /* --------------------------------------------------------------------------
    Agent Row — task leg badge
@@ -5331,23 +5345,13 @@ body[data-phase="experiment"] #toolbar {
 
 /* --- Panel dimming during demo --- */
 body.demo-active #panel-left {
-    opacity: 0;
     pointer-events: none;
-    overflow: hidden;
-    width: 0;
-    min-width: 0;
-    padding: 0;
-    border: none;
 }
 body.demo-active #toolbar {
-    opacity: 0.25;
     pointer-events: none;
-    transition: opacity 0.3s ease;
 }
 body.demo-active #header {
-    opacity: 0.4;
     pointer-events: none;
-    transition: opacity 0.3s ease;
 }
 /* Right panel stays visible during demo — metrics are part of the show */
 body.demo-active #panel-right {
@@ -5439,5 +5443,44 @@ body.demo-active[data-phase="analyze"] #panel-right {
 }
 body.demo-active .demo-skip-btn {
     display: block;
+}
+
+/* --- Demo guided tour spotlight --- */
+.demo-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 150;
+    pointer-events: none;
+}
+.demo-spotlight-hole {
+    position: fixed;
+    z-index: 151;
+    border-radius: 4px;
+    box-shadow: 0 0 0 9999px rgba(8, 8, 8, 0.55);
+    transition: top 0.4s ease, left 0.4s ease, width 0.4s ease, height 0.4s ease;
+    pointer-events: none;
+}
+.demo-tooltip {
+    position: fixed;
+    z-index: 152;
+    background: rgba(8, 8, 8, 0.88);
+    padding: 14px 22px;
+    max-width: 320px;
+    font-family: 'Inter', sans-serif;
+    font-size: 0.95rem;
+    font-weight: 400;
+    color: rgb(240, 238, 234);
+    letter-spacing: 0.01em;
+    line-height: 1.45;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    pointer-events: none;
+}
+.demo-tooltip.visible {
+    opacity: 1;
+}
+.demo-tooltip strong {
+    color: rgb(217, 158, 38);
+    font-weight: 600;
 }
 

@@ -125,8 +125,8 @@ export function initApp() {
     initResultsPhase();
     initExperimentMode();
 
-    // Auto-play demo: show on first visit per session
-    if (!sessionStorage.getItem('mafis-demo-seen')) {
+    // Auto-play demo: show on first visit (persisted in localStorage)
+    if (!localStorage.getItem('mafis-demo-seen')) {
         demoController = new DemoController();
         // Enable "Watch Demo" button now that WASM is ready
         const watchBtn = document.getElementById('demo-watch-btn');
@@ -280,10 +280,15 @@ class DemoController {
         this._spotHole = hole;
         this._spotTooltip = tooltip;
 
-        const spotlight = (elOrId, text, placement) => {
+        const spotlight = async (elOrId, text, placement) => {
             const el = typeof elOrId === 'string' ? document.getElementById(elOrId) : elOrId;
             if (!el) { hole.style.display = 'none'; tooltip.classList.remove('visible'); return; }
 
+            // 1. Scroll first, then wait for it to settle
+            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            await delay(450);
+
+            // 2. Now measure position after scroll
             const pad = 6;
             const r = el.getBoundingClientRect();
             hole.style.display = '';
@@ -314,9 +319,6 @@ class DemoController {
                 tooltip.style.top = (r.bottom + gap) + 'px';
                 tooltip.style.removeProperty('right');
             }
-
-            // Scroll the element into view within its panel
-            el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         };
 
         const clearSpotlight = () => {
@@ -361,42 +363,41 @@ class DemoController {
 
             // 1. Topology
             expandSection('sim-content');
-            spotlight('topology-presets', '<strong>Topology</strong> \u2014 Choose a warehouse layout. Selecting <strong>Compact Grid</strong>.');
             const topo = loadedTopologies.find(t => t.id === DEMO_CONFIG.topology);
             if (topo) {
                 sendCommand({ type: 'load_custom_map', ...topo.data });
             } else {
                 sendCommand({ type: 'set_topology', value: DEMO_CONFIG.topology });
             }
-            // Highlight the matching preset button
             const presetBtns = document.querySelectorAll('#topology-presets .topo-preset-btn');
             presetBtns.forEach(b => {
                 if (b.dataset.id === DEMO_CONFIG.topology) b.classList.add('active');
             });
+            await spotlight('topology-presets', '<strong>Topology</strong> \u2014 Choose a warehouse layout. Selecting <strong>Compact Grid</strong>.');
             await delay(STEP);
 
             // 2. Algorithm
             expandSection('solver-sched-content');
-            spotlight('input-solver', '<strong>Algorithm</strong> \u2014 PIBT: reactive priority inheritance. Replans every tick.');
             sendCommand({ type: 'set_solver', value: DEMO_CONFIG.solver });
             const solverSel = document.getElementById('input-solver');
             if (solverSel) solverSel.value = DEMO_CONFIG.solver;
+            await spotlight('input-solver', '<strong>Algorithm</strong> \u2014 PIBT: reactive priority inheritance. Replans every tick.');
             await delay(STEP);
 
             // 3. Scheduler
-            spotlight('input-scheduler', '<strong>Scheduler</strong> \u2014 Random: assigns pickups and deliveries randomly.');
             sendCommand({ type: 'set_scheduler', value: DEMO_CONFIG.scheduler });
             const schedSel = document.getElementById('input-scheduler');
             if (schedSel) schedSel.value = DEMO_CONFIG.scheduler;
+            await spotlight('input-scheduler', '<strong>Scheduler</strong> \u2014 Random: assigns pickups and deliveries randomly.');
             await delay(STEP);
 
             // 4. Duration
-            spotlight('input-duration', '<strong>Duration</strong> \u2014 300 ticks. Enough time to observe fault recovery.');
             sendCommand({ type: 'set_seed', value: DEMO_CONFIG.seed });
             sendCommand({ type: 'set_tick_hz', value: DEMO_CONFIG.tickHz });
             sendCommand({ type: 'set_duration', value: DEMO_CONFIG.duration });
             const durInput = document.getElementById('input-duration');
             if (durInput) durInput.value = DEMO_CONFIG.duration;
+            await spotlight('input-duration', '<strong>Duration</strong> \u2014 300 ticks. Enough time to observe fault recovery.');
             await delay(STEP);
 
             // 5. Fault Injection
@@ -407,12 +408,11 @@ class DemoController {
             sendCommand({ type: 'set_fault_scenario_type', value: 'burst_failure' });
             sendCommand({ type: 'set_scenario_param', key: 'burst_kill_percent', value: 20 });
             sendCommand({ type: 'set_scenario_param', key: 'burst_at_tick', value: 100 });
-            // Show the fault config panel so it's visible
             const faultPanel = document.getElementById('fault-config-panel');
             if (faultPanel) faultPanel.style.display = '';
             const scenarioSel = document.getElementById('input-fault-scenario-type');
             if (scenarioSel) scenarioSel.value = 'burst_failure';
-            spotlight('fault-config-panel', '<strong>Fault Injection</strong> \u2014 Burst failure: 20% of agents die at tick 100.');
+            await spotlight('fault-config-panel', '<strong>Fault Injection</strong> \u2014 Burst failure: 20% of agents die at tick 100.');
             await delay(STEP);
 
             // 6. Launch
@@ -466,14 +466,9 @@ class DemoController {
                 this.cueIndex++;
             }
 
-            // After last cue, show CTA
-            if (this.cueIndex >= DEMO_CUES.length && this.state === 'PLAYING') {
-                this._showCTA();
-            }
-
-            // Also transition to CTA if sim finishes early
+            // Also transition to finish if sim finishes early (before all cues)
             if (s.state === 'finished' && this.state === 'PLAYING') {
-                this._showCTA();
+                this._finishTour();
             }
             return;
         }
@@ -514,7 +509,7 @@ class DemoController {
                 if (resultsBtn) resultsBtn.classList.add('demo-pulse');
                 const panel = document.getElementById('panel-right');
                 if (panel) panel.scrollTo({ top: panel.scrollHeight, behavior: 'smooth' });
-                this._showCTA();
+                this._finishTour();
             }, 300);
             if (overlay) overlay.classList.remove('visible');
             return;
@@ -553,9 +548,14 @@ class DemoController {
             document.body.appendChild(tooltip);
         }
 
-        const spotlight = (elOrId, text, placement) => {
+        const spotlight = async (elOrId, text, placement) => {
             const el = typeof elOrId === 'string' ? document.getElementById(elOrId) : elOrId;
             if (!el) { hole.style.display = 'none'; tooltip.classList.remove('visible'); return; }
+
+            // Scroll first, wait for settle, then measure
+            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            await delay(450);
+
             const pad = 6;
             const r = el.getBoundingClientRect();
             hole.style.display = '';
@@ -576,7 +576,6 @@ class DemoController {
                 tooltip.style.left = (r.right + gap) + 'px';
                 tooltip.style.top = Math.max(8, r.top) + 'px';
             }
-            el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         };
 
         const clearSpotlight = () => {
@@ -614,30 +613,27 @@ class DemoController {
             // 1. Status section — tick & task bar
             if (panel) panel.scrollTo({ top: 0, behavior: 'smooth' });
             expandSection('status-content');
-            await delay(400);
-            spotlight('status-content', '<strong>Status</strong> \u2014 Current tick, simulation state, and fleet composition at a glance.', 'left');
+            await spotlight('status-content', '<strong>Status</strong> \u2014 Current tick, simulation state, and fleet composition at a glance.', 'left');
             await delay(STEP);
 
             // 2. Task leg bar
             const taskBar = document.getElementById('task-leg-bar-row');
             if (taskBar) {
-                spotlight(taskBar, '<strong>Fleet Bar</strong> \u2014 Real-time breakdown: Delivering, Loading, Idle, and Dead agents.', 'left');
+                await spotlight(taskBar, '<strong>Fleet Bar</strong> \u2014 Real-time breakdown: Delivering, Loading, Idle, and Dead agents.', 'left');
                 await delay(STEP);
             }
 
             // 3. Resilience Scorecard
             expandSection('scorecard-content');
-            await delay(300);
-            spotlight('scorecard-content', '<strong>Resilience Scorecard</strong> \u2014 Four metrics that grade how well the system handles faults: tolerance, recovery, utilization, critical time.', 'left');
+            await spotlight('scorecard-content', '<strong>Resilience Scorecard</strong> \u2014 Four metrics that grade how well the system handles faults: tolerance, recovery, utilization, critical time.', 'left');
             await delay(STEP);
             collapseSection('scorecard-content');
 
             // 4. System Performance — charts
             expandSection('system-perf-content');
-            await delay(300);
             const throughputChart = document.getElementById('chart-throughput');
             if (throughputChart) {
-                spotlight(throughputChart, '<strong>Throughput Chart</strong> \u2014 Tasks completed per tick. Watch for the dip at tick 100 when agents die.', 'left');
+                await spotlight(throughputChart, '<strong>Throughput Chart</strong> \u2014 Tasks completed per tick. Watch for the dip at tick 100 when agents die.', 'left');
                 await delay(STEP);
             }
 
@@ -645,68 +641,55 @@ class DemoController {
             const metricThroughput = document.getElementById('metric-throughput');
             if (metricThroughput) {
                 const metricsRow = metricThroughput.closest('.metric-row') || metricThroughput.parentElement;
-                spotlight(metricsRow, '<strong>Metrics</strong> \u2014 Throughput, completed tasks, and idle ratio. Delta indicators show change from baseline.', 'left');
+                await spotlight(metricsRow, '<strong>Metrics</strong> \u2014 Throughput, completed tasks, and idle ratio. Delta indicators show change from baseline.', 'left');
                 await delay(STEP);
             }
             collapseSection('system-perf-content');
 
             // 6. Fault Response
             expandSection('fault-response-content');
-            await delay(300);
-            spotlight('fault-response-content', '<strong>Fault Response</strong> \u2014 Live verdict, MTTR/MTBF, survival rate, and a timeline of every fault event.', 'left');
+            await spotlight('fault-response-content', '<strong>Fault Response</strong> \u2014 Live verdict, MTTR/MTBF, survival rate, and a timeline of every fault event.', 'left');
             await delay(STEP);
             collapseSection('fault-response-content');
 
             // 7. Fault Timeline
             expandSection('fault-events-content');
-            await delay(300);
-            spotlight('fault-events-content', '<strong>Fault Timeline</strong> \u2014 Every fault event logged with tick, agent ID, and type.', 'left');
+            await spotlight('fault-events-content', '<strong>Fault Timeline</strong> \u2014 Every fault event logged with tick, agent ID, and type.', 'left');
             await delay(STEP);
             collapseSection('fault-events-content');
 
             // 8. VIEW RESULTS button
             const resultsBtn = document.getElementById('btn-view-results');
             if (resultsBtn) {
-                if (panel) panel.scrollTo({ top: panel.scrollHeight, behavior: 'smooth' });
-                await delay(400);
                 resultsBtn.classList.add('demo-pulse');
-                spotlight(resultsBtn, '<strong>View Results</strong> \u2014 Full analysis dashboard with exportable charts and data.', 'left');
+                await spotlight(resultsBtn, '<strong>View Results</strong> \u2014 Full analysis dashboard with exportable charts and data.', 'left');
                 await delay(STEP);
             }
 
-            // Done — show CTA
+            // Done — end demo, let user interact
             clearSpotlight();
-            this._showCTA();
+            this._finishTour();
         } catch (e) {
             // Tour was interrupted (skip pressed)
             clearSpotlight();
         }
     }
 
-    _showCTA() {
-        if (this.state === 'CTA') return;
+    _finishTour() {
         this.state = 'CTA';
 
-        // Re-enable right panel interaction so user can click VIEW RESULTS
+        // Re-enable both panels so user can interact
         const rightPanel = document.getElementById('panel-right');
         if (rightPanel) rightPanel.style.pointerEvents = 'auto';
+        const leftPanel = document.getElementById('panel-left');
+        if (leftPanel) leftPanel.style.pointerEvents = 'auto';
 
-        const overlay = document.getElementById('demo-overlay');
-        if (!overlay) return;
+        // Highlight VIEW RESULTS button
+        const resultsBtn = document.getElementById('btn-view-results');
+        if (resultsBtn) resultsBtn.classList.add('demo-pulse');
 
-        overlay.classList.add('cta');
-        overlay.innerHTML =
-            'Click <strong>VIEW RESULTS</strong> for the full report' +
-            '<br><button class="demo-cta-btn" id="demo-take-control">Take Control</button>';
-        overlay.classList.add('visible');
-
-        document.getElementById('demo-take-control').addEventListener('click', () => {
-            this._takeControl();
-        });
-    }
-
-    _takeControl() {
-        this._cleanup();
+        // Clean up demo state after a short delay
+        setTimeout(() => this._cleanup(), 500);
     }
 
     skip() {
@@ -719,7 +702,7 @@ class DemoController {
     _cleanup() {
         this.state = 'DONE';
         this._cleanupTour();
-        sessionStorage.setItem('mafis-demo-seen', '1');
+        localStorage.setItem('mafis-demo-seen', '1');
         document.body.classList.remove('demo-active');
 
         const splash = document.getElementById('demo-splash');

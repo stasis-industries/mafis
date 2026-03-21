@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 
     <!-- Security headers -->
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://unpkg.com/uplot/ 'unsafe-inline'; style-src 'self' https://fonts.googleapis.com https://unpkg.com/uplot/ 'unsafe-inline'; font-src https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self'; worker-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://unpkg.com/uplot/ 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'self' https://fonts.googleapis.com https://unpkg.com/uplot/ 'unsafe-inline'; font-src https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self'; worker-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'">
     <meta http-equiv="X-Content-Type-Options" content="nosniff">
     <meta name="referrer" content="strict-origin-when-cross-origin">
 
@@ -99,8 +99,8 @@
     <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Inter:wght@300;400;500&family=Playfair+Display:wght@400;500&display=swap" onload="this.onload=null;this.rel='stylesheet'">
     <noscript><link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Inter:wght@300;400;500&family=Playfair+Display:wght@400;500&display=swap" rel="stylesheet"></noscript>
     <link rel="stylesheet" href="styles.css">
-    <link rel="stylesheet" href="https://unpkg.com/uplot/dist/uPlot.min.css" integrity="sha384-ZIQRQcbTq9PklHjLunPB6ephRzEmlllJRdG1f+ms1J1BFmqoFUjEu8D4OeG6+Wc8" crossorigin="anonymous">
-    <script src="https://unpkg.com/uplot/dist/uPlot.iife.min.js" defer integrity="sha384-tQlLmZASeVW/O+WD3FeDydVM9XVI0+eQqSaTa/QsSXX+2W70X6lbYO0x6q6ZL9c2" crossorigin="anonymous"></script>
+    <link rel="stylesheet" href="https://unpkg.com/uplot/dist/uPlot.min.css" crossorigin="anonymous">
+    <script src="https://unpkg.com/uplot/dist/uPlot.iife.min.js" defer crossorigin="anonymous"></script>
 </head>
 
 <body>
@@ -144,7 +144,7 @@
 
     <script>
         // Hide splash instantly for returning users (before WASM loads)
-        if (sessionStorage.getItem('mafis-demo-seen')) {
+        if (localStorage.getItem('mafis-demo-seen')) {
             document.getElementById('demo-splash').style.display = 'none';
         }
     </script>
