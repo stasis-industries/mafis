@@ -60,7 +60,9 @@ opt-level = 1
 
 [profile.release]
 lto = true
-opt-level = 3
+opt-level = "z"
 codegen-units = 1
 incremental = false
 debug = false
+strip = true
+panic = "abort"

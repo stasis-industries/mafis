@@ -60,6 +60,7 @@ jobs:
       - name: Optimize WASM binary (wasm-opt)
         run: |
           wasm-opt -Oz --enable-bulk-memory --enable-mutable-globals \
+            --enable-nontrapping-float-to-int --enable-sign-ext \
             -o web/mafis_bg.wasm.opt web/mafis_bg.wasm
           mv web/mafis_bg.wasm.opt web/mafis_bg.wasm
 
