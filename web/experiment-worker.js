@@ -159,7 +159,7 @@ function buildImports(module) {
             bg[name] = (arg0, arg1) => {
                 const ret = typeof arg1 === 'string' ? arg1 : undefined;
                 const none = isLikeNone(ret);
-                const ptr1 = none ? 0 : passString(ret, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+                const ptr1 = none ? 0 : passString(ret, wasmMalloc(), wasmRealloc());
                 const len1 = WASM_VECTOR_LEN;
                 getDV().setInt32(arg0 + 4, len1, true);
                 getDV().setInt32(arg0, ptr1, true);
@@ -168,7 +168,7 @@ function buildImports(module) {
         else if (name.includes('__wbindgen_debug_string')) {
             bg[name] = (arg0, arg1) => {
                 const ret = String(arg1);
-                const ptr1 = passString(ret, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+                const ptr1 = passString(ret, wasmMalloc(), wasmRealloc());
                 const len1 = WASM_VECTOR_LEN;
                 getDV().setInt32(arg0 + 4, len1, true);
                 getDV().setInt32(arg0, ptr1, true);
@@ -259,18 +259,31 @@ function buildImports(module) {
 
 // -- Experiment wrappers -----------------------------------------------------
 
+// Resolve malloc/realloc/free exports — wasm-bindgen uses either named
+// (__wbindgen_malloc) or numbered (__wbindgen_export) exports depending
+// on strip settings.  Detect both so the worker survives either config.
+function wasmMalloc() {
+    return wasm.__wbindgen_malloc || wasm.__wbindgen_export;
+}
+function wasmRealloc() {
+    return wasm.__wbindgen_realloc || wasm.__wbindgen_export2;
+}
+function wasmFree() {
+    return wasm.__wbindgen_free || wasm.__wbindgen_export4;
+}
+
 function experimentStart() {
     wasm.experiment_start();
 }
 
 function experimentRunSingle(configJson) {
-    const ptr = passString(configJson, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const ptr = passString(configJson, wasmMalloc(), wasmRealloc());
     const len = WASM_VECTOR_LEN;
     const ret = wasm.experiment_run_single(ptr, len);
     try {
         return getString(ret[0], ret[1]);
     } finally {
-        wasm.__wbindgen_free(ret[0], ret[1], 1);
+        wasmFree()(ret[0], ret[1], 1);
     }
 }
 
@@ -279,7 +292,7 @@ function experimentFinish() {
     try {
         return getString(ret[0], ret[1]);
     } finally {
-        wasm.__wbindgen_free(ret[0], ret[1], 1);
+        wasmFree()(ret[0], ret[1], 1);
     }
 }
 
