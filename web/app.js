@@ -130,8 +130,11 @@ export function initApp() {
         demoController = new DemoController();
         // Enable "Watch Demo" button now that WASM is ready
         const watchBtn = document.getElementById('demo-watch-btn');
+        const progressEl = document.getElementById('demo-splash-progress');
         if (watchBtn) {
+            watchBtn.textContent = 'Watch Demo';
             watchBtn.disabled = false;
+            if (progressEl) progressEl.style.display = 'none';
             watchBtn.addEventListener('click', () => {
                 demoController?.startDemo();
             });

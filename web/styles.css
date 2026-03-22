@@ -5342,6 +5342,19 @@ body[data-phase="experiment"] #toolbar {
     background: var(--text-primary);
     color: var(--bg-body);
 }
+.demo-splash-progress {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.65rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+    margin-top: 12px;
+    animation: pulse-loading 1.5s ease-in-out infinite;
+}
+@keyframes pulse-loading {
+    0%, 100% { opacity: 0.4; }
+    50% { opacity: 1; }
+}
 
 /* --- Panel dimming during demo --- */
 body.demo-active #panel-left {
