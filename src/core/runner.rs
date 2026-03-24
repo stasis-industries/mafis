@@ -499,12 +499,14 @@ impl SimulationRunner {
         self.command_queue.push(cmd);
     }
 
-    /// Clear transient state (command queue, distance cache).
+    /// Clear transient state (command queue, distance cache, rebuild queues).
     /// Used after rewind to avoid stale state from the pre-rewind timeline.
+    /// Rebuilds QueueManager occupancy from agent task legs so agents in
+    /// Queuing/TravelLoaded states retain their queue positions.
     pub fn clear_transient_state(&mut self) {
         self.command_queue.clear();
         self.dist_cache = DistanceMapCache::default();
-        self.queue_manager.clear();
+        self.queue_manager.rebuild_from_agents(&self.agents, &self.zones.queue_lines);
     }
 
     /// Reset the runner for a new simulation (keeps agents, resets state).
@@ -932,6 +934,7 @@ impl SimulationRunner {
             goal: a.goal,
             task_leg: a.task_leg.clone(),
             alive: a.alive,
+            frozen: a.latency_remaining > 0,
         }));
 
         let recycle =

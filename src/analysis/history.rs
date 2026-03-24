@@ -41,6 +41,9 @@ pub struct AgentSnapshot {
     /// Skipped from JSON — internal use only.
     #[serde(skip)]
     pub planned_actions: Vec<u8>,
+    /// Weibull operational age (movement-ticks). Required for wear rollback.
+    #[serde(skip)]
+    pub operational_age: u32,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -297,6 +300,11 @@ pub fn record_tick_snapshot(
             (agent.planned_path.len(), agent.planned_path.iter().map(|&a| crate::core::action::Action::to_u8(a)).collect())
         };
 
+        let op_age = sim.as_ref()
+            .and_then(|s| s.runner.agents.get(index.0))
+            .map(|sa| sa.operational_age)
+            .unwrap_or(0);
+
         agent_snapshots.push(AgentSnapshot {
             index: index.0,
             pos: agent.current_pos,
@@ -307,6 +315,7 @@ pub fn record_tick_snapshot(
             task_leg: leg_label.to_string(),
             task_leg_data: leg_data,
             planned_actions: actions,
+            operational_age: op_age,
         });
     }
 

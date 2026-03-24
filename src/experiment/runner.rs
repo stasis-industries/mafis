@@ -484,7 +484,7 @@ fn parse_config_json(json: &str) -> Option<ExperimentConfig> {
             "intermittent" => Some(FaultScenario {
                 enabled: true,
                 scenario_type: FaultScenarioType::IntermittentFault,
-                intermittent_mtbf_ticks: s.get("mtbf").and_then(|t| t.as_u64()).unwrap_or(80) as u32,
+                intermittent_mtbf_ticks: s.get("mtbf").and_then(|t| t.as_u64()).unwrap_or(80),
                 intermittent_recovery_ticks: s.get("recovery").and_then(|r| r.as_u64()).unwrap_or(15) as u32,
                 ..Default::default()
             }),

@@ -50,7 +50,8 @@
     --leg-charging: rgb(89, 135, 209);
 
     --bg-hover: rgba(5, 5, 5, 0.04);
-    --bg-canvas: rgb(225, 222, 218);
+    --bg-canvas: rgb(255, 255, 255);
+    --bg-overlay: rgba(70, 70, 74, 0.72);
 
     /* Timeline (YouTube-style 3-zone) */
     --tl-unloaded: rgba(0, 0, 0, 0.08);
@@ -86,7 +87,8 @@
     --text-header: rgb(230, 228, 224);
 
     --bg-hover: rgba(255, 255, 255, 0.06);
-    --bg-canvas: rgb(24, 24, 30);
+    --bg-canvas: rgb(18, 18, 22);
+    --bg-overlay: rgba(30, 30, 36, 0.78);
 
     /* Timeline (YouTube-style 3-zone) */
     --tl-unloaded: rgba(255, 255, 255, 0.06);
@@ -1462,22 +1464,84 @@ input[type="range"]:disabled::-webkit-slider-thumb {
     color: var(--text-primary);
 }
 
-.ft-btn-delete {
-    color: var(--fault-red, #c0392b);
-    border-color: var(--fault-red, #c0392b);
-}
-
-.ft-btn-delete:hover {
-    background: var(--fault-red, #c0392b);
-    color: #fff;
-}
-
 .ft-empty {
     font-family: 'DM Mono', monospace;
     font-size: 11px;
     color: var(--text-muted);
     padding: 8px 0;
 }
+
+/* --------------------------------------------------------------------------
+   Fault list (multi-fault configuration)
+   -------------------------------------------------------------------------- */
+
+.fault-add-form {
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 6px;
+}
+
+.fl-params { margin-top: 2px; }
+
+.fault-list-items {
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.fault-list-empty {
+    font-family: 'DM Mono', monospace;
+    font-size: 11px;
+    color: var(--text-muted);
+    padding: 6px 0;
+    text-align: center;
+}
+
+.fault-item-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 4px;
+    border-bottom: 1px solid var(--border);
+    font-family: 'DM Mono', monospace;
+    font-size: 11px;
+}
+
+.fault-item-row:last-child { border-bottom: none; }
+
+.fault-type-badge {
+    font-size: 9px;
+    letter-spacing: 0.4px;
+    padding: 1px 0;
+    min-width: 48px;
+    text-align: center;
+    text-transform: uppercase;
+    color: #fff;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+.fault-type-badge.burst { background: rgb(230, 44, 2); }
+.fault-type-badge.wear { background: rgb(230, 140, 0); }
+.fault-type-badge.zone { background: rgb(143, 58, 222); }
+.fault-type-badge.intermittent { background: rgb(59, 176, 184); }
+
+.fault-item-summary {
+    flex: 1;
+    color: var(--text-secondary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.fault-item-remove {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 14px;
+    padding: 0 4px;
+    line-height: 1;
+}
+.fault-item-remove:hover { color: rgb(230, 44, 2); }
 
 /* --------------------------------------------------------------------------
    Transport bar (replay mode)
@@ -1617,7 +1681,7 @@ input[type="range"]:disabled::-webkit-slider-thumb {
     color: rgba(200, 200, 200, 0.7);
 }
 
-.timeline-popup .popup-delete-btn {
+.timeline-popup .popup-seek-btn {
     display: block;
     margin-top: 4px;
     font-family: 'DM Mono', monospace;
@@ -1626,14 +1690,14 @@ input[type="range"]:disabled::-webkit-slider-thumb {
     letter-spacing: 0.3px;
     padding: 2px 8px;
     background: none;
-    border: 1px solid rgb(211, 47, 47);
-    color: rgb(211, 47, 47);
+    border: 1px solid var(--text-secondary);
+    color: var(--text-secondary);
     cursor: pointer;
 }
 
-.timeline-popup .popup-delete-btn:hover {
-    background: rgb(211, 47, 47);
-    color: #fff;
+.timeline-popup .popup-seek-btn:hover {
+    background: var(--text-secondary);
+    color: var(--bg-body);
 }
 
 .timeline-popup .stacked-title {
@@ -1717,7 +1781,7 @@ input[type="range"]:disabled::-webkit-slider-thumb {
 #canvas-container {
     position: relative;
     overflow: hidden;
-    background: var(--bg-canvas, rgb(225, 222, 218));
+    background: var(--bg-canvas);
     touch-action: none;
 }
 
@@ -1874,7 +1938,7 @@ input[type="range"]:disabled::-webkit-slider-thumb {
     flex-direction: column;
     gap: 3px;
     padding: 8px 10px;
-    background: rgba(8, 8, 8, 0.75);
+    background: var(--bg-overlay);
     backdrop-filter: blur(8px);
     font-size: 0.72em;
     font-family: 'DM Mono', monospace;
@@ -1920,7 +1984,7 @@ input[type="range"]:disabled::-webkit-slider-thumb {
 }
 
 .btn-camera {
-    background: rgba(5, 5, 5, 0.7);
+    background: var(--bg-overlay);
     border: 1px solid rgba(255, 255, 255, 0.12);
     border-radius: 0;
     padding: 6px 12px;
@@ -1937,12 +2001,14 @@ input[type="range"]:disabled::-webkit-slider-thumb {
 }
 
 .btn-camera:hover {
-    background: rgba(5, 5, 5, 0.85);
+    background: var(--bg-overlay);
+    filter: brightness(0.85);
     color: rgba(244, 241, 237, 1);
 }
 
 .btn-camera.active {
-    background: rgba(5, 5, 5, 0.9);
+    background: var(--bg-overlay);
+    filter: brightness(0.75);
     color: rgb(244, 241, 237);
     border-color: rgba(255, 255, 255, 0.35);
 }
@@ -3167,7 +3233,7 @@ input[type="range"]:disabled::-webkit-slider-thumb {
     right: 12px;
     width: 192px;
     box-sizing: border-box;
-    background: rgba(8, 8, 8, 0.75);
+    background: var(--bg-overlay);
     backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(8px);
     padding: 10px 14px;
@@ -3241,7 +3307,7 @@ input[type="range"]:disabled::-webkit-slider-thumb {
     right: 12px;
     width: 192px;
     box-sizing: border-box;
-    background: rgba(8, 8, 8, 0.75);
+    background: var(--bg-overlay);
     backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(8px);
     padding: 10px 14px;
@@ -3291,11 +3357,14 @@ input[type="range"]:disabled::-webkit-slider-thumb {
     align-items: center;
     gap: 8px;
     padding: 6px 12px;
-    background: var(--bg-panel);
-    border: 1px solid var(--border);
+    background: var(--bg-overlay);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border: 1px solid rgba(255, 255, 255, 0.10);
     z-index: 20;
     font-family: 'DM Mono', monospace;
     font-size: 11px;
+    color: var(--text-on-dark);
 }
 
 body[data-phase="observe"] .viz-toolbar,
@@ -3308,7 +3377,7 @@ body[data-phase="analyze"] .viz-toolbar {
     align-items: center;
     gap: 4px;
     cursor: pointer;
-    color: var(--text-secondary);
+    color: rgba(244, 241, 237, 0.7);
     text-transform: uppercase;
     letter-spacing: 0.5px;
     font-size: 11px;
@@ -3321,15 +3390,15 @@ body[data-phase="analyze"] .viz-toolbar {
 .viz-toolbar-sep {
     width: 1px;
     height: 16px;
-    background: var(--border);
+    background: rgba(255, 255, 255, 0.15);
 }
 
 .viz-mode-btn {
     width: 24px;
     height: 24px;
-    border: 1px solid var(--border);
+    border: 1px solid rgba(255, 255, 255, 0.15);
     background: transparent;
-    color: var(--text-muted);
+    color: rgba(244, 241, 237, 0.45);
     font-family: 'DM Mono', monospace;
     font-size: 11px;
     cursor: pointer;
@@ -3337,9 +3406,9 @@ body[data-phase="analyze"] .viz-toolbar {
 }
 
 .viz-mode-btn.active {
-    background: var(--text-primary);
-    color: var(--bg-panel);
-    border-color: var(--text-primary);
+    background: rgba(244, 241, 237, 0.9);
+    color: rgb(30, 30, 36);
+    border-color: rgba(244, 241, 237, 0.9);
 }
 
 .viz-toolbar-control {
@@ -3349,7 +3418,7 @@ body[data-phase="analyze"] .viz-toolbar {
 }
 
 .viz-toolbar-label {
-    color: var(--text-muted);
+    color: rgba(244, 241, 237, 0.45);
     font-size: 10px;
     text-transform: uppercase;
 }
@@ -3357,7 +3426,7 @@ body[data-phase="analyze"] .viz-toolbar {
 .viz-toolbar-control input[type="range"] {
     width: 50px;
     height: 4px;
-    accent-color: var(--text-secondary);
+    accent-color: rgba(244, 241, 237, 0.6);
 }
 
 /* --- Phase transitions on panels --- */
@@ -5485,7 +5554,9 @@ body.demo-active[data-phase="analyze"] #panel-right {
     left: 50%;
     transform: translateX(-50%);
     z-index: 100;
-    background: rgba(8, 8, 8, 0.78);
+    background: var(--bg-overlay);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
     padding: 16px 32px;
     max-width: 500px;
     text-align: center;

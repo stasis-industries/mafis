@@ -25,6 +25,7 @@ impl Plugin for FaultPlugin {
         app.init_resource::<FaultConfig>()
             .init_resource::<scenario::FaultScenario>()
             .init_resource::<scenario::FaultSchedule>()
+            .init_resource::<scenario::FaultList>()
             .init_resource::<manual::ManualFaultLog>()
             .init_resource::<manual::RewindRequest>()
             .add_message::<breakdown::FaultEvent>()

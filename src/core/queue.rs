@@ -403,6 +403,56 @@ impl QueueManager {
         }
     }
 
+    /// Rebuild queue occupancy from agent task legs after a rewind/restore.
+    ///
+    /// After restoring agents from a snapshot, the QueueManager's slot assignments
+    /// are stale. This method clears all slots and re-populates them by scanning
+    /// each agent's `TaskLeg`:
+    /// - `Queuing { line_index, .. }` → place agent in the correct slot based on position
+    /// - `TravelLoaded { to, .. }` → mark delivery cell as occupied (agent is delivering)
+    ///
+    /// Must be called AFTER agents are restored and AFTER the grid is rebuilt.
+    pub fn rebuild_from_agents(
+        &mut self,
+        agents: &[SimAgent],
+        queue_lines: &[QueueLine],
+    ) {
+        // Clear everything first
+        self.clear();
+
+        for (agent_idx, agent) in agents.iter().enumerate() {
+            if !agent.alive {
+                continue;
+            }
+            match &agent.task_leg {
+                TaskLeg::Queuing { line_index, .. } => {
+                    let li = *line_index;
+                    if li < self.queues.len() && li < queue_lines.len() {
+                        // Find which slot this agent occupies based on position
+                        let line = &queue_lines[li];
+                        for (slot_idx, &cell) in line.cells.iter().enumerate() {
+                            if cell == agent.pos && slot_idx < self.queues[li].slots.len() {
+                                self.queues[li].slots[slot_idx] = Some(agent_idx);
+                                break;
+                            }
+                        }
+                    }
+                }
+                TaskLeg::TravelLoaded { to, .. } => {
+                    // Agent is traveling to delivery — mark delivery as occupied
+                    // so no other agent gets promoted to the same cell.
+                    for (qi, line) in queue_lines.iter().enumerate() {
+                        if line.delivery_cell == *to && qi < self.queues.len() {
+                            self.queues[qi].delivery_occupied_by = Some(agent_idx);
+                            break;
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
     /// Run one tick of queue management.
     ///
     /// Must be called AFTER `recycle_goals` and BEFORE `run_solver`.

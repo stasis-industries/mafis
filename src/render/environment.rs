@@ -321,7 +321,7 @@ pub fn spawn_obstacles(
         CELL_SIZE * 0.9,
     ));
     let obstacle_material = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.82, 0.84, 0.88),
+        base_color: Color::srgb(0.45, 0.47, 0.52),
         perceptual_roughness: 0.55,
         metallic: 0.15,
         ..default()

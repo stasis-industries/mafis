@@ -105,7 +105,7 @@ pub trait TaskScheduler: Send + Sync + 'static {
     /// `(agent_index, assigned_pickup_cell)` for each successfully assigned agent.
     ///
     /// Default: calls `assign_pickup` per-agent sequentially (correct for
-    /// `RandomScheduler` and `BalancedScheduler` which already pick diversely).
+    /// `RandomScheduler` which already picks diversely).
     fn assign_pickups_batch(
         &self,
         free_agents: &[(usize, IVec2)],
@@ -328,151 +328,12 @@ impl TaskScheduler for ClosestFirstScheduler {
 }
 
 // ---------------------------------------------------------------------------
-// BalancedScheduler
-// ---------------------------------------------------------------------------
-
-/// Assigns tasks to the least-recently-used cell, tie-breaking by distance.
-/// Distributes load evenly across all pickup/delivery cells, reducing hotspots.
-pub struct BalancedScheduler;
-
-impl BalancedScheduler {
-    fn least_used_cell(
-        cells: &[IVec2],
-        pos: IVec2,
-        occupied: &HashSet<IVec2>,
-        rng: &mut ChaCha8Rng,
-    ) -> Option<IVec2> {
-        if cells.is_empty() {
-            return None;
-        }
-        // Count how many agents are currently targeting each cell (proxy for usage).
-        // occupied = cells that are already claimed as goals.
-        let free: Vec<IVec2> = cells
-            .iter()
-            .copied()
-            .filter(|&c| c != pos && !occupied.contains(&c))
-            .collect();
-        if free.is_empty() {
-            return None;
-        }
-        // Pick the farthest free cell from centroid of occupied cells — spreads agents out.
-        // When occupied is empty, fall back to random.
-        if occupied.is_empty() {
-            return Some(free[rng.random_range(0..free.len())]);
-        }
-        let n = occupied.len() as f32;
-        let cx = occupied.iter().map(|c| c.x as f32).sum::<f32>() / n;
-        let cy = occupied.iter().map(|c| c.y as f32).sum::<f32>() / n;
-        // Sort by distance from centroid (descending) to pick the most spread-out cell.
-        // Tie-break: closest to agent (minimize travel).
-        let best = free.iter().copied().max_by(|a, b| {
-            let da = (a.x as f32 - cx).abs() + (a.y as f32 - cy).abs();
-            let db = (b.x as f32 - cx).abs() + (b.y as f32 - cy).abs();
-            da.partial_cmp(&db)
-                .unwrap_or(std::cmp::Ordering::Equal)
-                .then_with(|| {
-                    // Tie-break: prefer closer to agent
-                    let dist_a = (a.x - pos.x).abs() + (a.y - pos.y).abs();
-                    let dist_b = (b.x - pos.x).abs() + (b.y - pos.y).abs();
-                    dist_b.cmp(&dist_a) // reverse: smaller distance = better
-                })
-        });
-        best
-    }
-}
-
-impl TaskScheduler for BalancedScheduler {
-    fn name(&self) -> &str {
-        "balanced"
-    }
-
-    fn assign_pickup(
-        &self,
-        zones: &ZoneMap,
-        pos: IVec2,
-        occupied: &HashSet<IVec2>,
-        rng: &mut ChaCha8Rng,
-    ) -> Option<IVec2> {
-        Self::least_used_cell(&zones.pickup_cells, pos, occupied, rng)
-    }
-
-    fn assign_delivery(
-        &self,
-        zones: &ZoneMap,
-        pos: IVec2,
-        occupied: &HashSet<IVec2>,
-        rng: &mut ChaCha8Rng,
-    ) -> Option<IVec2> {
-        Self::least_used_cell(&zones.delivery_cells, pos, occupied, rng)
-    }
-}
-
-// ---------------------------------------------------------------------------
-// RoundTripScheduler (warehouse-aware)
-// ---------------------------------------------------------------------------
-
-/// Warehouse-aware scheduler that minimizes total round-trip distance.
-/// Pickup: chooses the cell that minimizes `dist(agent→pickup) + min(dist(pickup→any_delivery))`.
-/// Delivery: chooses nearest delivery cell (same as closest).
-pub struct RoundTripScheduler;
-
-impl RoundTripScheduler {
-    fn min_delivery_dist(pickup: IVec2, delivery_cells: &[IVec2]) -> i32 {
-        delivery_cells
-            .iter()
-            .map(|d| (d.x - pickup.x).abs() + (d.y - pickup.y).abs())
-            .min()
-            .unwrap_or(0)
-    }
-}
-
-impl TaskScheduler for RoundTripScheduler {
-    fn name(&self) -> &str {
-        "roundtrip"
-    }
-
-    fn assign_pickup(
-        &self,
-        zones: &ZoneMap,
-        pos: IVec2,
-        occupied: &HashSet<IVec2>,
-        _rng: &mut ChaCha8Rng,
-    ) -> Option<IVec2> {
-        if zones.pickup_cells.is_empty() {
-            return None;
-        }
-        zones
-            .pickup_cells
-            .iter()
-            .copied()
-            .filter(|&c| c != pos && !occupied.contains(&c))
-            .min_by_key(|&pickup| {
-                let to_pickup = (pickup.x - pos.x).abs() + (pickup.y - pos.y).abs();
-                let pickup_to_delivery = Self::min_delivery_dist(pickup, &zones.delivery_cells);
-                to_pickup + pickup_to_delivery
-            })
-    }
-
-    fn assign_delivery(
-        &self,
-        zones: &ZoneMap,
-        pos: IVec2,
-        occupied: &HashSet<IVec2>,
-        _rng: &mut ChaCha8Rng,
-    ) -> Option<IVec2> {
-        ClosestFirstScheduler::nearest_from_cells(&zones.delivery_cells, pos, occupied)
-    }
-}
-
-// ---------------------------------------------------------------------------
 // ActiveScheduler resource
 // ---------------------------------------------------------------------------
 
 pub const SCHEDULER_NAMES: &[(&str, &str)] = &[
     ("random", "Random"),
     ("closest", "Closest"),
-    ("balanced", "Balanced"),
-    ("roundtrip", "Round-Trip"),
 ];
 
 #[derive(Resource)]
@@ -486,8 +347,6 @@ impl ActiveScheduler {
         let scheduler: Box<dyn TaskScheduler> = match name {
             "random" => Box::new(RandomScheduler),
             "closest" => Box::new(ClosestFirstScheduler),
-            "balanced" => Box::new(BalancedScheduler),
-            "roundtrip" => Box::new(RoundTripScheduler),
             _ => Box::new(RandomScheduler),
         };
         let actual_name = scheduler.name().to_string();
@@ -615,6 +474,10 @@ pub struct TaskAgentSnapshot {
     pub goal: IVec2,
     pub task_leg: TaskLeg,
     pub alive: bool,
+    /// Whether the agent is frozen (latency injection). Frozen agents' goals
+    /// are excluded from `used_goals` so they don't block cell assignment for
+    /// active agents, and they skip state transitions until latency expires.
+    pub frozen: bool,
 }
 
 /// Per-agent update from recycle_goals_core.
@@ -660,9 +523,13 @@ pub fn recycle_goals_core(
     rng: &mut ChaCha8Rng,
     tick: u64,
 ) -> RecycleResult {
+    // Frozen (latency-injected) agents are excluded: their goals are stale
+    // and they can't reach them, so reserving those cells only shrinks the
+    // available pool for active agents — causing artificial cell starvation
+    // (e.g., 4 active agents cycling on 2 cells during a zone outage).
     let mut used_goals: HashSet<IVec2> = agents
         .iter()
-        .filter(|a| a.alive && a.pos != a.goal)
+        .filter(|a| a.alive && !a.frozen && a.pos != a.goal)
         .map(|a| a.goal)
         .collect();
 
@@ -680,13 +547,20 @@ pub fn recycle_goals_core(
     let mut just_loaded = Vec::new();
 
     // ── Pass 1: batch-assign pickups to all Free agents ──────────────────────
-    // Collect every alive Free agent that has reached its goal this tick.
-    let free_agents: Vec<(usize, IVec2)> = agents
+    // Collect every alive, non-frozen Free agent that has reached its goal.
+    let mut free_agents: Vec<(usize, IVec2)> = agents
         .iter()
         .enumerate()
-        .filter(|(_, a)| a.alive && a.pos == a.goal && matches!(a.task_leg, TaskLeg::Free))
+        .filter(|(_, a)| a.alive && !a.frozen && a.pos == a.goal && matches!(a.task_leg, TaskLeg::Free))
         .map(|(i, a)| (i, a.pos))
         .collect();
+
+    // Shuffle so lower-index agents don't always get first pick.
+    // Fisher-Yates in-place — O(n), negligible cost.
+    for i in (1..free_agents.len()).rev() {
+        let j = rng.random_range(0..=i);
+        free_agents.swap(i, j);
+    }
 
     // The scheduler generates random task candidates and assigns them.
     // used_goals is updated in-place so subsequent passes see occupied cells.
@@ -701,8 +575,9 @@ pub fn recycle_goals_core(
 
     // ── Pass 2: apply assignments and process all other state transitions ─────
     for (i, agent) in agents.iter().enumerate() {
-        // Skip dead agents — they must not consume scheduler assignments
-        if !agent.alive {
+        // Skip dead or frozen agents — they must not consume scheduler
+        // assignments or transition state while under latency injection.
+        if !agent.alive || agent.frozen {
             continue;
         }
 
@@ -934,78 +809,12 @@ mod tests {
     }
 
     #[test]
-    fn balanced_scheduler_assigns_pickup() {
-        let zones = test_zones();
-        let scheduler = BalancedScheduler;
-        let mut rng = test_rng();
-        let occupied = HashSet::new();
-        let pos = IVec2::new(4, 4);
-
-        let pickup = scheduler.assign_pickup(&zones, pos, &occupied, &mut rng);
-        assert!(pickup.is_some());
-        assert!(zones.pickup_cells.contains(&pickup.unwrap()));
-    }
-
-    #[test]
-    fn balanced_scheduler_spreads_assignments() {
-        let zones = test_zones();
-        let scheduler = BalancedScheduler;
-        let mut rng = test_rng();
-        let pos = IVec2::new(4, 4);
-
-        // Claim some cells as occupied
-        let mut occupied = HashSet::new();
-        occupied.insert(IVec2::new(4, 3)); // one pickup cell occupied
-
-        let pickup = scheduler.assign_pickup(&zones, pos, &occupied, &mut rng);
-        assert!(pickup.is_some());
-        let p = pickup.unwrap();
-        // Should not assign the occupied cell
-        assert!(!occupied.contains(&p));
-    }
-
-    #[test]
-    fn roundtrip_scheduler_assigns_pickup() {
-        let zones = test_zones();
-        let scheduler = RoundTripScheduler;
-        let mut rng = test_rng();
-        let occupied = HashSet::new();
-        let pos = IVec2::new(4, 4);
-
-        let pickup = scheduler.assign_pickup(&zones, pos, &occupied, &mut rng);
-        assert!(pickup.is_some());
-        assert!(zones.pickup_cells.contains(&pickup.unwrap()));
-    }
-
-    #[test]
-    fn roundtrip_scheduler_prefers_close_to_delivery() {
-        let zones = test_zones();
-        let scheduler = RoundTripScheduler;
-        let mut rng = test_rng();
-        let occupied = HashSet::new();
-        // Agent at top of map — should prefer pickup cells closer to delivery zone (bottom)
-        let pos = IVec2::new(4, 7);
-
-        let pickup = scheduler.assign_pickup(&zones, pos, &occupied, &mut rng);
-        assert!(pickup.is_some());
-        let p = pickup.unwrap();
-        // y=3 pickup cells are closer to delivery (y<2) than y=5 cells
-        assert_eq!(p.y, 3, "roundtrip should prefer pickup closer to delivery zone");
-    }
-
-    #[test]
     fn active_scheduler_from_name() {
         let s = ActiveScheduler::from_name("random");
         assert_eq!(s.name(), "random");
 
         let s = ActiveScheduler::from_name("closest");
         assert_eq!(s.name(), "closest");
-
-        let s = ActiveScheduler::from_name("balanced");
-        assert_eq!(s.name(), "balanced");
-
-        let s = ActiveScheduler::from_name("roundtrip");
-        assert_eq!(s.name(), "roundtrip");
 
         // Unknown name falls back to random
         let s = ActiveScheduler::from_name("unknown");
@@ -1099,7 +908,7 @@ mod tests {
         assert!(saw_y5, "random candidates should sometimes select from y=5 row");
     }
 
-    /// Default batch behaviour (random / balanced): no regression.
+    /// Default batch behaviour (random): no regression.
     #[test]
     fn random_batch_assigns_all_free_agents() {
         let zones = test_zones();
@@ -1136,6 +945,7 @@ mod tests {
                 goal: IVec2::new(4, 7),
                 task_leg: TaskLeg::Free,
                 alive: true,
+                frozen: false,
             })
             .collect();
 
@@ -1238,5 +1048,58 @@ mod tests {
         }
 
         assert!(used_queues.len() >= 2, "only {} queue lines used out of 4", used_queues.len());
+    }
+
+    // ── Frozen agents don't block scheduling ───────────────────────────
+
+    #[test]
+    fn frozen_agents_goals_do_not_block_pickup_assignment() {
+        let zones = test_zones(); // 16 pickup cells
+        let scheduler = RandomScheduler;
+        let mut rng = test_rng();
+
+        // 12 frozen agents each heading to a unique pickup cell.
+        // Without the fix, these would block 12 of 16 cells, leaving only 4.
+        let frozen_goals: Vec<IVec2> = zones.pickup_cells[..12].to_vec();
+        let mut agents: Vec<TaskAgentSnapshot> = frozen_goals
+            .iter()
+            .map(|&goal| TaskAgentSnapshot {
+                pos: IVec2::new(0, 0), // far from goal → pos != goal → would enter used_goals
+                goal,
+                task_leg: TaskLeg::TravelEmpty(goal),
+                alive: true,
+                frozen: true, // latency-injected
+            })
+            .collect();
+
+        // 2 active Free agents ready for pickup assignment
+        for _ in 0..2 {
+            agents.push(TaskAgentSnapshot {
+                pos: IVec2::new(4, 1),
+                goal: IVec2::new(4, 1),
+                task_leg: TaskLeg::Free,
+                alive: true,
+                frozen: false,
+            });
+        }
+
+        // Run 50 rounds and collect unique pickup cells assigned
+        let mut all_pickups: HashSet<IVec2> = HashSet::new();
+        for tick in 1..=50 {
+            let result = recycle_goals_core(&agents, &scheduler, &zones, &mut rng, tick);
+            for update in &result.updates {
+                if let TaskLeg::TravelEmpty(cell) = &update.task_leg {
+                    all_pickups.insert(*cell);
+                }
+            }
+        }
+
+        // With frozen agents excluded from used_goals, all 16 pickup cells
+        // should be reachable. Without the fix, only 4 would be available.
+        assert!(
+            all_pickups.len() > 4,
+            "frozen agents' goals should not block scheduling: only {} unique cells assigned",
+            all_pickups.len()
+        );
     }
 }

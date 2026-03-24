@@ -311,8 +311,6 @@
                         <select class="input-select" id="input-scheduler">
                             <option value="random">Random</option>
                             <option value="closest">Closest First</option>
-                            <option value="balanced">Balanced</option>
-                            <option value="roundtrip">Round-Trip</option>
                         </select>
                     </div>
 
@@ -337,80 +335,92 @@
                 <div class="section-content" id="fault-content">
                     <div class="panel-divider"></div>
 
-                    <!-- Fault toggle -->
-                    <div class="input-group checkbox-group">
-                        <label class="checkbox-label">
-                            <input type="checkbox" id="input-fault-enabled">
-                            <span>Enable fault injection</span>
-                        </label>
-                    </div>
+                    <div id="fault-config-panel">
+                        <!-- Add fault form (header) -->
+                        <div class="fault-add-form">
+                            <div class="input-group">
+                                <select class="input-select" id="input-fault-type" title="Choose fault type">
+                                    <option value="burst_failure" selected>Burst Failure</option>
+                                    <option value="wear_based">Wear-Based</option>
+                                    <option value="zone_outage">Zone Outage</option>
+                                    <option value="intermittent_fault">Intermittent</option>
+                                </select>
+                            </div>
 
-                    <div id="fault-config-panel" style="display:none">
-                        <!-- Scenario type -->
-                        <div class="input-group">
-                            <select class="input-select" id="input-fault-scenario-type" title="Choose a fault scenario">
-                                <option value="burst_failure" selected>Burst Failure</option>
-                                <option value="wear_based">Wear-Based</option>
-                                <option value="zone_outage">Zone Outage</option>
-                            </select>
+                            <!-- Burst params -->
+                            <div id="fl-params-burst" class="fl-params">
+                                <div class="input-group" title="Percentage of alive fleet to kill">
+                                    <label class="input-label">Kill %</label>
+                                    <div class="slider-row">
+                                        <input type="range" id="fl-burst-pct" min="1" max="100" value="20" step="1">
+                                        <span class="slider-value" id="fl-burst-pct-val">20%</span>
+                                    </div>
+                                    <span class="input-hint" id="fl-burst-abs">(= 4 robots)</span>
+                                </div>
+                                <div class="input-group" title="Tick at which burst fires">
+                                    <label class="input-label">At tick</label>
+                                    <div class="slider-row">
+                                        <input type="range" id="fl-burst-tick" min="1" max="500" value="100" step="1">
+                                        <span class="slider-value" id="fl-burst-tick-val">100</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Wear params -->
+                            <div id="fl-params-wear" class="fl-params" style="display:none">
+                                <div class="input-group" title="Weibull wear intensity">
+                                    <label class="input-label">Intensity</label>
+                                    <div class="preset-row" id="fl-wear-presets">
+                                        <button class="preset-btn" data-rate="low">Low</button>
+                                        <button class="preset-btn active" data-rate="medium">Med</button>
+                                        <button class="preset-btn" data-rate="high">High</button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Zone params -->
+                            <div id="fl-params-zone" class="fl-params" style="display:none">
+                                <div class="input-group" title="Tick at which zone latency fires">
+                                    <label class="input-label">At tick</label>
+                                    <div class="slider-row">
+                                        <input type="range" id="fl-zone-tick" min="1" max="500" value="100" step="1">
+                                        <span class="slider-value" id="fl-zone-tick-val">100</span>
+                                    </div>
+                                </div>
+                                <div class="input-group" title="Duration of latency (ticks)">
+                                    <label class="input-label">Duration</label>
+                                    <div class="slider-row">
+                                        <input type="range" id="fl-zone-dur" min="10" max="200" value="50" step="1">
+                                        <span class="slider-value" id="fl-zone-dur-val">50</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Intermittent params -->
+                            <div id="fl-params-intermittent" class="fl-params" style="display:none">
+                                <div class="input-group" title="Mean ticks between faults per agent">
+                                    <label class="input-label">MTBF (ticks)</label>
+                                    <div class="slider-row">
+                                        <input type="range" id="fl-inter-mtbf" min="10" max="500" value="80" step="1">
+                                        <span class="slider-value" id="fl-inter-mtbf-val">80</span>
+                                    </div>
+                                </div>
+                                <div class="input-group" title="Ticks agent is unavailable per fault">
+                                    <label class="input-label">Recovery (ticks)</label>
+                                    <div class="slider-row">
+                                        <input type="range" id="fl-inter-rec" min="1" max="100" value="15" step="1">
+                                        <span class="slider-value" id="fl-inter-rec-val">15</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <button class="btn-secondary" id="btn-add-fault" style="width:100%;margin-top:4px">+ ADD FAULT</button>
                         </div>
 
-                        <!-- Burst Failure params -->
-                        <div id="params-burst-failure" class="scenario-params">
-                            <div class="input-group" title="Percentage of fleet to kill (0-100%)">
-                                <label class="input-label" for="input-burst-kill-percent">Robots to kill</label>
-                                <div class="slider-row">
-                                    <input type="range" id="input-burst-kill-percent" min="1" max="100" value="20" step="1">
-                                    <span class="slider-value" id="val-burst-kill-percent">20%</span>
-                                </div>
-                                <span class="input-hint" id="burst-kill-abs">(= 3 robots)</span>
-                            </div>
-                            <div class="input-group" title="Tick at which robots are killed">
-                                <label class="input-label" for="input-burst-at-tick">At tick</label>
-                                <div class="slider-row">
-                                    <input type="range" id="input-burst-at-tick" min="1" max="500" value="100" step="1">
-                                    <span class="slider-value" id="val-burst-at-tick">100</span>
-                                </div>
-                            </div>
+                        <!-- Fault list (items appear here) -->
+                        <div id="fault-list-items" class="fault-list-items">
+                            <div class="fault-list-empty">No faults configured</div>
                         </div>
-
-                        <!-- Wear-Based params -->
-                        <div id="params-wear-based" class="scenario-params" style="display:none">
-                            <div class="input-group" title="How fast robots accumulate heat">
-                                <label class="input-label">Heat rate</label>
-                                <div class="preset-row" id="wear-rate-presets">
-                                    <button class="preset-btn" data-rate="low">Low</button>
-                                    <button class="preset-btn active" data-rate="medium">Med</button>
-                                    <button class="preset-btn" data-rate="high">High</button>
-                                </div>
-                            </div>
-                            <div class="input-group" title="Heat level triggering overheat (10-200). Lower = more failures.">
-                                <label class="input-label" for="input-wear-threshold">Overheat threshold</label>
-                                <div class="slider-row">
-                                    <input type="range" id="input-wear-threshold" min="10" max="200" value="80" step="1">
-                                    <span class="slider-value" id="val-wear-threshold">80</span>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Zone Outage params -->
-                        <div id="params-zone-outage" class="scenario-params" style="display:none">
-                            <div class="input-group" title="Tick at which zone latency is injected">
-                                <label class="input-label" for="input-zone-at-tick">At tick</label>
-                                <div class="slider-row">
-                                    <input type="range" id="input-zone-at-tick" min="1" max="500" value="100" step="1">
-                                    <span class="slider-value" id="val-zone-at-tick">100</span>
-                                </div>
-                            </div>
-                            <div class="input-group" title="How long the latency lasts (10-200 ticks)">
-                                <label class="input-label" for="input-zone-latency-duration">Latency duration</label>
-                                <div class="slider-row">
-                                    <input type="range" id="input-zone-latency-duration" min="10" max="200" value="50" step="1">
-                                    <span class="slider-value" id="val-zone-latency-duration">50</span>
-                                </div>
-                            </div>
-                        </div>
-
                     </div>
 
                     <!-- Manual fault injection -->
@@ -996,8 +1006,6 @@
                                 <div class="exp-check-grid" id="exp-schedulers">
                                     <label class="checkbox-label"><input type="checkbox" value="random" checked><span>Random</span></label>
                                     <label class="checkbox-label"><input type="checkbox" value="closest"><span>Closest</span></label>
-                                    <label class="checkbox-label"><input type="checkbox" value="balanced"><span>Balanced</span></label>
-                                    <label class="checkbox-label"><input type="checkbox" value="roundtrip"><span>Roundtrip</span></label>
                                 </div>
                             </div>
                             <div class="exp-check-group">

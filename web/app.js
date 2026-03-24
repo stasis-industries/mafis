@@ -408,18 +408,11 @@ class DemoController {
             await spotlight('input-duration', '<strong>Duration</strong> \u2014 300 ticks. Enough time to observe fault recovery.');
             await delay(STEP);
 
-            // 5. Fault Injection
+            // 5. Fault Injection — add a burst fault via the list
             expandSection('fault-content');
-            const faultCb = document.getElementById('input-fault-enabled');
-            if (faultCb) faultCb.checked = true;
-            sendCommand({ type: 'set_fault_enabled', value: true });
-            sendCommand({ type: 'set_fault_scenario_type', value: 'burst_failure' });
-            sendCommand({ type: 'set_scenario_param', key: 'burst_kill_percent', value: 20 });
-            sendCommand({ type: 'set_scenario_param', key: 'burst_at_tick', value: 100 });
-            const faultPanel = document.getElementById('fault-config-panel');
-            if (faultPanel) faultPanel.style.display = '';
-            const scenarioSel = document.getElementById('input-fault-scenario-type');
-            if (scenarioSel) scenarioSel.value = 'burst_failure';
+            faultList = [{ id: 'f_demo', type: 'burst_failure', kill_percent: 20, at_tick: 100 }];
+            renderFaultList();
+            syncFaultListToRust();
             await spotlight('fault-config-panel', '<strong>Fault Injection</strong> \u2014 Burst failure: 20% of agents die at tick 100.');
             await delay(STEP);
 
@@ -981,21 +974,16 @@ function showTimelinePopup(marker) {
         });
         html += '</div>';
     }
-    html += `<button class="popup-delete-btn" data-delete-tick="${tick}">DELETE</button>`;
+    html += `<button class="popup-seek-btn" data-seek-tick="${tick}">SEEK</button>`;
 
     popup.innerHTML = html;
-    // Bind delete button
-    const delBtn = popup.querySelector('.popup-delete-btn');
-    if (delBtn) {
-        delBtn.addEventListener('click', (e) => {
+    const seekBtn = popup.querySelector('.popup-seek-btn');
+    if (seekBtn) {
+        seekBtn.addEventListener('click', (e) => {
             e.stopPropagation();
-            const t = parseInt(delBtn.dataset.deleteTick);
-            sendCommand({ type: 'delete_fault', value: t });
+            const t = parseInt(seekBtn.dataset.seekTick);
+            sendCommand({ type: 'seek_to_tick', value: t });
             hideTimelinePopup();
-            // Force marker rebuild on next poll by resetting tracked counts
-            _tlScheduledEls = [];
-            _tlManualCount = -1;
-            lastFaultEventCount = -1;
         });
     }
     popup.style.display = 'block';
@@ -1317,9 +1305,7 @@ function updateUI(s) {
         'input-grid-width', 'input-grid-height', 'input-solver',
         'input-scheduler',
         'input-duration',
-        'input-fault-enabled', 'input-fault-scenario-type',
-        'input-burst-kill-percent', 'input-burst-at-tick',
-        'input-wear-threshold', 'input-zone-at-tick', 'input-zone-latency-duration',
+        'input-fault-type',
     ];
     configInputs.forEach(id => {
         const el = document.getElementById(id);
@@ -1662,10 +1648,12 @@ function updateFaultTimeline(s) {
 
         // Impact line: agents + optional throughput drop (only if meaningful)
         let impactHtml = `${fe.agents_affected} agent${fe.agents_affected !== 1 ? 's' : ''} affected`;
-        if (fe.throughput_before > 0 && Math.abs(fe.throughput_delta) > 0.001) {
+        if (fe.agents_affected > 0 && fe.throughput_before > 0 && Math.abs(fe.throughput_delta) > 0.01) {
             const dropPct = Math.abs((fe.throughput_delta / fe.throughput_before) * 100).toFixed(0);
-            const isNeg = fe.throughput_delta < 0;
-            impactHtml += ` <span class="ft-card-delta ${isNeg ? 'negative' : 'positive'}">${isNeg ? '\u2212' : '+'}${dropPct}%</span>`;
+            if (parseInt(dropPct) > 0) {
+                const isNeg = fe.throughput_delta < 0;
+                impactHtml += ` <span class="ft-card-delta ${isNeg ? 'negative' : 'positive'}">${isNeg ? '\u2212' : '+'}${dropPct}%</span>`;
+            }
         }
 
         card.innerHTML = `
@@ -1677,7 +1665,6 @@ function updateFaultTimeline(s) {
             <div class="ft-card-status ${recClass}">${recText}</div>
             <div class="ft-card-actions">
                 <button class="ft-btn" data-action="seek" data-tick="${fe.tick}">SEEK</button>
-                <button class="ft-btn ft-btn-delete" data-action="delete" data-tick="${fe.tick}">DELETE</button>
             </div>
         `;
         list.appendChild(card);
@@ -1698,12 +1685,6 @@ function updateFaultTimeline(s) {
         });
     });
 
-    list.querySelectorAll('.ft-btn[data-action="delete"]').forEach(btn => {
-        btn.addEventListener('click', () => {
-            const tick = parseInt(btn.dataset.tick);
-            sendCommand({ type: 'delete_fault', value: tick });
-        });
-    });
 }
 
 // (Bottom fault timeline section removed — now handled by unified timeline bar)
@@ -3990,29 +3971,39 @@ function bindTopologyPresets() {
 // Fault scenario — per-scenario params
 // ---------------------------------------------------------------------------
 
-function showScenarioParams(type) {
-    document.querySelectorAll('.scenario-params').forEach(el => el.style.display = 'none');
-    const panel = document.getElementById('params-' + type.replace(/_/g, '-'));
+// ---------------------------------------------------------------------------
+// Multi-fault list
+// ---------------------------------------------------------------------------
+
+let faultList = [];
+let faultIdCounter = 0;
+
+function getAgentCount() {
+    return parseInt(document.getElementById('input-agents')?.value || 20);
+}
+
+function getDuration() {
+    return parseInt(document.getElementById('input-duration')?.value || 500);
+}
+
+function showFaultParams(type) {
+    document.querySelectorAll('.fl-params').forEach(el => el.style.display = 'none');
+    const map = { burst_failure: 'fl-params-burst', wear_based: 'fl-params-wear', zone_outage: 'fl-params-zone', intermittent_fault: 'fl-params-intermittent' };
+    const panel = document.getElementById(map[type]);
     if (panel) panel.style.display = '';
 }
 
-function updateBurstAbsLabel() {
-    const pct = parseFloat(document.getElementById('input-burst-kill-percent')?.value || 20);
-    // Use live agent count from bridge state if available, fall back to slider
-    let agents = 0;
-    try {
-        const raw = typeof get_simulation_state === 'function' ? get_simulation_state() : null;
-        if (raw) { const s = JSON.parse(raw); agents = s.num_agents || 0; }
-    } catch { /* ignore */ }
-    if (!agents) agents = parseInt(document.getElementById('input-agents')?.value || 20);
+function updateFlBurstAbs() {
+    const pct = parseFloat(document.getElementById('fl-burst-pct')?.value || 20);
+    const agents = getAgentCount();
     const abs = Math.max(1, Math.round(agents * pct / 100));
-    const label = document.getElementById('burst-kill-abs');
+    const label = document.getElementById('fl-burst-abs');
     if (label) label.textContent = `(= ${abs} robot${abs !== 1 ? 's' : ''})`;
 }
 
-function clampTickSliders() {
-    const duration = parseInt(document.getElementById('input-duration')?.value || 500);
-    ['input-burst-at-tick', 'input-zone-at-tick'].forEach(id => {
+function clampFlTickSliders() {
+    const duration = getDuration();
+    ['fl-burst-tick', 'fl-zone-tick'].forEach(id => {
         const el = document.getElementById(id);
         if (el) {
             el.max = duration;
@@ -4021,70 +4012,178 @@ function clampTickSliders() {
     });
 }
 
-function bindFaultScenario() {
-    // Master toggle
-    const toggle = document.getElementById('input-fault-enabled');
-    const panel = document.getElementById('fault-config-panel');
-    if (toggle && panel) {
-        toggle.addEventListener('change', () => {
-            panel.style.display = toggle.checked ? '' : 'none';
-            sendCommand({ type: 'set_fault_enabled', value: toggle.checked });
-        });
+function buildFaultItemFromForm() {
+    const type = document.getElementById('input-fault-type').value;
+    const item = { type };
+    switch (type) {
+        case 'burst_failure':
+            item.kill_percent = parseFloat(document.getElementById('fl-burst-pct').value);
+            item.at_tick = parseInt(document.getElementById('fl-burst-tick').value);
+            break;
+        case 'wear_based': {
+            const active = document.querySelector('#fl-wear-presets .preset-btn.active');
+            item.heat_rate = active ? active.dataset.rate : 'medium';
+            break;
+        }
+        case 'zone_outage':
+            item.at_tick = parseInt(document.getElementById('fl-zone-tick').value);
+            item.duration = parseInt(document.getElementById('fl-zone-dur').value);
+            break;
+        case 'intermittent_fault':
+            item.mtbf = parseInt(document.getElementById('fl-inter-mtbf').value);
+            item.recovery = parseInt(document.getElementById('fl-inter-rec').value);
+            break;
+    }
+    return item;
+}
+
+function addFault() {
+    const type = document.getElementById('input-fault-type').value;
+
+    // Enforce: max 1 wear, max 1 intermittent
+    if (type === 'wear_based' && faultList.some(f => f.type === 'wear_based')) return;
+    if (type === 'intermittent_fault' && faultList.some(f => f.type === 'intermittent_fault')) return;
+
+    const item = buildFaultItemFromForm();
+
+    // Auto-merge: same type + same tick → combine instead of creating duplicate
+    if (type === 'burst_failure') {
+        const existing = faultList.find(f => f.type === 'burst_failure' && f.at_tick === item.at_tick);
+        if (existing) {
+            existing.kill_percent = Math.min(100, existing.kill_percent + item.kill_percent);
+            renderFaultList();
+            syncFaultListToRust();
+            return;
+        }
+        // Cap: total burst % across all ticks can't meaningfully exceed 100% per tick
+        item.kill_percent = Math.min(100, item.kill_percent);
+    }
+    if (type === 'zone_outage') {
+        const existing = faultList.find(f => f.type === 'zone_outage' && f.at_tick === item.at_tick);
+        if (existing) {
+            existing.duration = Math.max(existing.duration, item.duration);
+            renderFaultList();
+            syncFaultListToRust();
+            return;
+        }
     }
 
-    // Scenario type dropdown
-    const typeEl = document.getElementById('input-fault-scenario-type');
+    item.id = 'f_' + (++faultIdCounter);
+    faultList.push(item);
+    renderFaultList();
+    syncFaultListToRust();
+}
+
+function removeFault(id) {
+    faultList = faultList.filter(f => f.id !== id);
+    renderFaultList();
+    syncFaultListToRust();
+}
+
+function syncFaultListToRust() {
+    sendCommand({ type: 'set_fault_list', value: JSON.stringify(faultList) });
+}
+
+function faultBadgeClass(type) {
+    return { burst_failure: 'burst', wear_based: 'wear', zone_outage: 'zone', intermittent_fault: 'intermittent' }[type] || 'burst';
+}
+
+function faultBadgeLabel(type) {
+    return { burst_failure: 'BURST', wear_based: 'WEAR', zone_outage: 'ZONE', intermittent_fault: 'INTER' }[type] || type;
+}
+
+function faultSummary(item) {
+    switch (item.type) {
+        case 'burst_failure': return `${item.kill_percent}% at t=${item.at_tick}`;
+        case 'wear_based': return `${(item.heat_rate || 'medium')} intensity`;
+        case 'zone_outage': return `${item.duration}t at t=${item.at_tick}`;
+        case 'intermittent_fault': return `MTBF=${item.mtbf} rec=${item.recovery}t`;
+        default: return '';
+    }
+}
+
+function renderFaultList() {
+    const container = document.getElementById('fault-list-items');
+    if (!container) return;
+    container.innerHTML = '';
+
+    if (faultList.length === 0) {
+        container.innerHTML = '<div class="fault-list-empty">No faults configured</div>';
+        updateFaultTypeOptions();
+        return;
+    }
+
+    faultList.forEach(item => {
+        const row = document.createElement('div');
+        row.className = 'fault-item-row';
+        row.innerHTML = `
+            <span class="fault-type-badge ${faultBadgeClass(item.type)}">${faultBadgeLabel(item.type)}</span>
+            <span class="fault-item-summary">${faultSummary(item)}</span>
+            <button class="fault-item-remove" title="Remove">&times;</button>
+        `;
+        row.querySelector('.fault-item-remove').addEventListener('click', () => removeFault(item.id));
+        container.appendChild(row);
+    });
+
+    updateFaultTypeOptions();
+}
+
+function updateFaultTypeOptions() {
+    const sel = document.getElementById('input-fault-type');
+    if (!sel) return;
+    const hasWear = faultList.some(f => f.type === 'wear_based');
+    const hasInter = faultList.some(f => f.type === 'intermittent_fault');
+    for (const opt of sel.options) {
+        if (opt.value === 'wear_based') opt.disabled = hasWear;
+        if (opt.value === 'intermittent_fault') opt.disabled = hasInter;
+    }
+    // If current selection is disabled, switch to burst
+    if (sel.options[sel.selectedIndex]?.disabled) {
+        sel.value = 'burst_failure';
+        showFaultParams('burst_failure');
+    }
+}
+
+function bindFaultList() {
+    // Type dropdown — switch param forms
+    const typeEl = document.getElementById('input-fault-type');
     if (typeEl) {
-        typeEl.addEventListener('change', () => {
-            showScenarioParams(typeEl.value);
-            sendCommand({ type: 'set_fault_scenario_type', value: typeEl.value });
-        });
+        typeEl.addEventListener('change', () => showFaultParams(typeEl.value));
     }
 
-    // Burst Failure params
-    bindSlider('input-burst-kill-percent', 'val-burst-kill-percent', v => {
-        document.getElementById('val-burst-kill-percent').textContent = v + '%';
-        sendCommand({ type: 'set_scenario_param', key: 'burst_kill_percent', value: parseFloat(v) });
-        updateBurstAbsLabel();
+    // Burst params
+    bindSlider('fl-burst-pct', 'fl-burst-pct-val', v => {
+        document.getElementById('fl-burst-pct-val').textContent = v + '%';
+        updateFlBurstAbs();
     });
-    bindSlider('input-burst-at-tick', 'val-burst-at-tick', v => {
-        sendCommand({ type: 'set_scenario_param', key: 'burst_at_tick', value: parseInt(v) });
-    });
+    bindSlider('fl-burst-tick', 'fl-burst-tick-val', () => {});
 
-    // Wear-Based params — heat rate presets
-    document.querySelectorAll('#wear-rate-presets .preset-btn').forEach(btn => {
+    // Wear presets
+    document.querySelectorAll('#fl-wear-presets .preset-btn').forEach(btn => {
         btn.addEventListener('click', () => {
-            document.querySelectorAll('#wear-rate-presets .preset-btn').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('#fl-wear-presets .preset-btn').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
-            const rateMap = { low: 0, medium: 1, high: 2 };
-            sendCommand({ type: 'set_scenario_param', key: 'wear_heat_rate', value: rateMap[btn.dataset.rate] || 1 });
         });
     });
-    bindSlider('input-wear-threshold', 'val-wear-threshold', v => {
-        sendCommand({ type: 'set_scenario_param', key: 'wear_threshold', value: parseFloat(v) });
-    });
 
-    // Zone Outage params
-    bindSlider('input-zone-at-tick', 'val-zone-at-tick', v => {
-        sendCommand({ type: 'set_scenario_param', key: 'zone_at_tick', value: parseInt(v) });
-    });
-    bindSlider('input-zone-latency-duration', 'val-zone-latency-duration', v => {
-        sendCommand({ type: 'set_scenario_param', key: 'zone_latency_duration', value: parseInt(v) });
-    });
+    // Zone params
+    bindSlider('fl-zone-tick', 'fl-zone-tick-val', () => {});
+    bindSlider('fl-zone-dur', 'fl-zone-dur-val', () => {});
 
-    // Update absolute label and tick slider max on agent/duration change
-    const agentInput = document.getElementById('input-agents');
-    if (agentInput) {
-        agentInput.addEventListener('input', updateBurstAbsLabel);
-    }
-    const durationInput = document.getElementById('input-duration');
-    if (durationInput) {
-        durationInput.addEventListener('input', clampTickSliders);
-    }
+    // Intermittent params
+    bindSlider('fl-inter-mtbf', 'fl-inter-mtbf-val', () => {});
+    bindSlider('fl-inter-rec', 'fl-inter-rec-val', () => {});
+
+    // ADD button
+    document.getElementById('btn-add-fault')?.addEventListener('click', addFault);
+
+    // Update burst abs label and tick sliders on agent/duration change
+    document.getElementById('input-agents')?.addEventListener('input', () => { updateFlBurstAbs(); clampFlTickSliders(); });
+    document.getElementById('input-duration')?.addEventListener('input', clampFlTickSliders);
 
     // Initial state
-    updateBurstAbsLabel();
-    clampTickSliders();
+    updateFlBurstAbs();
+    clampFlTickSliders();
 }
 
 // ---------------------------------------------------------------------------
@@ -4094,7 +4193,7 @@ function bindFaultScenario() {
 function bindControls() {
     // Scenario presets
     bindTopologyPresets();
-    bindFaultScenario();
+    bindFaultList();
 
     // Toolbar buttons
     document.getElementById('btn-start').addEventListener('click', () => {
@@ -4224,7 +4323,7 @@ function bindControls() {
             document.querySelectorAll('#duration-presets .preset-btn').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
             sendCommand({ type: 'set_duration', value: d });
-            clampTickSliders();
+            clampFlTickSliders();
         });
     });
     bindNumberInput('input-duration', v => {
@@ -4233,7 +4332,7 @@ function bindControls() {
             b.classList.toggle('active', parseInt(b.dataset.duration) === d);
         });
         sendCommand({ type: 'set_duration', value: d });
-        clampTickSliders();
+        clampFlTickSliders();
     });
 
     // Visualization config
@@ -4528,9 +4627,10 @@ function syncSliderDisplay(sliderId, valId, value) {
 // Experiment Mode — Full-Page View
 // ---------------------------------------------------------------------------
 
-// Experiment Web Worker — runs WASM experiments off the main thread
-let experimentWorker = null;
-let experimentReject = null; // reject function to unblock runExpAsync on cancel
+// Experiment Web Workers — persistent warm pool, work-stealing dispatch
+let workerPool = [];          // warm workers, kept alive between runs
+let experimentReject = null;  // reject function to cancel a running experiment
+let cachedWasmModule = null;  // compiled module cached across runs (compile once, instantiate N times)
 
 // State
 let experimentData = null;       // { summaries: [...], runs?: [...] }
@@ -4558,6 +4658,100 @@ const EXPERIMENT_METRICS = [
     { key: 'solver_step_us', label: '\u00b5s', decimals: 1 },
     { key: 'wall_time_ms', label: 'ms', decimals: 0 },
 ];
+
+// ---------------------------------------------------------------------------
+// Statistical summary computation (mirrors Rust compute_stat_summary exactly)
+// ---------------------------------------------------------------------------
+
+// Two-tailed t-critical values for 95% CI, df 1..30 (same table as stats.rs)
+const T_CRITICAL_95 = [
+    12.706, 4.303, 3.182, 2.776, 2.571,  // df 1-5
+    2.447, 2.365, 2.306, 2.262, 2.228,   // df 6-10
+    2.201, 2.179, 2.160, 2.145, 2.131,   // df 11-15
+    2.120, 2.110, 2.101, 2.093, 2.086,   // df 16-20
+    2.080, 2.074, 2.069, 2.064, 2.060,   // df 21-25
+    2.056, 2.052, 2.048, 2.045, 2.042,   // df 26-30
+];
+
+function computeStatSummaryJS(values) {
+    const v = values.filter(x => x !== null && x !== undefined && !isNaN(x));
+    const n = v.length;
+    if (n === 0) return { n: 0, mean: 0, std: 0, ci95_lo: 0, ci95_hi: 0, min: 0, max: 0 };
+    const mean = v.reduce((a, b) => a + b, 0) / n;
+    const min = Math.min(...v);
+    const max = Math.max(...v);
+    const std = n > 1 ? Math.sqrt(v.reduce((a, b) => a + (b - mean) ** 2, 0) / (n - 1)) : 0;
+    let ci95_lo, ci95_hi;
+    if (n > 1) {
+        const df = n - 1;
+        const t = df <= 30 ? T_CRITICAL_95[df - 1] : 1.96;
+        const margin = t * std / Math.sqrt(n);
+        ci95_lo = mean - margin;
+        ci95_hi = mean + margin;
+    } else {
+        ci95_lo = mean;
+        ci95_hi = mean;
+    }
+    return { n, mean, std, ci95_lo, ci95_hi, min, max };
+}
+
+// Metric mapping: run JSON key -> summary JSON key
+const METRIC_MAP = [
+    ['avg_throughput', 'throughput'],
+    ['total_tasks', 'total_tasks'],
+    ['idle_ratio', 'idle_ratio'],
+    ['fault_tolerance', 'fault_tolerance'],
+    ['nrr', 'nrr'],
+    ['critical_time', 'critical_time'],
+    ['deficit_recovery', 'deficit_recovery'],
+    ['throughput_recovery', 'throughput_recovery'],
+    ['propagation_rate', 'propagation_rate'],
+    ['survival_rate', 'survival_rate'],
+    ['impacted_area', 'impacted_area'],
+    ['deficit_integral', 'deficit_integral'],
+    ['solver_step_avg_us', 'solver_step_us'],
+    ['wall_time_ms', 'wall_time_ms'],
+];
+
+function computeSummariesJS(runs) {
+    // Group by config key (excluding seed) -- mirrors Rust BTreeMap grouping
+    const groups = {};
+    for (const run of runs) {
+        const c = run.config;
+        const key = `${c.solver}|${c.topology}|${c.scenario}|${c.scheduler}|${c.num_agents}`;
+        if (!groups[key]) groups[key] = [];
+        groups[key].push(run);
+    }
+    // Sort keys for deterministic order (BTreeMap equivalent)
+    return Object.keys(groups).sort().map(key => {
+        const group = groups[key];
+        const first = group[0].config;
+        const summary = {
+            solver: first.solver,
+            topology: first.topology,
+            scenario: first.scenario,
+            scheduler: first.scheduler,
+            num_agents: first.num_agents,
+            num_seeds: group.length,
+        };
+        for (const [runKey, summaryKey] of METRIC_MAP) {
+            summary[summaryKey] = computeStatSummaryJS(group.map(r => r.faulted[runKey]));
+        }
+        return summary;
+    });
+}
+
+function mergeWorkerResults(workerResults) {
+    const allRuns = [];
+    for (const result of workerResults) {
+        if (!result?.json) continue;
+        try {
+            const parsed = JSON.parse(result.json);
+            if (Array.isArray(parsed.runs)) allRuns.push(...parsed.runs);
+        } catch { /* skip unparseable partial results */ }
+    }
+    return allRuns;
+}
 
 const EXPERIMENT_SCENARIOS = {
     none: null,
@@ -4675,7 +4869,7 @@ const EXPERIMENT_PRESETS = {
         agents: '10, 20, 40, 80', seeds: '42, 123, 456, 789, 1024', ticks: 500,
     },
     scheduler: {
-        solvers: ['pibt'], topologies: ['warehouse-medium'], schedulers: ['random', 'closest', 'balanced', 'roundtrip'],
+        solvers: ['pibt'], topologies: ['warehouse-medium'], schedulers: ['random', 'closest'],
         scenarios: ['none', 'burst_20', 'burst_50', 'wear_medium', 'wear_high', 'zone'],
         agents: '40', seeds: '42, 123, 456, 789, 1024', ticks: 500,
     },
@@ -4937,14 +5131,9 @@ function initExperimentMode() {
         if (!experimentRunning) runExpAsync();
     });
 
-    // Cancel button — terminates the worker immediately
+    // Cancel button — stops dispatching new work; in-flight runOne finishes then workers go idle
     document.getElementById('btn-exp-cancel')?.addEventListener('click', () => {
         experimentCancelled = true;
-        if (experimentWorker) {
-            experimentWorker.terminate();
-            experimentWorker = null;
-        }
-        // Unblock the runExpAsync promise so it hits the catch/finally
         if (experimentReject) {
             experimentReject(new Error('Cancelled'));
             experimentReject = null;
@@ -5002,10 +5191,6 @@ function initExperimentMode() {
     document.getElementById('btn-exp-new')?.addEventListener('click', () => {
         if (experimentRunning) {
             experimentCancelled = true;
-            if (experimentWorker) {
-                experimentWorker.terminate();
-                experimentWorker = null;
-            }
             if (experimentReject) {
                 experimentReject(new Error('Cancelled'));
                 experimentReject = null;
@@ -5185,6 +5370,39 @@ function padlockFinalize() {
 }
 
 // ---------------------------------------------------------------------------
+// Warm worker pool management
+// ---------------------------------------------------------------------------
+
+// Initialize the pool once. Compiles WASM (if not cached) then spawns and
+// inits one worker per logical CPU. Subsequent calls are instant no-ops.
+async function ensureWorkerPool() {
+    if (workerPool.length > 0) return;
+
+    if (!cachedWasmModule) {
+        const wasmUrl = new URL('mafis_bg.wasm', window.location.href).href;
+        cachedWasmModule = await WebAssembly.compileStreaming(fetch(wasmUrl));
+    }
+
+    const size = navigator.hardwareConcurrency || 4;
+    const workers = Array.from({ length: size }, () => new Worker('experiment-worker.js'));
+    await Promise.all(workers.map(worker => new Promise((resolve, reject) => {
+        worker.onerror = (ev) => { ev.preventDefault(); reject(new Error(ev.message || 'Worker init failed')); };
+        worker.onmessage = (e) => {
+            if (e.data.type === 'ready') resolve();
+            else if (e.data.type === 'error') reject(new Error(e.data.message));
+        };
+        worker.postMessage({ type: 'init', module: cachedWasmModule });
+    })));
+    workerPool = workers;
+}
+
+// Terminate pool on page close to free OS threads
+window.addEventListener('beforeunload', () => {
+    for (const w of workerPool) w.terminate();
+    workerPool = [];
+});
+
+// ---------------------------------------------------------------------------
 // Async experiment runner
 // ---------------------------------------------------------------------------
 
@@ -5206,7 +5424,7 @@ async function runExpAsync() {
 
     experimentRunning = true;
     experimentCancelled = false;
-    experimentData = null; // Clear stale results from previous experiment
+    experimentData = null;
     setExpStage('running');
     const _expBtnRef = document.getElementById('btn-exp-mode');
     if (_expBtnRef) _expBtnRef.classList.add('exp-running');
@@ -5219,120 +5437,136 @@ async function runExpAsync() {
     const fillEl = document.getElementById('exp-progress-fill');
     const timeEl = document.getElementById('exp-progress-time');
 
-    // Initialize padlock matrix
     padlockInit(configs);
 
-    // Spawn Web Worker for off-thread computation
-    experimentWorker = new Worker('experiment-worker.js');
+    // Ensure worker pool is warm (no-op on second+ run — skips spawn + WASM init entirely)
+    if (workerPool.length === 0) {
+        if (fractionEl) fractionEl.textContent = cachedWasmModule ? 'Initializing workers...' : 'Compiling WASM...';
+        await ensureWorkerPool();
+    }
 
-    // Catch worker crashes (WASM traps, OOM) — without this the promise hangs forever
-    experimentWorker.onerror = (ev) => {
-        ev.preventDefault();
-        const msg = ev.message || 'Worker crashed';
-        if (experimentReject) {
-            experimentReject(new Error(msg));
-            experimentReject = null;
+    const numWorkers = Math.min(workerPool.length, total);
+
+    // Work-stealing queue cursor — each worker pulls the next available config index.
+    // Unlike round-robin partitioning, fast workers keep running instead of sitting idle.
+    let queueIdx = 0;
+    let completedCount = 0;
+    const allRuns = []; // populated incrementally so partial salvage works on cancel/error
+
+    function updateProgressUI() {
+        const pct = ((completedCount / total) * 100).toFixed(0);
+        if (fractionEl) fractionEl.textContent = `${completedCount} / ${total}`;
+        if (pctEl) pctEl.textContent = `${pct}%`;
+        if (fillEl) fillEl.style.width = pct + '%';
+        if (timeEl) {
+            const elapsed = ((performance.now() - startTime) / 1000).toFixed(1);
+            const eta = completedCount > 0
+                ? (((performance.now() - startTime) / completedCount) * (total - completedCount) / 1000).toFixed(0)
+                : '--';
+            timeEl.textContent = `${elapsed}s elapsed \u2014 ~${eta}s remaining`;
         }
-    };
+    }
 
     try {
-        // Wait for WASM init in worker
-        await new Promise((resolve, reject) => {
-            experimentReject = reject;
-            experimentWorker.onmessage = (e) => {
-                if (e.data.type === 'ready') { experimentReject = null; resolve(); }
-                else if (e.data.type === 'error') { experimentReject = null; reject(new Error(e.data.message)); }
-            };
-            // Pass absolute WASM URL so the Worker can fetch it correctly
-            const wasmUrl = new URL('mafis_bg.wasm', window.location.href).href;
-            experimentWorker.postMessage({ type: 'init', wasmUrl });
-        });
+        // Cancel token — rejecting this races against worker promises
+        let cancelReject;
+        const cancelPromise = new Promise((_, rej) => { cancelReject = rej; });
+        experimentReject = cancelReject;
 
-        // Send all configs — worker runs the loop and posts progress
-        const resultPromise = new Promise((resolve, reject) => {
-            experimentReject = reject;
-            experimentWorker.onmessage = (e) => {
-                const msg = e.data;
-                switch (msg.type) {
-                    case 'progress': {
-                        const i = msg.index + 1;
-                        const pct = ((i / total) * 100).toFixed(0);
-                        if (fractionEl) fractionEl.textContent = `${i} / ${total}`;
-                        if (pctEl) pctEl.textContent = `${pct}%`;
-                        if (fillEl) fillEl.style.width = pct + '%';
-                        if (timeEl) {
-                            const elapsed = ((performance.now() - startTime) / 1000).toFixed(1);
-                            const eta = i > 0 ? (((performance.now() - startTime) / i) * (total - i) / 1000).toFixed(0) : '--';
-                            timeEl.textContent = `${elapsed}s elapsed \u2014 ~${eta}s remaining`;
-                        }
-                        // Advance padlock animation
-                        if (i < total) padlockAdvance();
-                        break;
-                    }
-                    case 'done':
-                        experimentReject = null;
-                        resolve(msg);
-                        break;
-                    case 'cancelled':
-                        experimentReject = null;
-                        resolve({ json: null, partial: true });
-                        break;
-                    case 'error':
-                        experimentReject = null;
-                        reject(new Error(msg.message));
-                        break;
+        if (fractionEl) fractionEl.textContent = `0 / ${total}`;
+
+        // Work-stealing dispatch: each worker calls sendNext() when it finishes a job.
+        // Workers are from the warm pool — no spawn or WASM init overhead here.
+        await Promise.race([
+            Promise.allSettled(workerPool.slice(0, numWorkers).map(worker => new Promise((resolve, reject) => {
+                function sendNext() {
+                    if (experimentCancelled || queueIdx >= total) { resolve(); return; }
+                    const idx = queueIdx++;
+                    worker.postMessage({ type: 'runOne', config: configs[idx], index: idx });
                 }
-            };
-            experimentWorker.postMessage({ type: 'runAll', configs });
-        });
 
-        const result = await resultPromise;
+                worker.onerror = (ev) => { ev.preventDefault(); reject(new Error(ev.message || 'Worker crashed')); };
+                worker.onmessage = (e) => {
+                    const msg = e.data;
+                    if (msg.type === 'runOneDone') {
+                        completedCount++;
+                        updateProgressUI();
+                        if (completedCount < total) padlockAdvance();
+                        try {
+                            const parsed = JSON.parse(msg.json);
+                            if (Array.isArray(parsed.runs)) allRuns.push(...parsed.runs);
+                        } catch {}
+                        sendNext(); // pull next config from queue
+                    } else if (msg.type === 'error') {
+                        reject(new Error(msg.message));
+                    }
+                };
+
+                sendNext(); // kick off first job for this worker
+            }))),
+            cancelPromise,
+        ]);
 
         padlockFinalize();
-
         const elapsed = ((performance.now() - startTime) / 1000).toFixed(1);
 
-        if (result.partial || !result.json) {
-            if (fractionEl) fractionEl.textContent = 'Cancelled';
+        if (allRuns.length > 0) {
+            experimentData = {
+                total_runs: allRuns.length,
+                wall_time_total_ms: Math.round(performance.now() - startTime),
+                runs: allRuns,
+                summaries: computeSummariesJS(allRuns),
+            };
+        }
+
+        const threadStr = numWorkers > 1 ? ` (${numWorkers} threads)` : '';
+        if (allRuns.length < total) {
+            if (fractionEl) fractionEl.textContent = `${allRuns.length} / ${total}`;
             if (pctEl) pctEl.textContent = '';
-            // Try to parse partial results
-            if (result.json) {
-                try {
-                    experimentData = JSON.parse(result.json);
-                    setExpStage('results');
-                    renderExpResults();
-                } catch { /* ignore partial parse failures */ }
-            }
+            if (experimentData) { setExpStage('results'); renderExpResults(); }
             const status = document.getElementById('exp-status');
-            if (status) status.textContent = `Cancelled after ${elapsed}s`;
+            if (status) status.textContent = `Partial: ${allRuns.length}/${total} runs in ${elapsed}s${threadStr}`;
         } else {
             if (fractionEl) fractionEl.textContent = `${total} / ${total}`;
             if (pctEl) pctEl.textContent = '100%';
             if (fillEl) fillEl.style.width = '100%';
-
-            experimentData = JSON.parse(result.json);
             setExpStage('results');
             renderExpResults();
             const status = document.getElementById('exp-status');
-            if (status) status.textContent = `Done: ${total} runs in ${elapsed}s`;
+            if (status) status.textContent = `Done: ${total} runs in ${elapsed}s${threadStr}`;
         }
     } catch (err) {
         padlockFinalize();
+
+        // Salvage partial results collected so far (allRuns is populated incrementally)
+        if (allRuns.length > 0) {
+            experimentData = {
+                total_runs: allRuns.length,
+                wall_time_total_ms: Math.round(performance.now() - startTime),
+                runs: allRuns,
+                summaries: computeSummariesJS(allRuns),
+            };
+        }
+
         const status = document.getElementById('exp-status');
         if (experimentCancelled) {
             const elapsed = ((performance.now() - startTime) / 1000).toFixed(1);
             if (status) status.textContent = `Cancelled after ${elapsed}s`;
             if (fractionEl) fractionEl.textContent = 'Cancelled';
             if (pctEl) pctEl.textContent = '';
+            if (experimentData) { setExpStage('results'); renderExpResults(); }
+            else setExpStage('config');
         } else {
             if (status) status.textContent = `Error: ${err.message}`;
+            setExpStage('config');
         }
-        setExpStage('config');
     } finally {
-        // Terminate worker to free memory
-        if (experimentWorker) {
-            experimentWorker.terminate();
-            experimentWorker = null;
+        // Null out handlers on all pool workers. Workers stay alive (warm pool) but
+        // stale runOneDone messages from a cancelled/errored run must not mix into
+        // the next run's message stream.
+        for (const w of workerPool) {
+            w.onmessage = null;
+            w.onerror = null;
         }
         experimentReject = null;
         experimentRunning = false;
@@ -5730,83 +5964,34 @@ function simulateIn3D(idx) {
 function configureFaultFromScenarioLabel(label) {
     if (!label || label === 'none') {
         // Disable faults
-        sendCommand({ type: 'set_fault_enabled', value: false });
-        const toggle = document.getElementById('input-fault-enabled');
-        if (toggle) toggle.checked = false;
-        const panel = document.getElementById('fault-config-panel');
-        if (panel) panel.style.display = 'none';
+        faultList = [];
+        renderFaultList();
+        syncFaultListToRust();
         return;
     }
 
-    // Enable faults
-    sendCommand({ type: 'set_fault_enabled', value: true });
-    const toggle = document.getElementById('input-fault-enabled');
-    if (toggle) toggle.checked = true;
-    const panel = document.getElementById('fault-config-panel');
-    if (panel) panel.style.display = '';
-
-    const typeEl = document.getElementById('input-fault-scenario-type');
+    // Build fault list from scenario label
+    faultList = [];
 
     if (label.startsWith('burst_')) {
-        // "burst_20pct" → kill_percent=20
         const match = label.match(/^burst_(\d+)pct$/);
         const killPct = match ? parseInt(match[1]) : 20;
-
-        if (typeEl) typeEl.value = 'burst_failure';
-        sendCommand({ type: 'set_fault_scenario_type', value: 'burst_failure' });
-        showScenarioParams('burst_failure');
-
-        sendCommand({ type: 'set_scenario_param', key: 'burst_kill_percent', value: killPct });
-        syncSliderDisplay('input-burst-kill-percent', 'val-burst-kill-percent', killPct);
-        const pctLabel = document.getElementById('val-burst-kill-percent');
-        if (pctLabel) pctLabel.textContent = killPct + '%';
-        updateBurstAbsLabel();
-
-        // burst_at_tick defaults to 100 (matching EXPERIMENT_SCENARIOS)
-        sendCommand({ type: 'set_scenario_param', key: 'burst_at_tick', value: 100 });
-        syncSliderDisplay('input-burst-at-tick', 'val-burst-at-tick', 100);
-
+        faultList.push({ id: 'f_' + (++faultIdCounter), type: 'burst_failure', kill_percent: killPct, at_tick: 100 });
     } else if (label.startsWith('wear_')) {
-        // "wear_medium", "wear_high", "wear_low"
         const rate = label.replace('wear_', '');
-        const rateMap = { low: 0, medium: 1, high: 2 };
-        const rateVal = rateMap[rate] ?? 1;
-        const thresholdMap = { low: 100, medium: 80, high: 60 };
-        const threshold = thresholdMap[rate] ?? 80;
-
-        if (typeEl) typeEl.value = 'wear_based';
-        sendCommand({ type: 'set_fault_scenario_type', value: 'wear_based' });
-        showScenarioParams('wear_based');
-
-        sendCommand({ type: 'set_scenario_param', key: 'wear_heat_rate', value: rateVal });
-        // Highlight the correct rate button
-        document.querySelectorAll('.wear-rate-btn').forEach(btn => {
-            btn.classList.toggle('active', btn.dataset.rate === rate);
-        });
-
-        sendCommand({ type: 'set_scenario_param', key: 'wear_threshold', value: threshold });
-        syncSliderDisplay('input-wear-threshold', 'val-wear-threshold', threshold);
-
+        faultList.push({ id: 'f_' + (++faultIdCounter), type: 'wear_based', heat_rate: rate || 'medium' });
     } else if (label.startsWith('zone_')) {
-        // "zone_50t" → duration=50
         const match = label.match(/^zone_(\d+)t$/);
         const duration = match ? parseInt(match[1]) : 50;
-
-        if (typeEl) typeEl.value = 'zone_outage';
-        sendCommand({ type: 'set_fault_scenario_type', value: 'zone_outage' });
-        showScenarioParams('zone_outage');
-
-        sendCommand({ type: 'set_scenario_param', key: 'zone_at_tick', value: 100 });
-        syncSliderDisplay('input-zone-at-tick', 'val-zone-at-tick', 100);
-        sendCommand({ type: 'set_scenario_param', key: 'zone_latency_duration', value: duration });
-        syncSliderDisplay('input-zone-latency-duration', 'val-zone-latency-duration', duration);
-
+        faultList.push({ id: 'f_' + (++faultIdCounter), type: 'zone_outage', at_tick: 100, duration });
+    } else if (label.startsWith('intermittent')) {
+        faultList.push({ id: 'f_' + (++faultIdCounter), type: 'intermittent_fault', mtbf: 80, recovery: 15 });
     } else {
-        // Unknown scenario type (e.g. intermittent) — enable faults with burst as default
-        if (typeEl) typeEl.value = 'burst_failure';
-        sendCommand({ type: 'set_fault_scenario_type', value: 'burst_failure' });
-        showScenarioParams('burst_failure');
+        faultList.push({ id: 'f_' + (++faultIdCounter), type: 'burst_failure', kill_percent: 20, at_tick: 100 });
     }
+
+    renderFaultList();
+    syncFaultListToRust();
 }
 
 // ---------------------------------------------------------------------------
@@ -5915,29 +6100,16 @@ function getShareableState() {
         d: domInt('input-duration') || state.duration || undefined,
     };
 
-    // Fault scenario — read from DOM: bridge fault_scenario.enabled is only set when sim starts,
-    // so DOM checkbox is the ground truth during configure phase.
-    const faultEnabled = domBool('input-fault-enabled');
-    if (faultEnabled) {
-        const faultType = domStr('input-fault-scenario-type') || state.fault_scenario?.scenario_type;
-        if (faultType && faultType !== 'none') {
-            shared.f = { type: faultType };
-            if (faultType === 'burst_failure') {
-                shared.f.kill = domInt('input-burst-kill-percent') ?? state.fault_scenario?.burst_kill_percent ?? 20;
-                shared.f.at = domInt('input-burst-at-tick') ?? state.fault_scenario?.burst_at_tick ?? 100;
-            } else if (faultType === 'wear_based') {
-                const activeRateBtn = document.querySelector('.wear-rate-btn.active');
-                const rateName = activeRateBtn?.dataset.rate || state.fault_scenario?.wear_heat_rate || 'medium';
-                const rateMap = { low: 0, medium: 1, high: 2 };
-                shared.f.rate = rateMap[rateName] ?? 1;
-                shared.f.thresh = domInt('input-wear-threshold') ?? state.fault_scenario?.wear_threshold ?? 80;
-            } else if (faultType === 'zone_outage') {
-                shared.f.at = domInt('input-zone-at-tick') ?? state.fault_scenario?.zone_at_tick ?? 100;
-                shared.f.dur = domInt('input-zone-latency-duration') ?? state.fault_scenario?.zone_latency_duration ?? 50;
-            } else {
-                // intermittent or other — store type only
-            }
-        }
+    // Fault list — use the in-memory fault list as source of truth
+    if (faultList.length > 0) {
+        shared.faults = faultList.map(f => {
+            const item = { type: f.type };
+            if (f.type === 'burst_failure') { item.kill = f.kill_percent; item.at = f.at_tick; }
+            if (f.type === 'wear_based') { item.rate = f.heat_rate; }
+            if (f.type === 'zone_outage') { item.at = f.at_tick; item.dur = f.duration; }
+            if (f.type === 'intermittent_fault') { item.mtbf = f.mtbf; item.rec = f.recovery; }
+            return item;
+        });
     }
 
     // Strip undefined values
@@ -6041,38 +6213,32 @@ async function applySharedState(hash) {
     if (shared.hz) sendCommand({ type: 'set_tick_hz', value: shared.hz });
     if (shared.d) sendCommand({ type: 'set_duration', value: shared.d });
 
-    // Fault scenario — build a proper label for configureFaultFromScenarioLabel
-    const rateNames = { 0: 'low', 1: 'medium', 2: 'high' };
-    let faultLabel = 'none';
-    if (shared.f) {
-        if (shared.f.type === 'burst_failure') {
-            faultLabel = `burst_${shared.f.kill != null ? shared.f.kill : 20}pct`;
-        } else if (shared.f.type === 'wear_based') {
-            // rate may be a number (0/1/2) from getShareableState or a string from generateShareUrlFromSummary
-            const rateName = typeof shared.f.rate === 'number'
-                ? (rateNames[shared.f.rate] ?? 'medium')
-                : (shared.f.rate || 'medium');
+    // Fault list — restore from shared config (supports both old `f` and new `faults` format)
+    faultList = [];
+    if (shared.faults && Array.isArray(shared.faults)) {
+        shared.faults.forEach(f => {
+            const item = { id: 'f_' + (++faultIdCounter), type: f.type };
+            if (f.type === 'burst_failure') { item.kill_percent = f.kill || 20; item.at_tick = f.at || 100; }
+            if (f.type === 'wear_based') { item.heat_rate = f.rate || 'medium'; }
+            if (f.type === 'zone_outage') { item.at_tick = f.at || 100; item.duration = f.dur || 50; }
+            if (f.type === 'intermittent_fault') { item.mtbf = f.mtbf || 80; item.recovery = f.rec || 15; }
+            faultList.push(item);
+        });
+    } else if (shared.f) {
+        // Legacy single-fault format
+        const rateNames = { 0: 'low', 1: 'medium', 2: 'high' };
+        let faultLabel = 'none';
+        if (shared.f.type === 'burst_failure') faultLabel = `burst_${shared.f.kill || 20}pct`;
+        else if (shared.f.type === 'wear_based') {
+            const rateName = typeof shared.f.rate === 'number' ? (rateNames[shared.f.rate] ?? 'medium') : (shared.f.rate || 'medium');
             faultLabel = `wear_${rateName}`;
-        } else if (shared.f.type === 'zone_outage') {
-            faultLabel = `zone_${shared.f.dur != null ? shared.f.dur : 50}t`;
-        } else {
-            faultLabel = shared.f.type || 'none';
-        }
+        } else if (shared.f.type === 'zone_outage') faultLabel = `zone_${shared.f.dur || 50}t`;
+        else faultLabel = shared.f.type || 'none';
+        configureFaultFromScenarioLabel(faultLabel);
     }
-    configureFaultFromScenarioLabel(faultLabel);
-
-    // Override at-tick/thresh params that configureFaultFromScenarioLabel hardcodes
-    if (shared.f?.type === 'burst_failure' && shared.f.at != null) {
-        sendCommand({ type: 'set_scenario_param', key: 'burst_at_tick', value: shared.f.at });
-        syncSliderDisplay('input-burst-at-tick', 'val-burst-at-tick', shared.f.at);
-    }
-    if (shared.f?.type === 'wear_based' && shared.f.thresh != null) {
-        sendCommand({ type: 'set_scenario_param', key: 'wear_threshold', value: shared.f.thresh });
-        syncSliderDisplay('input-wear-threshold', 'val-wear-threshold', shared.f.thresh);
-    }
-    if (shared.f?.type === 'zone_outage' && shared.f.at != null) {
-        sendCommand({ type: 'set_scenario_param', key: 'zone_at_tick', value: shared.f.at });
-        syncSliderDisplay('input-zone-at-tick', 'val-zone-at-tick', shared.f.at);
+    if (faultList.length > 0) {
+        renderFaultList();
+        syncFaultListToRust();
     }
 
     // Auto-start

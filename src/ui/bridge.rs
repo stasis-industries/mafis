@@ -120,9 +120,7 @@ enum JsCommand {
     SetRhcrReplanInterval(usize),
     SetRhcrFallback(String),
     SetQueuePolicy(String),
-    SetFaultScenarioType(String),
-    SetScenarioParam { key: String, value: f64 },
-    DeleteFaultAtTick(u64),
+    SetFaultList(String),
     SetTheme(String),
 }
 
@@ -239,17 +237,8 @@ fn parse_command(json: &str) -> Option<JsCommand> {
         "set_queue_policy" => {
             Some(JsCommand::SetQueuePolicy(v.get("value")?.as_str()?.to_string()))
         }
-        "set_fault_scenario_type" => {
-            Some(JsCommand::SetFaultScenarioType(v.get("value")?.as_str()?.to_string()))
-        }
-        "set_scenario_param" => {
-            Some(JsCommand::SetScenarioParam {
-                key: v.get("key")?.as_str()?.to_string(),
-                value: v.get("value")?.as_f64()?,
-            })
-        }
-        "delete_fault" => {
-            Some(JsCommand::DeleteFaultAtTick(v.get("value")?.as_u64()?))
+        "set_fault_list" => {
+            Some(JsCommand::SetFaultList(v.get("value")?.as_str()?.to_string()))
         }
         "set_theme" => {
             Some(JsCommand::SetTheme(v.get("value")?.as_str()?.to_string()))
@@ -1177,6 +1166,7 @@ fn process_js_commands(
     mut click_selection: ResMut<ClickSelection>,
     mut rewind_req: ResMut<crate::fault::manual::RewindRequest>,
     mut clear_color: ResMut<ClearColor>,
+    mut fault_list: ResMut<crate::fault::scenario::FaultList>,
 ) {
     #[cfg(target_arch = "wasm32")]
     {
@@ -1664,56 +1654,22 @@ fn process_js_commands(
                         sim_res.ui_state.rhcr_fallback = Some(mode);
                     }
                 }
-                JsCommand::SetFaultScenarioType(name) => {
+                JsCommand::SetFaultList(json) => {
                     if current == SimState::Idle {
-                        sim_res.ui_state.fault_scenario_type = name;
-                    }
-                }
-                JsCommand::SetScenarioParam { key, value } => {
-                    if current == SimState::Idle {
-                        match key.as_str() {
-                            "burst_kill_percent" => {
-                                sim_res.ui_state.burst_kill_percent = (value as f32).clamp(0.0, 100.0);
-                            }
-                            "burst_at_tick" => {
-                                sim_res.ui_state.burst_at_tick = value as u64;
-                            }
-                            "wear_heat_rate" => {
-                                // value: 0=low, 1=medium, 2=high
-                                sim_res.ui_state.wear_heat_rate = match value as u32 {
-                                    0 => "low".to_string(),
-                                    2 => "high".to_string(),
-                                    _ => "medium".to_string(),
-                                };
-                            }
-                            "wear_threshold" => {
-                                sim_res.ui_state.wear_threshold = (value as f32).clamp(10.0, 200.0);
-                            }
-                            "zone_at_tick" => {
-                                sim_res.ui_state.zone_at_tick = value as u64;
-                            }
-                            "zone_latency_duration" => {
-                                sim_res.ui_state.zone_latency_duration = (value as u32).clamp(10, 200);
-                            }
-                            _ => {}
+                        if let Some(list) = parse_fault_list_json(&json) {
+                            *fault_list = list;
+                            sim_res.ui_state.fault_enabled = !fault_list.items.is_empty();
                         }
-                    }
-                }
-                JsCommand::DeleteFaultAtTick(tick) => {
-                    if current != SimState::Idle {
-                        rewind_req.pending = Some(
-                            crate::fault::manual::RewindKind::DeleteFaultAtTick(tick),
-                        );
                     }
                 }
                 JsCommand::SetTheme(ref theme) => {
                     // Update ClearColor to match CSS theme
                     if theme == "dark" {
-                        // Match --bg-canvas dark: rgb(24, 24, 30)
-                        clear_color.0 = Color::srgb(0.094, 0.094, 0.118);
+                        // Match dark mode --bg-body: rgb(18, 18, 22)
+                        clear_color.0 = Color::srgb(0.071, 0.071, 0.086);
                     } else {
-                        // Match --bg-canvas light: rgb(225, 222, 218)
-                        clear_color.0 = Color::srgb(0.882, 0.871, 0.855);
+                        // White canvas background for light mode
+                        clear_color.0 = Color::WHITE;
                     }
                 }
             }
@@ -1853,4 +1809,67 @@ impl Plugin for BridgePlugin {
                 process_js_commands.in_set(BridgeSet),
             ));
     }
+}
+
+// ---------------------------------------------------------------------------
+// Parse fault list JSON from JS
+// ---------------------------------------------------------------------------
+
+fn parse_fault_list_json(json: &str) -> Option<crate::fault::scenario::FaultList> {
+    use crate::fault::scenario::*;
+
+    let arr: Vec<serde_json::Value> = serde_json::from_str(json).ok()?;
+    let mut items = Vec::new();
+
+    for v in &arr {
+        let fault_type = match v.get("type")?.as_str()? {
+            "burst_failure" => FaultScenarioType::BurstFailure,
+            "wear_based" => FaultScenarioType::WearBased,
+            "zone_outage" => FaultScenarioType::ZoneOutage,
+            "intermittent_fault" => FaultScenarioType::IntermittentFault,
+            _ => continue,
+        };
+
+        let mut item = FaultItem {
+            fault_type,
+            ..Default::default()
+        };
+
+        match fault_type {
+            FaultScenarioType::BurstFailure => {
+                item.burst_kill_percent = v.get("kill_percent")
+                    .and_then(|v| v.as_f64()).unwrap_or(20.0) as f32;
+                item.burst_at_tick = v.get("at_tick")
+                    .and_then(|v| v.as_u64()).unwrap_or(100);
+            }
+            FaultScenarioType::WearBased => {
+                let rate_str = v.get("heat_rate")
+                    .and_then(|v| v.as_str()).unwrap_or("medium");
+                item.wear_heat_rate = rate_str.parse().unwrap_or_default();
+                // Custom Weibull override
+                if let (Some(beta), Some(eta)) = (
+                    v.get("custom_beta").and_then(|v| v.as_f64()),
+                    v.get("custom_eta").and_then(|v| v.as_f64()),
+                ) {
+                    item.custom_weibull = Some((beta as f32, eta as f32));
+                }
+            }
+            FaultScenarioType::ZoneOutage => {
+                item.zone_at_tick = v.get("at_tick")
+                    .and_then(|v| v.as_u64()).unwrap_or(100);
+                item.zone_latency_duration = v.get("duration")
+                    .and_then(|v| v.as_u64()).unwrap_or(50) as u32;
+            }
+            FaultScenarioType::IntermittentFault => {
+                item.intermittent_mtbf_ticks = v.get("mtbf")
+                    .and_then(|v| v.as_u64()).unwrap_or(80);
+                item.intermittent_recovery_ticks = v.get("recovery")
+                    .and_then(|v| v.as_u64()).unwrap_or(15) as u32;
+            }
+        }
+
+        items.push(item);
+    }
+
+    Some(FaultList { items })
 }

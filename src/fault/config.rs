@@ -53,22 +53,19 @@ pub struct FaultConfig {
 
 impl FaultConfig {
     /// Validate that the configuration is internally consistent.
-    /// Panics on invalid combinations (fail-fast during setup, not mid-simulation).
+    /// Multi-fault lists may enable both weibull + intermittent — this is valid
+    /// because they use separate RNG consumption patterns (Weibull pre-samples
+    /// at init, intermittent samples per-tick from fault_rng).
     pub fn validate(&self) {
-        assert!(
-            !(self.weibull_enabled && self.intermittent_enabled),
-            "FaultConfig: weibull_enabled and intermittent_enabled cannot both be true. \
-             They use the same fault_rng stream — enabling both causes RNG divergence \
-             between baseline and faulted runs, breaking scientific parity."
-        );
+        // No assertions — all combinations are valid since multi-fault support.
     }
 }
 
 impl Default for FaultConfig {
     fn default() -> Self {
         Self {
-            enabled: true,
-            weibull_enabled: true,
+            enabled: false,
+            weibull_enabled: false,
             weibull_beta: 2.5,
             weibull_eta: 500.0,
             intermittent_enabled: false,

@@ -51,6 +51,7 @@ struct LoadingResources<'w> {
     fault_scenario: ResMut<'w, crate::fault::scenario::FaultScenario>,
     fault_schedule: ResMut<'w, crate::fault::scenario::FaultSchedule>,
     fault_config: ResMut<'w, crate::fault::config::FaultConfig>,
+    fault_list: Res<'w, crate::fault::scenario::FaultList>,
     baseline_store: ResMut<'w, crate::analysis::baseline::BaselineStore>,
     active_scheduler: Res<'w, crate::core::task::ActiveScheduler>,
 }
@@ -252,25 +253,13 @@ fn begin_loading(
         commands.entity(entity).despawn();
     }
 
-    // Apply fault scenario from UI state
+    // Apply fault list → compile into FaultConfig + FaultSchedule
     {
-        res.fault_scenario.enabled = res.ui_state.fault_enabled;
-        res.fault_scenario.scenario_type = res.ui_state.fault_scenario_type.parse().unwrap_or_default();
-        res.fault_scenario.burst_kill_percent = res.ui_state.burst_kill_percent;
-        res.fault_scenario.burst_at_tick = res.ui_state.burst_at_tick;
-        res.fault_scenario.wear_heat_rate = res.ui_state.wear_heat_rate.parse().unwrap_or_default();
-        res.fault_scenario.wear_threshold = res.ui_state.wear_threshold;
-        res.fault_scenario.zone_at_tick = res.ui_state.zone_at_tick;
-        res.fault_scenario.zone_latency_duration = res.ui_state.zone_latency_duration;
-
-        // Apply FaultConfig from scenario
-        *res.fault_config = res.fault_scenario.to_fault_config();
-
-        // Generate fault schedule
         let total_ticks = res.config.duration;
-        *res.fault_schedule = res.fault_scenario.generate_schedule(
-            total_ticks, res.ui_state.num_agents,
-        );
+        let (fc, fs) = res.fault_list.compile(total_ticks, res.ui_state.num_agents);
+        *res.fault_config = fc;
+        *res.fault_schedule = fs;
+        res.fault_scenario.enabled = res.fault_list.is_active();
 
         // Set up incremental baseline computation — runs across multiple frames
         // during the Baseline loading phase to avoid blocking the main thread.
@@ -299,7 +288,7 @@ fn begin_loading(
                 seed: res.ui_state.seed,
                 tick_count: total_ticks,
                 grid_override,
-                fault_enabled: res.fault_config.enabled,
+                fault_enabled: res.fault_list.is_active(),
                 agent_positions,
             };
             res.baseline_store.computing = true;

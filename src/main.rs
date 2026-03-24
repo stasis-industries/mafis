@@ -14,8 +14,8 @@ fn main() {
             }),
             ..default()
         }))
-        // Light theme canvas background — matches --bg-canvas: rgb(225, 222, 218)
-        .insert_resource(ClearColor(Color::srgb(0.882, 0.871, 0.855)))
+        // Light theme canvas background — white (synced to dark via set_theme bridge command)
+        .insert_resource(ClearColor(Color::WHITE))
         .add_plugins(MapfFisPlugin)
         .run();
 }

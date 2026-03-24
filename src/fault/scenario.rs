@@ -269,6 +269,128 @@ impl FaultScenario {
 }
 
 // ---------------------------------------------------------------------------
+// FaultList — multi-fault configuration (UI-facing)
+// ---------------------------------------------------------------------------
+
+/// A single fault item in the multi-fault list.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FaultItem {
+    pub fault_type: FaultScenarioType,
+    // Burst
+    pub burst_kill_percent: f32,
+    pub burst_at_tick: u64,
+    // Wear
+    pub wear_heat_rate: WearHeatRate,
+    pub custom_weibull: Option<(f32, f32)>,
+    // Zone
+    pub zone_at_tick: u64,
+    pub zone_latency_duration: u32,
+    // Intermittent
+    pub intermittent_mtbf_ticks: u64,
+    pub intermittent_recovery_ticks: u32,
+}
+
+impl Default for FaultItem {
+    fn default() -> Self {
+        Self {
+            fault_type: FaultScenarioType::BurstFailure,
+            burst_kill_percent: 20.0,
+            burst_at_tick: 100,
+            wear_heat_rate: WearHeatRate::Medium,
+            custom_weibull: None,
+            zone_at_tick: 100,
+            zone_latency_duration: 50,
+            intermittent_mtbf_ticks: 80,
+            intermittent_recovery_ticks: 15,
+        }
+    }
+}
+
+/// Multi-fault configuration — replaces single FaultScenario for interactive runs.
+///
+/// Rules:
+/// - Burst: multiple allowed, same-tick → sum percentages (cap 100%)
+/// - Zone outage: multiple allowed, same-tick → max duration
+/// - Wear-based: max ONE (continuous Weibull process)
+/// - Intermittent: max ONE (continuous per-agent recurring)
+/// - All types can be combined in one run
+#[derive(Resource, Debug, Clone, Default, Serialize)]
+pub struct FaultList {
+    pub items: Vec<FaultItem>,
+}
+
+impl FaultList {
+    /// Whether any faults are configured (needs baseline comparison).
+    pub fn is_active(&self) -> bool {
+        !self.items.is_empty()
+    }
+
+    /// Compile the fault list into a FaultConfig + FaultSchedule for the runner.
+    ///
+    /// Merges same-tick events: bursts sum percentages, zones take max duration.
+    pub fn compile(&self, total_ticks: u64, num_agents: usize) -> (FaultConfig, FaultSchedule) {
+        if self.items.is_empty() {
+            return (FaultConfig { enabled: false, ..Default::default() }, FaultSchedule::default());
+        }
+
+        let mut fault_config = FaultConfig { enabled: false, ..Default::default() };
+        let mut events: Vec<ScheduledEvent> = Vec::new();
+
+        // --- Continuous models (at most one each) ---
+        if let Some(wear) = self.items.iter().find(|i| i.fault_type == FaultScenarioType::WearBased) {
+            let (beta, eta) = wear.custom_weibull.unwrap_or_else(|| wear.wear_heat_rate.weibull_params());
+            fault_config.enabled = true;
+            fault_config.weibull_enabled = true;
+            fault_config.weibull_beta = beta;
+            fault_config.weibull_eta = eta;
+        }
+
+        if let Some(inter) = self.items.iter().find(|i| i.fault_type == FaultScenarioType::IntermittentFault) {
+            fault_config.enabled = true;
+            fault_config.intermittent_enabled = true;
+            fault_config.intermittent_mtbf_ticks = inter.intermittent_mtbf_ticks;
+            fault_config.intermittent_recovery_ticks = inter.intermittent_recovery_ticks;
+        }
+
+        // --- Scheduled events: burst (sum same-tick) ---
+        let mut burst_by_tick: std::collections::BTreeMap<u64, f32> = std::collections::BTreeMap::new();
+        for item in self.items.iter().filter(|i| i.fault_type == FaultScenarioType::BurstFailure) {
+            let tick = item.burst_at_tick.min(total_ticks);
+            *burst_by_tick.entry(tick).or_insert(0.0) += item.burst_kill_percent;
+        }
+        for (tick, pct) in &burst_by_tick {
+            let clamped = pct.min(100.0);
+            let count = ((num_agents as f32 * clamped / 100.0).round() as usize).max(1).min(num_agents);
+            events.push(ScheduledEvent { tick: *tick, action: ScheduledAction::KillRandomAgents(count), fired: false });
+        }
+
+        // --- Scheduled events: zone outage (max duration same-tick) ---
+        let mut zone_by_tick: std::collections::BTreeMap<u64, u32> = std::collections::BTreeMap::new();
+        for item in self.items.iter().filter(|i| i.fault_type == FaultScenarioType::ZoneOutage) {
+            let tick = item.zone_at_tick.min(total_ticks);
+            let dur = zone_by_tick.entry(tick).or_insert(0);
+            *dur = (*dur).max(item.zone_latency_duration);
+        }
+        for (tick, duration) in &zone_by_tick {
+            events.push(ScheduledEvent { tick: *tick, action: ScheduledAction::ZoneLatency { duration: *duration }, fired: false });
+        }
+
+        // Sort by tick for deterministic execution
+        events.sort_by_key(|e| e.tick);
+
+        let has_scheduled = !events.is_empty();
+        let schedule = FaultSchedule { events, initialized: has_scheduled || fault_config.enabled };
+
+        // Enable config if any scheduled events exist (runner checks this for schedule execution)
+        if has_scheduled {
+            fault_config.enabled = true;
+        }
+
+        (fault_config, schedule)
+    }
+}
+
+// ---------------------------------------------------------------------------
 // FaultSchedule — timed fault events
 // ---------------------------------------------------------------------------
 
@@ -300,6 +422,9 @@ impl FaultSchedule {
     }
 
     /// Reset `fired` flag on scheduled events after `tick` so they re-fire on resume.
+    ///
+    /// The snapshot at `tick` captures state AFTER that tick's processing, so events
+    /// AT `tick` have already fired. Only events AFTER `tick` need to be un-fired.
     pub fn un_fire_after_tick(&mut self, tick: u64) {
         for event in &mut self.events {
             if event.tick > tick {
@@ -487,6 +612,144 @@ mod tests {
             let t: FaultScenarioType = id.parse().unwrap();
             assert_eq!(t.id(), id, "roundtrip failed for {id}");
         }
+    }
+
+    // --- FaultList compile tests ---
+
+    #[test]
+    fn fault_list_empty_produces_disabled() {
+        let list = FaultList::default();
+        let (config, sched) = list.compile(500, 20);
+        assert!(!config.enabled);
+        assert!(sched.events.is_empty());
+    }
+
+    #[test]
+    fn fault_list_single_burst() {
+        let list = FaultList {
+            items: vec![FaultItem {
+                fault_type: FaultScenarioType::BurstFailure,
+                burst_kill_percent: 20.0,
+                burst_at_tick: 100,
+                ..Default::default()
+            }],
+        };
+        let (config, sched) = list.compile(500, 50);
+        assert!(config.enabled);
+        assert_eq!(sched.events.len(), 1);
+        assert_eq!(sched.events[0].tick, 100);
+        match &sched.events[0].action {
+            ScheduledAction::KillRandomAgents(n) => assert_eq!(*n, 10),
+            _ => panic!("expected KillRandomAgents"),
+        }
+    }
+
+    #[test]
+    fn fault_list_same_tick_bursts_merge() {
+        let list = FaultList {
+            items: vec![
+                FaultItem {
+                    fault_type: FaultScenarioType::BurstFailure,
+                    burst_kill_percent: 20.0,
+                    burst_at_tick: 100,
+                    ..Default::default()
+                },
+                FaultItem {
+                    fault_type: FaultScenarioType::BurstFailure,
+                    burst_kill_percent: 30.0,
+                    burst_at_tick: 100,
+                    ..Default::default()
+                },
+            ],
+        };
+        let (_, sched) = list.compile(500, 20);
+        assert_eq!(sched.events.len(), 1); // merged
+        match &sched.events[0].action {
+            ScheduledAction::KillRandomAgents(n) => assert_eq!(*n, 10), // 50% of 20
+            _ => panic!("expected KillRandomAgents"),
+        }
+    }
+
+    #[test]
+    fn fault_list_different_tick_bursts_separate() {
+        let list = FaultList {
+            items: vec![
+                FaultItem {
+                    fault_type: FaultScenarioType::BurstFailure,
+                    burst_kill_percent: 20.0,
+                    burst_at_tick: 100,
+                    ..Default::default()
+                },
+                FaultItem {
+                    fault_type: FaultScenarioType::BurstFailure,
+                    burst_kill_percent: 30.0,
+                    burst_at_tick: 200,
+                    ..Default::default()
+                },
+            ],
+        };
+        let (_, sched) = list.compile(500, 20);
+        assert_eq!(sched.events.len(), 2);
+        assert_eq!(sched.events[0].tick, 100);
+        assert_eq!(sched.events[1].tick, 200);
+    }
+
+    #[test]
+    fn fault_list_zone_same_tick_max_duration() {
+        let list = FaultList {
+            items: vec![
+                FaultItem {
+                    fault_type: FaultScenarioType::ZoneOutage,
+                    zone_at_tick: 150,
+                    zone_latency_duration: 30,
+                    ..Default::default()
+                },
+                FaultItem {
+                    fault_type: FaultScenarioType::ZoneOutage,
+                    zone_at_tick: 150,
+                    zone_latency_duration: 80,
+                    ..Default::default()
+                },
+            ],
+        };
+        let (_, sched) = list.compile(500, 20);
+        assert_eq!(sched.events.len(), 1);
+        match &sched.events[0].action {
+            ScheduledAction::ZoneLatency { duration } => assert_eq!(*duration, 80),
+            _ => panic!("expected ZoneLatency"),
+        }
+    }
+
+    #[test]
+    fn fault_list_combined_burst_wear_zone() {
+        let list = FaultList {
+            items: vec![
+                FaultItem { fault_type: FaultScenarioType::BurstFailure, burst_kill_percent: 10.0, burst_at_tick: 50, ..Default::default() },
+                FaultItem { fault_type: FaultScenarioType::WearBased, wear_heat_rate: WearHeatRate::High, ..Default::default() },
+                FaultItem { fault_type: FaultScenarioType::ZoneOutage, zone_at_tick: 200, zone_latency_duration: 40, ..Default::default() },
+            ],
+        };
+        let (config, sched) = list.compile(500, 30);
+        assert!(config.enabled);
+        assert!(config.weibull_enabled);
+        assert_eq!(sched.events.len(), 2); // burst + zone
+        assert_eq!(sched.events[0].tick, 50);
+        assert_eq!(sched.events[1].tick, 200);
+    }
+
+    #[test]
+    fn fault_list_wear_only_first_used() {
+        let list = FaultList {
+            items: vec![
+                FaultItem { fault_type: FaultScenarioType::WearBased, wear_heat_rate: WearHeatRate::Low, ..Default::default() },
+                FaultItem { fault_type: FaultScenarioType::WearBased, wear_heat_rate: WearHeatRate::High, ..Default::default() },
+            ],
+        };
+        let (config, _) = list.compile(500, 20);
+        // First wear item wins
+        let (beta, eta) = WearHeatRate::Low.weibull_params();
+        assert_eq!(config.weibull_beta, beta);
+        assert_eq!(config.weibull_eta, eta);
     }
 
     #[test]

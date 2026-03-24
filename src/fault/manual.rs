@@ -75,8 +75,6 @@ impl ManualFaultLog {
 pub enum RewindKind {
     /// Resume from replay: restore world state to snapshot tick, then run.
     ResumeFromTick(u64),
-    /// Delete fault at tick: truncate everything, enter Replay.
-    DeleteFaultAtTick(u64),
 }
 
 #[derive(Resource, Default, Debug)]
@@ -94,9 +92,7 @@ pub struct RewindResources<'w> {
     grid: ResMut<'w, GridMap>,
     topology: Res<'w, crate::core::topology::ActiveTopology>,
     fault_log: ResMut<'w, ManualFaultLog>,
-    fault_metrics: ResMut<'w, crate::analysis::fault_metrics::FaultMetrics>,
     fault_schedule: ResMut<'w, super::scenario::FaultSchedule>,
-    cascade: ResMut<'w, crate::analysis::cascade::CascadeState>,
     tick_history: ResMut<'w, crate::analysis::history::TickHistory>,
     config: ResMut<'w, SimulationConfig>,
     solver: ResMut<'w, crate::solver::ActiveSolver>,
@@ -105,7 +101,6 @@ pub struct RewindResources<'w> {
     ui_state: Res<'w, crate::ui::controls::UiState>,
     dist_cache: ResMut<'w, crate::solver::heuristics::DistanceMapCache>,
     rewind_req: ResMut<'w, RewindRequest>,
-    baseline_diff: ResMut<'w, crate::analysis::baseline::BaselineDiff>,
 }
 
 #[cfg(not(test))]
@@ -154,68 +149,8 @@ pub fn apply_rewind(
             res.fault_schedule.un_fire_after_tick(target_tick);
 
             res.tick_history.replay_cursor = None;
+
             next_state.set(crate::core::state::SimState::Running);
-        }
-
-        RewindKind::DeleteFaultAtTick(fault_tick) => {
-            // Find snapshot strictly before the fault tick.
-            // If the closest snapshot is AT or AFTER the fault, we can't safely
-            // restore pre-fault state (the snapshot already contains fault effects).
-            let target_tick = fault_tick.saturating_sub(1);
-            let snapshot = match find_snapshot(&res.tick_history, target_tick) {
-                Some(s) if s.tick < fault_tick => s.clone(),
-                _ => return, // No valid pre-fault snapshot — abort silently
-            };
-            let snap_tick = snapshot.tick;
-
-            restore_world_state(
-                &mut commands, &mut res, &mut agents, &mut heat_query,
-                &obstacles, &mut meshes, &mut materials,
-                &snapshot,
-            );
-
-            // Restore runner state to match ECS
-            restore_runner_state(&mut sim, &res, &snapshot);
-
-            // Also sync fault schedule on runner
-            if let Some(ref mut sim) = sim {
-                sim.runner.fault_schedule_mut().remove_events_at_or_after(fault_tick);
-                sim.runner.fault_schedule_mut().un_fire_after_tick(snap_tick);
-                sim.analysis.truncate_to_tick(snap_tick);
-            }
-
-            // Truncate: delete the fault and everything after it.
-            // Use fault_tick-1 for metrics/cascade so events BEFORE the
-            // deleted fault are preserved (they'll be replayed when resumed
-            // and replay_manual_faults skips re-registering existing ones).
-            // tick_history must use snap_tick since that's the latest valid
-            // snapshot we can restore to.
-            let metrics_cutoff = fault_tick.saturating_sub(1);
-            res.fault_log.entries.retain(|e| e.tick < fault_tick);
-            res.fault_metrics.truncate_after_tick(metrics_cutoff);
-            res.cascade.truncate_after_tick(metrics_cutoff);
-            res.tick_history.truncate_after_tick(snap_tick);
-            // BaselineDiff is derived — clear and let update_baseline_diff
-            // re-accumulate as ticks resume.
-            res.baseline_diff.clear();
-            // Remove scheduled events at or after the fault tick so their
-            // timeline markers disappear, and un-fire any remaining events
-            // after the restored snapshot tick.
-            res.fault_schedule.remove_events_at_or_after(fault_tick);
-            res.fault_schedule.un_fire_after_tick(snap_tick);
-
-            // If no faults remain after deletion, disable the continuous fault
-            // pipeline so the resumed run produces results identical to baseline.
-            if res.fault_schedule.events.is_empty() && res.fault_log.entries.is_empty() {
-                if let Some(ref mut sim) = sim {
-                    sim.runner.set_fault_enabled(false);
-                }
-            }
-
-            // Set cursor to the last valid snapshot
-            let len = res.tick_history.snapshots.len();
-            res.tick_history.replay_cursor = if len > 0 { Some(len - 1) } else { None };
-            next_state.set(crate::core::state::SimState::Replay);
         }
     }
 }
@@ -240,8 +175,7 @@ fn restore_world_state(
     materials: &mut Assets<StandardMaterial>,
     snapshot: &crate::analysis::history::FullTickSnapshot,
 ) {
-    use std::collections::HashMap;
-    use crate::render::environment::spawn_obstacles;
+    use std::collections::{HashMap, HashSet};
 
     let target_tick = snapshot.tick;
 
@@ -250,6 +184,8 @@ fn restore_world_state(
     *res.grid = topo_output.grid;
 
     // 2. Replay manual fault log entries that modify the grid (tick <= snapshot tick)
+    //    Track fault-placed obstacle positions so they get the dark color, not topology grey.
+    let mut fault_obstacle_cells: HashSet<IVec2> = HashSet::new();
     for entry in &res.fault_log.entries {
         if entry.tick > target_tick {
             break; // entries are in chronological order
@@ -257,9 +193,11 @@ fn restore_world_state(
         match &entry.action {
             ManualFaultAction::KillAgent { pos, .. } => {
                 res.grid.set_obstacle(*pos);
+                fault_obstacle_cells.insert(*pos);
             }
             ManualFaultAction::PlaceObstacle(cell) => {
                 res.grid.set_obstacle(*cell);
+                fault_obstacle_cells.insert(*cell);
             }
             // Latency is transient — skip for grid rebuild
             _ => {}
@@ -303,11 +241,50 @@ fn restore_world_state(
         }
     }
 
-    // 4. Despawn all obstacle visuals and respawn from current grid state
+    // 4. Despawn all obstacle visuals and respawn from current grid state.
+    //    Topology obstacles get light grey; fault-placed obstacles (dead agents,
+    //    manual walls) get dark brown so they remain visually distinct.
     for entity in obstacles.iter() {
         commands.entity(entity).despawn();
     }
-    spawn_obstacles(commands, meshes, materials, &res.grid);
+    {
+        use crate::render::environment::{grid_to_world, ObstacleMarker};
+        const CELL_SIZE: f32 = 1.0;
+        const OBSTACLE_HEIGHT: f32 = 0.45;
+
+        let topo_mesh = meshes.add(Cuboid::new(CELL_SIZE * 0.9, OBSTACLE_HEIGHT, CELL_SIZE * 0.9));
+        let topo_mat = materials.add(StandardMaterial {
+            base_color: Color::srgb(0.45, 0.47, 0.52),
+            perceptual_roughness: 0.55,
+            metallic: 0.15,
+            ..default()
+        });
+        let fault_mesh = meshes.add(Cuboid::new(0.9, 0.6, 0.9));
+        let fault_mat = materials.add(StandardMaterial {
+            base_color: Color::srgb(0.35, 0.20, 0.18),
+            perceptual_roughness: 0.7,
+            ..default()
+        });
+
+        for &pos in res.grid.obstacles() {
+            let world = grid_to_world(pos);
+            if fault_obstacle_cells.contains(&pos) {
+                commands.spawn((
+                    Mesh3d(fault_mesh.clone()),
+                    MeshMaterial3d(fault_mat.clone()),
+                    Transform::from_xyz(world.x, 0.3, world.z),
+                    ObstacleMarker,
+                ));
+            } else {
+                commands.spawn((
+                    Mesh3d(topo_mesh.clone()),
+                    MeshMaterial3d(topo_mat.clone()),
+                    Transform::from_xyz(world.x, OBSTACLE_HEIGHT * 0.5, world.z),
+                    ObstacleMarker,
+                ));
+            }
+        }
+    }
 
     // 6. Reset simulation state
     res.config.tick = target_tick;
@@ -380,6 +357,7 @@ fn restore_runner_state(
             );
             agent.latency_remaining = 0; // transient, can't reconstruct duration
             agent.last_action = crate::core::action::Action::Wait;
+            agent.operational_age = snap.operational_age;
         }
     }
 
