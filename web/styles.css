@@ -50,6 +50,7 @@
     --leg-charging: rgb(89, 135, 209);
 
     --bg-hover: rgba(5, 5, 5, 0.04);
+    --bg-canvas: rgb(225, 222, 218);
 
     /* Timeline (YouTube-style 3-zone) */
     --tl-unloaded: rgba(0, 0, 0, 0.08);
@@ -85,6 +86,7 @@
     --text-header: rgb(230, 228, 224);
 
     --bg-hover: rgba(255, 255, 255, 0.06);
+    --bg-canvas: rgb(24, 24, 30);
 
     /* Timeline (YouTube-style 3-zone) */
     --tl-unloaded: rgba(255, 255, 255, 0.06);
@@ -245,6 +247,17 @@ body {
     color: var(--text-secondary);
 }
 
+.btn-share {
+    font-family: 'DM Mono', monospace;
+    font-size: 11px;
+    font-weight: 400;
+    letter-spacing: 0.4px;
+    position: relative;
+}
+.btn-share.copied {
+    color: var(--green, #047857);
+    border-color: var(--green, #047857);
+}
 
 /* --------------------------------------------------------------------------
    Main grid layout
@@ -1375,24 +1388,23 @@ input[type="range"]:disabled::-webkit-slider-thumb {
 .ft-card-header {
     display: flex;
     justify-content: space-between;
-    align-items: baseline;
-    margin-bottom: 4px;
+    align-items: center;
+    margin-bottom: 6px;
 }
 
-.ft-card-id {
-    font-family: 'DM Mono', monospace;
-    font-size: 12px;
-    font-weight: 500;
-    color: var(--text-primary);
-}
-
-.ft-card-type {
+.ft-card-type-badge {
     font-family: 'DM Mono', monospace;
     font-size: 10px;
-    text-transform: uppercase;
-    letter-spacing: 0.3px;
-    color: var(--state-fault);
+    font-weight: 500;
+    letter-spacing: 0.4px;
+    padding: 1px 6px;
+    background: var(--state-fault);
+    color: #fff;
 }
+
+.ft-card-type-badge.latency { background: var(--state-critical); }
+.ft-card-type-badge.breakdown { background: var(--state-fault); }
+.ft-card-type-badge.obstacle { background: var(--state-delayed); }
 
 .ft-card-tick {
     font-family: 'DM Mono', monospace;
@@ -1400,33 +1412,31 @@ input[type="range"]:disabled::-webkit-slider-thumb {
     color: var(--text-muted);
 }
 
-.ft-card-body {
+.ft-card-impact {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
     font-family: 'DM Mono', monospace;
     font-size: 10px;
     color: var(--text-secondary);
-    line-height: 1.6;
+    margin-bottom: 4px;
 }
 
-.ft-card-tp {
-    display: flex;
-    align-items: baseline;
-    gap: 6px;
-    margin-top: 4px;
-}
+.ft-card-agents { color: var(--text-secondary); }
 
-.ft-card-delta {
-    font-weight: 500;
-}
-
+.ft-card-delta { font-weight: 500; }
 .ft-card-delta.negative { color: var(--state-fault); }
 .ft-card-delta.positive { color: var(--state-moving); }
 
-.ft-card-recovery {
+.ft-card-status {
+    font-family: 'DM Mono', monospace;
+    font-size: 10px;
     font-weight: 500;
+    margin-bottom: 6px;
 }
 
-.ft-card-recovery.recovered { color: var(--state-moving); }
-.ft-card-recovery.permanent { color: var(--state-fault); }
+.ft-card-status.recovered { color: var(--state-moving); }
+.ft-card-status.permanent { color: var(--state-fault); }
 
 .ft-card-actions {
     display: flex;
@@ -1658,8 +1668,8 @@ input[type="range"]:disabled::-webkit-slider-thumb {
    Charts
    -------------------------------------------------------------------------- */
 .chart-container {
-    margin-bottom: 14px;
-    padding-bottom: 8px;
+    margin-bottom: 18px;
+    padding: 10px 0 12px;
     border-bottom: 1px solid var(--border);
     position: relative;
     width: 100%;
@@ -1707,7 +1717,7 @@ input[type="range"]:disabled::-webkit-slider-thumb {
 #canvas-container {
     position: relative;
     overflow: hidden;
-    background: rgb(30, 30, 40);
+    background: var(--bg-canvas, rgb(225, 222, 218));
     touch-action: none;
 }
 
@@ -3640,7 +3650,7 @@ body[data-phase="results"] #panel-right > .view-results-wrapper {
     flex-direction: column;
     border-bottom: 1px solid var(--border);
 }
-.results-chart-cell:nth-child(odd) {
+.results-chart-cell:nth-child(odd):not(:last-child) {
     border-right: 1px solid var(--border);
 }
 .results-chart-cell:nth-last-child(-n+2) {
@@ -5169,6 +5179,28 @@ body[data-phase="experiment"] #toolbar {
     background: var(--text-primary);
     color: var(--bg-panel);
     border-color: var(--text-primary);
+}
+
+.exp-table .btn-exp-share {
+    font-family: 'DM Mono', monospace;
+    font-size: 9px;
+    padding: 1px 5px;
+    background: transparent;
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+    cursor: pointer;
+    letter-spacing: 0.3px;
+    transition: all 100ms ease;
+    margin-left: 3px;
+}
+.exp-table .btn-exp-share:hover {
+    background: var(--text-primary);
+    color: var(--bg-panel);
+    border-color: var(--text-primary);
+}
+.exp-table .btn-exp-share.copied {
+    color: var(--green, #047857);
+    border-color: var(--green, #047857);
 }
 
 /* Zone coloring */

@@ -1797,4 +1797,76 @@ mod tests {
 
         assert_eq!(ticks_before, ticks_after, "failure ticks must be identical after reset");
     }
+
+    // ── F1: Weibull quantile cross-validation ─────────────────────────
+
+    /// Verify that Weibull inverse CDF produces correct distribution quantiles.
+    /// For Weibull(beta=2.5, eta=500): median ~381, P10 ~112, P90 ~660.
+    /// 100,000 samples; empirical quantiles must be within 3% of theory.
+    #[test]
+    fn weibull_quantiles_match_theory() {
+        use crate::core::seed::SeededRng;
+
+        let n = 100_000;
+        let beta = 2.5_f32;
+        let eta = 500.0_f32;
+        let mut rng = SeededRng::new(42);
+        let ticks = SimulationRunner::sample_weibull_ticks(n, beta, eta, &mut rng);
+
+        let mut sorted: Vec<u32> = ticks;
+        sorted.sort();
+
+        let p10 = sorted[n / 10] as f64;
+        let median = sorted[n / 2] as f64;
+        let p90 = sorted[9 * n / 10] as f64;
+
+        // Theoretical values: t = eta * (-ln(1-p))^(1/beta)
+        // equivalently for survival function: t = eta * (-ln(U))^(1/beta)
+        let beta_f64 = beta as f64;
+        let eta_f64 = eta as f64;
+        let t_median = eta_f64 * (-0.5_f64.ln()).powf(1.0 / beta_f64);
+        let t_p10 = eta_f64 * (-0.9_f64.ln()).powf(1.0 / beta_f64);
+        let t_p90 = eta_f64 * (-0.1_f64.ln()).powf(1.0 / beta_f64);
+
+        assert!((median - t_median).abs() / t_median < 0.03,
+            "median: empirical={median:.1} theoretical={t_median:.1}");
+        assert!((p10 - t_p10).abs() / t_p10 < 0.03,
+            "P10: empirical={p10:.1} theoretical={t_p10:.1}");
+        assert!((p90 - t_p90).abs() / t_p90 < 0.03,
+            "P90: empirical={p90:.1} theoretical={t_p90:.1}");
+    }
+
+    // ── F4: Weibull MTTF for all WearHeatRate presets ─────────────────
+
+    /// Verify that all 3 WearHeatRate presets produce MTTF values matching
+    /// theoretical Gamma function expectations.
+    /// Low (2.0, 900): MTTF ~ 798, Medium (2.5, 500): MTTF ~ 444, High (3.5, 150): MTTF ~ 137.
+    #[test]
+    fn weibull_mttf_all_presets() {
+        use crate::core::seed::SeededRng;
+        use crate::fault::scenario::WearHeatRate;
+
+        let n = 50_000;
+
+        for rate in &[WearHeatRate::Low, WearHeatRate::Medium, WearHeatRate::High] {
+            let (beta, eta) = rate.weibull_params();
+
+            let mut rng = SeededRng::new(12345);
+            let ticks = SimulationRunner::sample_weibull_ticks(n, beta, eta, &mut rng);
+
+            let sample_mean: f64 = ticks.iter().map(|&t| t as f64).sum::<f64>() / n as f64;
+
+            // Theoretical MTTF = eta * Gamma(1 + 1/beta)
+            let gamma_val = gamma_approx(1.0 + 1.0 / beta as f64);
+            let theoretical_mttf = eta as f64 * gamma_val;
+
+            let relative_error = ((sample_mean - theoretical_mttf) / theoretical_mttf).abs();
+            assert!(
+                relative_error < 0.05,
+                "WearHeatRate::{:?} MTTF mismatch: sample={sample_mean:.1}, theory={theoretical_mttf:.1}, error={:.1}%",
+                rate,
+                relative_error * 100.0
+            );
+        }
+    }
 }

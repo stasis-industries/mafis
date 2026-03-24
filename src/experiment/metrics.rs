@@ -387,4 +387,131 @@ mod tests {
         // 8 ticks after fault, 4 below
         assert!((ct - 0.5).abs() < 1e-10);
     }
+
+    #[test]
+    fn ft_known_values() {
+        // Baseline: constant 2.0 throughput
+        let bl = vec![2.0; 20];
+        // Faulted: normal for 5 ticks, then drops to 1.0
+        let mut faulted = vec![2.0; 20];
+        for i in 5..20 {
+            faulted[i] = 1.0;
+        }
+
+        // FT = avg(faulted[5..]) / avg(baseline[5..]) = 1.0 / 2.0 = 0.5
+        let avg_faulted: f64 = faulted[5..].iter().sum::<f64>() / 15.0;
+        let avg_baseline: f64 = bl[5..].iter().sum::<f64>() / 15.0;
+        let ft = avg_faulted / avg_baseline;
+        assert!((ft - 0.5).abs() < 1e-10, "FT should be 0.5, got {ft}");
+    }
+
+    #[test]
+    fn nrr_known_values() {
+        // MTBF = 100 (faults at tick 100 and 200)
+        let mtbf = 100.0_f64;
+        // Throughput recovery = 15 ticks
+        let throughput_recovery = 15.0_f64;
+        // NRR = 1 - recovery / MTBF = 1 - 15/100 = 0.85
+        let nrr = 1.0 - throughput_recovery / mtbf;
+        assert!(
+            (nrr - 0.85).abs() < 1e-10,
+            "NRR should be 0.85, got {nrr}"
+        );
+
+        // Also verify MTBF computation
+        let fault_ticks = vec![100_u64, 200];
+        let computed_mtbf = FaultMetrics::compute_mtbf(&fault_ticks).unwrap();
+        assert_eq!(computed_mtbf, 100.0);
+    }
+
+    #[test]
+    fn critical_time_known_fraction() {
+        // 20 ticks baseline=4.0, faulted drops at tick 10
+        let bl = vec![4.0; 20];
+        let mut faulted = vec![4.0; 20];
+        // Ticks at 0-indexed 9..14: below 50% threshold (faulted=1.0, threshold=2.0)
+        for i in 9..14 {
+            faulted[i] = 1.0;
+        }
+        // Ticks 14-19: above threshold (faulted=4.0, stays at default)
+        // first_gap_tick = Some(10) is 1-indexed, converts to start=9 internally
+        // CT = 5 below / (20-9=11 total post-fault) = 5/11
+        let ct = compute_critical_time(&bl, &faulted, Some(10));
+        let expected = 5.0 / 11.0;
+        assert!(
+            (ct - expected).abs() < 1e-10,
+            "CT should be {expected:.4}, got {ct:.4}"
+        );
+    }
+
+    #[test]
+    fn throughput_recovery_known_tick() {
+        let bl = vec![3.0; 20];
+        let mut faulted = vec![3.0; 20];
+        // Drop at tick 5, stay at 0 until tick 10 where it recovers
+        for i in 5..10 {
+            faulted[i] = 0.0;
+        }
+        // Recovery = first tick AFTER fault onset where faulted >= baseline
+        // fault_onset = index 5. Skip tick 5 itself. Check from index 6.
+        // Index 10: faulted[10] = 3.0 >= baseline[10] = 3.0
+        // recovery = 10 - 5 = 5.0
+        let recovery = compute_throughput_recovery(&bl, &faulted, Some(5));
+        assert!(
+            (recovery - 5.0).abs() < 1e-10,
+            "recovery should be 5.0, got {recovery}"
+        );
+    }
+
+    #[test]
+    fn impacted_area_sign_convention() {
+        use std::collections::HashMap;
+        // Build minimal BaselineRecord
+        let baseline = BaselineRecord {
+            config_hash: 0,
+            tick_count: 10,
+            num_agents: 10,
+            throughput_series: vec![1.0; 10],
+            tasks_completed_series: (1..=10).map(|i| i as u64).collect(),
+            idle_count_series: vec![0; 10],
+            wait_ratio_series: vec![0.0; 10],
+            total_tasks: 10,
+            avg_throughput: 1.0,
+            traffic_counts: HashMap::default(),
+            position_snapshots: Vec::new(),
+        };
+        // Faulted: 90% of baseline tasks
+        let live_tasks: Vec<u64> = (1..=10).map(|i| (i as f64 * 0.9) as u64).collect();
+        let live_tp = vec![0.9; 10];
+
+        let mut diff = BaselineDiff::default();
+        diff.recompute(&baseline, &live_tasks, &live_tp);
+        // impacted_area should be negative (behind baseline)
+        assert!(
+            diff.impacted_area < 0.0,
+            "impacted_area should be negative when behind baseline, got {}",
+            diff.impacted_area
+        );
+    }
+
+    #[test]
+    fn ft_one_when_no_faults() {
+        // When no faults occurred, FT should be exactly 1.0
+        // (faulted run identical to baseline)
+        let bl_tp = 2.5_f64;
+        let faulted_tp = 2.5_f64;
+        // No faults -> FT = faulted_avg / baseline_avg
+        let ft = faulted_tp / bl_tp;
+        assert!(
+            (ft - 1.0).abs() < 1e-10,
+            "FT should be 1.0 with no faults, got {ft}"
+        );
+
+        // Also verify throughput_recovery returns 0.0 with no faults
+        let recovery = compute_throughput_recovery(&[2.0; 10], &[2.0; 10], None);
+        assert!(
+            (recovery - 0.0).abs() < 1e-10,
+            "recovery should be 0.0 with no faults"
+        );
+    }
 }

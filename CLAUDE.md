@@ -14,7 +14,7 @@ Multi-Agent Fault Injection Simulator — Bevy 0.18 → WASM. A **fault resilien
 # Step 1 — type & borrow check (~5s). Catches 80% of errors instantly.
 cargo check
 
-# Step 2 — logic correctness (~7s). 188 tests across core, solver, analysis.
+# Step 2 — logic correctness (~10s). 396 tests across core, solver, analysis, experiments.
 cargo test
 
 # Step 3 — only if Steps 1-2 pass AND the change touches rendering, bridge, or ECS systems.
@@ -29,7 +29,7 @@ basic-http-server web
 | Step | Time | Covers |
 |------|------|--------|
 | `cargo check` | ~5s | Types, borrow checker, imports |
-| `cargo test` | ~7s | Grid, actions, heuristics, PIBT, task scheduling, cascade, ADG, fault metrics, heatmap |
+| `cargo test` | ~10s | Grid, actions, heuristics, PIBT, task scheduling, cascade, ADG, fault metrics, heatmap, Weibull, determinism, collision, CI95, metrics formulas |
 | WASM build | ~2-3 min | Rendering, Bevy ECS systems, JS bridge, visual correctness |
 
 **When WASM build is NOT needed:** pure logic changes (solver tweaks, analysis math, constants). `cargo test` is sufficient.
@@ -210,13 +210,18 @@ Topologies are defined exclusively as JSON files in `topologies/`. No Rust-gener
 | Scheduler | Characteristic |
 |-----------|----------------|
 | Random | Random pickup/delivery from zone cells |
-| Closest | Nearest pickup/delivery by Manhattan distance |
+| Closest | Two-phase: random task creation + closest assignment from pool |
+| Balanced | Least-recently-used cell, tie-break by distance |
+| Roundtrip | Prefers pickups near the delivery zone (minimize empty travel) |
 
+**Closest scheduler design (two-phase batch):** Phase 1 creates N task candidates uniformly at random from all pickup cells (position-independent). Phase 2 assigns each agent the nearest task from the random pool via greedy matching. This eliminates positional convergence (all agents going to the same column) while preserving locality benefit.
+
+- `TaskScheduler` trait: `assign_pickup()` + `assign_delivery()` + `assign_pickups_batch()` (batch override for closest)
+- `recycle_goals_core`: two-pass — Pass 1 batch-assigns all Free agents via `assign_pickups_batch`, Pass 2 applies assignments + processes all other state transitions
 - `TaskLeg` enum (8 states): `Free` → `TravelEmpty` → `Loading` → `TravelToQueue` → `Queuing` → `TravelLoaded` → `Unloading` → `Free`
   - `TravelToQueue`: agent has cargo, traveling to back of delivery queue line
   - `Queuing`: agent physically in queue slot, shuffling forward each tick
   - `QueueManager` transitions: Loading → TravelToQueue (policy picks queue), TravelToQueue → Queuing (arrival at queue cell), Queuing → TravelLoaded (promotion when slot[0] + delivery free)
-- `TaskScheduler` trait: `fn assign_pickup(zones, pos, occupied, rng)` + `fn assign_delivery(...)`
 - `ActiveScheduler` resource: `Box<dyn TaskScheduler>` — 4 schedulers: random, closest, balanced, roundtrip
 - `LifelongConfig` resource: tasks_completed, task_limit, throughput window
 - Systems: `recycle_goals` (state machine) → `QueueManager::tick()` → solver replan

@@ -25,6 +25,7 @@ const WASM_WARN_GRID_AREA = 128 * 128; // 16384
 
 let pollTimer = null;
 let selectedAgentId = null;
+let activeTopologyId = null; // tracks the selected topology preset ID
 let lastAgentCount = -1;
 let _baselineLoggedForRun = false;
 let prevMetricValues = {};
@@ -124,6 +125,7 @@ export function initApp() {
     initVizToolbar();
     initResultsPhase();
     initExperimentMode();
+    initShareButton();
 
     // Auto-play demo: show on first visit (persisted in localStorage)
     if (!localStorage.getItem('mafis-demo-seen')) {
@@ -154,6 +156,9 @@ export function initApp() {
     }
 
     startPolling();
+
+    // Check for shared URL state (auto-configures + starts simulation)
+    checkSharedUrl();
 
     // Suppress right-click context menu on canvas (right-drag = pan)
     const canvas = document.getElementById('bevy-canvas');
@@ -1652,29 +1657,26 @@ function updateFaultTimeline(s) {
         const card = document.createElement('div');
         card.className = 'ft-card';
 
-        const deltaPct = fe.throughput_before > 0
-            ? ((fe.throughput_delta / fe.throughput_before) * 100).toFixed(0)
-            : '0';
-        const deltaClass = fe.throughput_delta < 0 ? 'negative' : 'positive';
         const recClass = fe.recovered ? 'recovered' : 'permanent';
-        const recText = fe.recovered ? `${fe.recovery_tick - fe.tick} ticks \u2713` : 'permanent';
+        const recText = fe.recovered ? `recovered in ${fe.recovery_tick - fe.tick}t` : 'permanent';
+
+        // Impact line: agents + optional throughput drop (only if meaningful)
+        let impactHtml = `${fe.agents_affected} agent${fe.agents_affected !== 1 ? 's' : ''} affected`;
+        if (fe.throughput_before > 0 && Math.abs(fe.throughput_delta) > 0.001) {
+            const dropPct = Math.abs((fe.throughput_delta / fe.throughput_before) * 100).toFixed(0);
+            const isNeg = fe.throughput_delta < 0;
+            impactHtml += ` <span class="ft-card-delta ${isNeg ? 'negative' : 'positive'}">${isNeg ? '\u2212' : '+'}${dropPct}%</span>`;
+        }
 
         card.innerHTML = `
             <div class="ft-card-header">
-                <span class="ft-card-id">#${fe.id} ${fe.fault_type.toUpperCase()}</span>
-                <span class="ft-card-tick">T${fe.tick}</span>
+                <span class="ft-card-type-badge ${fe.fault_type}">${fe.fault_type.toUpperCase()}</span>
+                <span class="ft-card-tick">tick ${fe.tick}</span>
             </div>
-            <div class="ft-card-body">
-                ${fe.source} at (${fe.position[0]}, ${fe.position[1]}) &middot; ${fe.agents_affected} agents &middot; depth ${fe.cascade_depth}
-            </div>
-            <div class="ft-card-tp">
-                <span>TP ${fe.throughput_before.toFixed(3)} \u2192 ${fe.throughput_min.toFixed(3)}</span>
-                <span class="ft-card-delta ${deltaClass}">\u25BC ${Math.abs(deltaPct)}%</span>
-                <span class="ft-card-recovery ${recClass}">${recText}</span>
-            </div>
+            <div class="ft-card-impact">${impactHtml}</div>
+            <div class="ft-card-status ${recClass}">${recText}</div>
             <div class="ft-card-actions">
                 <button class="ft-btn" data-action="seek" data-tick="${fe.tick}">SEEK</button>
-                <button class="ft-btn" data-action="compare" data-event-id="${fe.id}">COMPARE</button>
                 <button class="ft-btn ft-btn-delete" data-action="delete" data-tick="${fe.tick}">DELETE</button>
             </div>
         `;
@@ -3267,6 +3269,8 @@ function initTheme() {
     if (saved === 'dark') {
         document.documentElement.setAttribute('data-theme', 'dark');
         document.getElementById('btn-theme').textContent = '\u2600'; // sun
+        // Sync Bevy ClearColor on next bridge poll
+        setTimeout(() => sendCommand({ type: 'set_theme', value: 'dark' }), 500);
     }
 }
 
@@ -3276,10 +3280,12 @@ function toggleTheme() {
         document.documentElement.removeAttribute('data-theme');
         document.getElementById('btn-theme').textContent = '\u263D'; // moon
         localStorage.setItem('mafis-theme', 'light');
+        sendCommand({ type: 'set_theme', value: 'light' });
     } else {
         document.documentElement.setAttribute('data-theme', 'dark');
         document.getElementById('btn-theme').textContent = '\u2600'; // sun
         localStorage.setItem('mafis-theme', 'dark');
+        sendCommand({ type: 'set_theme', value: 'dark' });
     }
 }
 
@@ -3922,6 +3928,9 @@ function applyTopologyByIndex(idx) {
     if (idx < 0 || idx >= loadedTopologies.length) return;
     const topo = loadedTopologies[idx];
 
+    // Track selected topology ID for URL sharing
+    activeTopologyId = topo.id;
+
     // Send the full map JSON as a custom map load
     sendCommand({ type: 'load_custom_map', ...topo.data });
 
@@ -3989,7 +3998,13 @@ function showScenarioParams(type) {
 
 function updateBurstAbsLabel() {
     const pct = parseFloat(document.getElementById('input-burst-kill-percent')?.value || 20);
-    const agents = parseInt(document.getElementById('input-agents')?.value || 15);
+    // Use live agent count from bridge state if available, fall back to slider
+    let agents = 0;
+    try {
+        const raw = typeof get_simulation_state === 'function' ? get_simulation_state() : null;
+        if (raw) { const s = JSON.parse(raw); agents = s.num_agents || 0; }
+    } catch { /* ignore */ }
+    if (!agents) agents = parseInt(document.getElementById('input-agents')?.value || 20);
     const abs = Math.max(1, Math.round(agents * pct / 100));
     const label = document.getElementById('burst-kill-abs');
     if (label) label.textContent = `(= ${abs} robot${abs !== 1 ? 's' : ''})`;
@@ -5238,9 +5253,12 @@ async function runExpAsync() {
 // ---------------------------------------------------------------------------
 
 function renderExpResults() {
-    if (!experimentData?.summaries?.length) return;
+    if (!experimentData || !Array.isArray(experimentData.summaries) || experimentData.summaries.length === 0) return;
     const summ = document.getElementById('exp-results-summary');
-    if (summ) summ.textContent = `${experimentData.summaries.length} configurations \u2014 ${experimentData.summaries[0]?.num_seeds || '?'} seeds each`;
+    if (summ) {
+        const seeds = experimentData.summaries[0]?.num_seeds || '?';
+        summ.textContent = `${experimentData.summaries.length} configurations \u2014 ${seeds} seeds each`;
+    }
     renderExpTable();
     renderExpChart();
 }
@@ -5320,7 +5338,7 @@ function renderExpTable() {
     for (const idx of sortedIndices) {
         const s = summaries[idx];
         bodyHtml += `<tr data-exp-idx="${idx}">`;
-        bodyHtml += `<td><button class="btn-sim3d" data-sim-idx="${idx}" title="Simulate in observatory">OBS</button></td>`;
+        bodyHtml += `<td><button class="btn-sim3d" data-sim-idx="${idx}" title="Simulate in observatory">OBS</button><button class="btn-exp-share" data-share-idx="${idx}" title="Copy shareable URL">SHARE</button></td>`;
         bodyHtml += `<td>${s.solver || ''}</td>`;
         bodyHtml += `<td>${s.topology || ''}</td>`;
         bodyHtml += `<td>${s.scenario || ''}</td>`;
@@ -5343,8 +5361,8 @@ function renderExpTable() {
     // Bind row click → drill-down
     tbody.querySelectorAll('tr').forEach(tr => {
         tr.addEventListener('click', (e) => {
-            // Don't trigger drill-down if clicking the 3D button
-            if (e.target.closest('.btn-sim3d')) return;
+            // Don't trigger drill-down if clicking action buttons
+            if (e.target.closest('.btn-sim3d') || e.target.closest('.btn-exp-share')) return;
             const idx = parseInt(tr.dataset.expIdx, 10);
             if (!isNaN(idx)) showExpDrilldown(idx);
         });
@@ -5355,6 +5373,27 @@ function renderExpTable() {
         btn.addEventListener('click', () => {
             const idx = parseInt(btn.dataset.simIdx, 10);
             if (!isNaN(idx)) simulateIn3D(idx);
+        });
+    });
+
+    // Bind share buttons
+    tbody.querySelectorAll('.btn-exp-share').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            const idx = parseInt(btn.dataset.shareIdx, 10);
+            if (isNaN(idx) || !experimentData?.summaries?.[idx]) return;
+            const url = await generateShareUrlFromSummary(experimentData.summaries[idx]);
+            if (!url) return;
+            try { await navigator.clipboard.writeText(url); } catch {
+                const ta = document.createElement('textarea');
+                ta.value = url; ta.style.position = 'fixed'; ta.style.opacity = '0';
+                document.body.appendChild(ta); ta.select(); document.execCommand('copy');
+                document.body.removeChild(ta);
+            }
+            const prev = btn.textContent;
+            btn.textContent = 'OK';
+            btn.classList.add('copied');
+            setTimeout(() => { btn.textContent = prev; btn.classList.remove('copied'); }, 1200);
         });
     });
 }
@@ -5741,4 +5780,345 @@ function exportExpTypst() {
     }
     typ += ')\n';
     downloadBlob(typ, 'experiment.typ', 'text/plain');
+}
+
+// ---------------------------------------------------------------------------
+// URL Sharing System
+// ---------------------------------------------------------------------------
+// Encodes the current observatory state into a URL hash fragment.
+// Format: #s=<base64url-encoded compressed JSON>
+// Uses CompressionStream (native) with raw base64 fallback.
+
+function getShareableState() {
+    // Read the latest bridge state (for fields not available from DOM)
+    let state;
+    try {
+        const raw = get_simulation_state();
+        if (!raw || raw === '{}') return null;
+        state = JSON.parse(raw);
+    } catch { return null; }
+
+    // DOM helpers — DOM controls are always current, even in configure phase
+    const domStr = (id) => document.getElementById(id)?.value || undefined;
+    const domInt = (id) => { const v = parseInt(document.getElementById(id)?.value, 10); return isNaN(v) ? undefined : v; };
+    const domFloat = (id) => { const v = parseFloat(document.getElementById(id)?.value); return isNaN(v) ? undefined : v; };
+    const domBool = (id) => document.getElementById(id)?.checked ?? false;
+
+    // Topology: use activeTopologyId (JS-tracked) — reliable even when load_custom_map sets name="custom"
+    const topoId = (activeTopologyId && activeTopologyId !== 'custom')
+        ? activeTopologyId
+        : (state.topology && state.topology !== 'custom' ? state.topology : undefined);
+
+    const shared = {
+        v: 1,
+        t: topoId,
+        s: domStr('input-solver') || state.solver || undefined,
+        sc: domStr('input-scheduler') || state.lifelong?.scheduler || undefined,
+        n: domInt('input-agents') || state.num_agents || undefined,
+        // Seed: read bridge (always synced); handle seed=0 explicitly
+        sd: state.seed != null ? state.seed : undefined,
+        hz: domFloat('input-tick-hz') || state.tick_hz || undefined,
+        d: domInt('input-duration') || state.duration || undefined,
+    };
+
+    // Fault scenario — read from DOM: bridge fault_scenario.enabled is only set when sim starts,
+    // so DOM checkbox is the ground truth during configure phase.
+    const faultEnabled = domBool('input-fault-enabled');
+    if (faultEnabled) {
+        const faultType = domStr('input-fault-scenario-type') || state.fault_scenario?.scenario_type;
+        if (faultType && faultType !== 'none') {
+            shared.f = { type: faultType };
+            if (faultType === 'burst_failure') {
+                shared.f.kill = domInt('input-burst-kill-percent') ?? state.fault_scenario?.burst_kill_percent ?? 20;
+                shared.f.at = domInt('input-burst-at-tick') ?? state.fault_scenario?.burst_at_tick ?? 100;
+            } else if (faultType === 'wear_based') {
+                const activeRateBtn = document.querySelector('.wear-rate-btn.active');
+                const rateName = activeRateBtn?.dataset.rate || state.fault_scenario?.wear_heat_rate || 'medium';
+                const rateMap = { low: 0, medium: 1, high: 2 };
+                shared.f.rate = rateMap[rateName] ?? 1;
+                shared.f.thresh = domInt('input-wear-threshold') ?? state.fault_scenario?.wear_threshold ?? 80;
+            } else if (faultType === 'zone_outage') {
+                shared.f.at = domInt('input-zone-at-tick') ?? state.fault_scenario?.zone_at_tick ?? 100;
+                shared.f.dur = domInt('input-zone-latency-duration') ?? state.fault_scenario?.zone_latency_duration ?? 50;
+            } else {
+                // intermittent or other — store type only
+            }
+        }
+    }
+
+    // Strip undefined values
+    return JSON.parse(JSON.stringify(shared));
+}
+
+async function compressToBase64Url(jsonStr) {
+    if (typeof CompressionStream !== 'undefined') {
+        const stream = new Blob([jsonStr]).stream().pipeThrough(new CompressionStream('deflate-raw'));
+        const buf = await new Response(stream).arrayBuffer();
+        return arrayBufferToBase64Url(buf);
+    }
+    // Fallback: raw base64url (no compression)
+    return btoa(jsonStr).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+async function decompressFromBase64Url(b64) {
+    const buf = base64UrlToArrayBuffer(b64);
+    if (typeof DecompressionStream !== 'undefined') {
+        try {
+            const stream = new Blob([buf]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+            return await new Response(stream).text();
+        } catch {
+            // Fallback: maybe it was stored uncompressed
+        }
+    }
+    // Fallback: raw base64url decode
+    try {
+        return atob(b64.replace(/-/g, '+').replace(/_/g, '/'));
+    } catch { return null; }
+}
+
+function arrayBufferToBase64Url(buf) {
+    const bytes = new Uint8Array(buf);
+    let binary = '';
+    for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+    return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+function base64UrlToArrayBuffer(b64) {
+    const padded = b64.replace(/-/g, '+').replace(/_/g, '/');
+    const binary = atob(padded);
+    const buf = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) buf[i] = binary.charCodeAt(i);
+    return buf.buffer;
+}
+
+async function generateShareUrl() {
+    const state = getShareableState();
+    if (!state) return null;
+    const json = JSON.stringify(state);
+    const encoded = await compressToBase64Url(json);
+    const url = new URL(window.location.href);
+    url.hash = '';
+    url.search = '';
+    return url.origin + url.pathname + '#s=' + encoded;
+}
+
+async function applySharedState(hash) {
+    if (!hash || !hash.startsWith('#s=')) return false;
+    const encoded = hash.slice(3);
+    if (!encoded) return false;
+
+    let json;
+    try {
+        json = await decompressFromBase64Url(encoded);
+        if (!json) return false;
+    } catch { return false; }
+
+    let shared;
+    try {
+        shared = JSON.parse(json);
+    } catch { return false; }
+
+    if (!shared || shared.v !== 1) return false;
+
+    // Reset and configure
+    sendCommand({ type: 'set_state', value: 'reset' });
+    setPhase('configure');
+
+    // Hide demo splash for shared URLs
+    const splash = document.getElementById('demo-splash');
+    if (splash) splash.style.display = 'none';
+    localStorage.setItem('mafis-demo-seen', '1');
+
+    // Apply topology: load_custom_map is required on WASM (TopologyRegistry is empty there).
+    // Track activeTopologyId so getShareableState() can read the correct ID later.
+    if (shared.t) {
+        activeTopologyId = shared.t;
+        const topo = loadedTopologies.find(t => t.id === shared.t);
+        if (topo) {
+            sendCommand({ type: 'load_custom_map', ...topo.data });
+        }
+    }
+
+    if (shared.s) sendCommand({ type: 'set_solver', value: shared.s });
+    if (shared.sc) sendCommand({ type: 'set_scheduler', value: shared.sc });
+    // set_num_agents after set_topology (set_topology resets num_agents to suggested_agents)
+    if (shared.n) sendCommand({ type: 'set_num_agents', value: shared.n });
+    if (shared.sd != null) sendCommand({ type: 'set_seed', value: shared.sd });
+    if (shared.hz) sendCommand({ type: 'set_tick_hz', value: shared.hz });
+    if (shared.d) sendCommand({ type: 'set_duration', value: shared.d });
+
+    // Fault scenario — build a proper label for configureFaultFromScenarioLabel
+    const rateNames = { 0: 'low', 1: 'medium', 2: 'high' };
+    let faultLabel = 'none';
+    if (shared.f) {
+        if (shared.f.type === 'burst_failure') {
+            faultLabel = `burst_${shared.f.kill != null ? shared.f.kill : 20}pct`;
+        } else if (shared.f.type === 'wear_based') {
+            // rate may be a number (0/1/2) from getShareableState or a string from generateShareUrlFromSummary
+            const rateName = typeof shared.f.rate === 'number'
+                ? (rateNames[shared.f.rate] ?? 'medium')
+                : (shared.f.rate || 'medium');
+            faultLabel = `wear_${rateName}`;
+        } else if (shared.f.type === 'zone_outage') {
+            faultLabel = `zone_${shared.f.dur != null ? shared.f.dur : 50}t`;
+        } else {
+            faultLabel = shared.f.type || 'none';
+        }
+    }
+    configureFaultFromScenarioLabel(faultLabel);
+
+    // Override at-tick/thresh params that configureFaultFromScenarioLabel hardcodes
+    if (shared.f?.type === 'burst_failure' && shared.f.at != null) {
+        sendCommand({ type: 'set_scenario_param', key: 'burst_at_tick', value: shared.f.at });
+        syncSliderDisplay('input-burst-at-tick', 'val-burst-at-tick', shared.f.at);
+    }
+    if (shared.f?.type === 'wear_based' && shared.f.thresh != null) {
+        sendCommand({ type: 'set_scenario_param', key: 'wear_threshold', value: shared.f.thresh });
+        syncSliderDisplay('input-wear-threshold', 'val-wear-threshold', shared.f.thresh);
+    }
+    if (shared.f?.type === 'zone_outage' && shared.f.at != null) {
+        sendCommand({ type: 'set_scenario_param', key: 'zone_at_tick', value: shared.f.at });
+        syncSliderDisplay('input-zone-at-tick', 'val-zone-at-tick', shared.f.at);
+    }
+
+    // Auto-start
+    sendCommand({ type: 'set_state', value: 'start' });
+
+    // Sync DOM controls
+    setTimeout(() => {
+        if (shared.s) {
+            const el = document.getElementById('input-solver');
+            if (el) el.value = shared.s;
+        }
+        if (shared.sc) {
+            const el = document.getElementById('input-scheduler');
+            if (el) el.value = shared.sc;
+        }
+        if (shared.d) {
+            const el = document.getElementById('input-duration');
+            if (el) el.value = shared.d;
+        }
+        if (shared.n) {
+            syncSliderDisplay('input-agents', 'val-agents', shared.n);
+        }
+        if (shared.sd != null) {
+            const el = document.getElementById('input-seed');
+            if (el) el.value = shared.sd;
+        }
+        // Mark topology button active
+        if (shared.t) {
+            const presetBtns = document.querySelectorAll('#topology-presets .preset-btn');
+            presetBtns.forEach(btn => {
+                const idx = parseInt(btn.dataset.topoIdx, 10);
+                const topo = loadedTopologies[idx];
+                btn.classList.toggle('active', topo?.id === shared.t);
+            });
+        }
+    }, 200);
+
+    return true;
+}
+
+function initShareButton() {
+    const btn = document.getElementById('btn-share');
+    if (!btn) return;
+
+    btn.addEventListener('click', async () => {
+        const url = await generateShareUrl();
+        if (!url) return;
+
+        try {
+            await navigator.clipboard.writeText(url);
+        } catch {
+            // Fallback for non-HTTPS or denied clipboard
+            const ta = document.createElement('textarea');
+            ta.value = url;
+            ta.style.position = 'fixed';
+            ta.style.opacity = '0';
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand('copy');
+            document.body.removeChild(ta);
+        }
+
+        // Visual feedback
+        const prev = btn.textContent;
+        btn.textContent = 'COPIED';
+        btn.classList.add('copied');
+        setTimeout(() => {
+            btn.textContent = prev;
+            btn.classList.remove('copied');
+        }, 1500);
+    });
+}
+
+// Generate share URL from an experiment summary row
+async function generateShareUrlFromSummary(summary) {
+    if (!summary) return null;
+    const shared = { v: 1 };
+    if (summary.topology) shared.t = summary.topology;
+    if (summary.solver) shared.s = summary.solver;
+    if (summary.scheduler) shared.sc = summary.scheduler;
+    if (summary.num_agents) shared.n = summary.num_agents;
+
+    // Get seed from first matching run
+    const run = experimentData?.runs?.find(r =>
+        r.config?.solver === summary.solver &&
+        r.config?.topology === summary.topology &&
+        r.config?.scenario === summary.scenario &&
+        r.config?.scheduler === summary.scheduler &&
+        r.config?.num_agents === summary.num_agents
+    );
+    if (run?.config?.seed != null) shared.sd = run.config.seed;
+    if (run?.config?.tick_count) shared.d = run.config.tick_count;
+
+    // Map experiment scenario label to fault config
+    if (summary.scenario && summary.scenario !== 'none') {
+        if (summary.scenario.startsWith('burst_')) {
+            const m = summary.scenario.match(/^burst_(\d+)pct$/);
+            shared.f = { type: 'burst_failure', kill: m ? parseInt(m[1]) : 20, at: 100 };
+        } else if (summary.scenario.startsWith('wear_')) {
+            const rate = summary.scenario.replace('wear_', '');
+            shared.f = { type: 'wear_based', rate, thresh: rate === 'high' ? 60 : rate === 'low' ? 100 : 80 };
+        } else if (summary.scenario.startsWith('zone_')) {
+            const m = summary.scenario.match(/^zone_(\d+)t$/);
+            shared.f = { type: 'zone_outage', at: 100, dur: m ? parseInt(m[1]) : 50 };
+        }
+    }
+
+    const json = JSON.stringify(shared);
+    const encoded = await compressToBase64Url(json);
+    const url = new URL(window.location.href);
+    url.hash = '';
+    url.search = '';
+    return url.origin + url.pathname + '#s=' + encoded;
+}
+
+// Check for shared state on load (called from initApp after topologies are loaded)
+async function checkSharedUrl() {
+    if (!window.location.hash || !window.location.hash.startsWith('#s=')) return;
+
+    // Wait for Bevy to be ready (first non-empty state from bridge).
+    // The WASM binary is ~18MB; Bevy's event loop may take several seconds to start.
+    const maxWait = 15000; // 15s max
+    const start = Date.now();
+    while (Date.now() - start < maxWait) {
+        try {
+            const raw = get_simulation_state();
+            if (raw && raw !== '{}') break;
+        } catch { /* WASM not ready */ }
+        await new Promise(r => setTimeout(r, 200));
+    }
+
+    // Also wait for topologies to load (fetched from manifest.json)
+    let topoWait = 0;
+    while (loadedTopologies.length === 0 && topoWait < 5000) {
+        await new Promise(r => setTimeout(r, 100));
+        topoWait += 100;
+    }
+
+    const applied = await applySharedState(window.location.hash);
+    if (applied) {
+        history.replaceState(null, '', window.location.pathname + window.location.search);
+    }
 }

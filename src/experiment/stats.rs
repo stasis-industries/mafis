@@ -178,4 +178,51 @@ mod tests {
         let many_width = many.ci95_hi - many.ci95_lo;
         assert!(many_width < few_width, "CI should narrow with more samples");
     }
+
+    #[test]
+    fn ci95_matches_reference() {
+        // Reference: [2, 4, 4, 4, 5, 5, 7, 9], n=8, mean=5.0
+        // Sample std = sqrt(sum((xi-5)^2)/7) = sqrt((9+1+1+1+0+0+4+16)/7) = sqrt(32/7) ~ 2.1381
+        // t(df=7, 0.025) = 2.365 (from table)
+        // margin = 2.365 * 2.1381 / sqrt(8) = 2.365 * 0.7559 = 1.7867
+        // CI = [5.0 - 1.787, 5.0 + 1.787] = [3.213, 6.787]
+        let vals = [2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0];
+        let s = compute_stat_summary(&vals).unwrap();
+        assert!(
+            (s.ci95_lo - 3.21).abs() < 0.02,
+            "ci95_lo should be ~3.21, got {:.3}",
+            s.ci95_lo
+        );
+        assert!(
+            (s.ci95_hi - 6.79).abs() < 0.02,
+            "ci95_hi should be ~6.79, got {:.3}",
+            s.ci95_hi
+        );
+    }
+
+    #[test]
+    fn nan_filtering_sample_size() {
+        // 5 values with 2 NaNs -> effective n=3
+        let vals = [1.0, f64::NAN, 3.0, f64::NAN, 5.0];
+        let s = compute_stat_summary(&vals).unwrap();
+        assert_eq!(s.n, 3, "effective sample size should be 3");
+        assert!(
+            (s.mean - 3.0).abs() < 1e-10,
+            "mean of [1,3,5] should be 3.0"
+        );
+        // std of [1,3,5] = sqrt(((1-3)^2+(3-3)^2+(5-3)^2)/2) = sqrt(8/2) = 2.0
+        assert!((s.std - 2.0).abs() < 1e-10, "std should be 2.0, got {}", s.std);
+        // CI with t(df=2) = 4.303
+        let margin = 4.303 * 2.0 / (3.0_f64).sqrt();
+        let expected_lo = 3.0 - margin;
+        let expected_hi = 3.0 + margin;
+        assert!(
+            (s.ci95_lo - expected_lo).abs() < 0.01,
+            "ci95_lo mismatch"
+        );
+        assert!(
+            (s.ci95_hi - expected_hi).abs() < 0.01,
+            "ci95_hi mismatch"
+        );
+    }
 }

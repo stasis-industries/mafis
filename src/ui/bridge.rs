@@ -123,6 +123,7 @@ enum JsCommand {
     SetFaultScenarioType(String),
     SetScenarioParam { key: String, value: f64 },
     DeleteFaultAtTick(u64),
+    SetTheme(String),
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -249,6 +250,9 @@ fn parse_command(json: &str) -> Option<JsCommand> {
         }
         "delete_fault" => {
             Some(JsCommand::DeleteFaultAtTick(v.get("value")?.as_u64()?))
+        }
+        "set_theme" => {
+            Some(JsCommand::SetTheme(v.get("value")?.as_str()?.to_string()))
         }
         _ => None,
     }
@@ -1172,6 +1176,7 @@ fn process_js_commands(
     mut sim_res: SimCommandResources,
     mut click_selection: ResMut<ClickSelection>,
     mut rewind_req: ResMut<crate::fault::manual::RewindRequest>,
+    mut clear_color: ResMut<ClearColor>,
 ) {
     #[cfg(target_arch = "wasm32")]
     {
@@ -1699,6 +1704,16 @@ fn process_js_commands(
                         rewind_req.pending = Some(
                             crate::fault::manual::RewindKind::DeleteFaultAtTick(tick),
                         );
+                    }
+                }
+                JsCommand::SetTheme(ref theme) => {
+                    // Update ClearColor to match CSS theme
+                    if theme == "dark" {
+                        // Match --bg-canvas dark: rgb(24, 24, 30)
+                        clear_color.0 = Color::srgb(0.094, 0.094, 0.118);
+                    } else {
+                        // Match --bg-canvas light: rgb(225, 222, 218)
+                        clear_color.0 = Color::srgb(0.882, 0.871, 0.855);
                     }
                 }
             }

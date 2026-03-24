@@ -96,7 +96,7 @@ Systematically vary multiple parameters:
 
 | Variable | Values | Why |
 |----------|--------|-----|
-| **Scheduler** | random, closest | Directly affects task distribution and congestion patterns |
+| **Scheduler** | random, closest, balanced, roundtrip | Affects task distribution; ~10% throughput effect (not dominant) |
 | **Fault scenario** | None, BurstFailure, WearBased, ZoneOutage, IntermittentFault | Different failure modes stress different aspects |
 | **Wear intensity** | Low, Medium, High (Weibull presets) | Gradual degradation curve |
 | **Topology** | warehouse_medium, warehouse_medium, warehouse_large | Scale effects |

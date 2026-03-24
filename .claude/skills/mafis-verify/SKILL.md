@@ -26,7 +26,7 @@ Was code modified?
 │   ├── Fails → fix errors, re-check
 │   └── Passes → Step 2: cargo test (~7s)
 │       ├── Fails → fix errors, re-test
-│       └── Passes → Does change touch rendering, bridge, ECS, or web/?
+│       └── Passes (396 tests) → Does change touch rendering, bridge, ECS, or web/?
 │           ├── No → DONE (report pass)
 │           ├── Yes (web/bridge only) → Step 3a: WASM build
 │           ├── Yes (desktop/egui only) → Step 3b: cargo run

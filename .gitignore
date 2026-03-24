@@ -7,3 +7,4 @@ settings.local.json
 .claude/settings.local.json
 .claude/launch.json
 .claude/skills/*-workspace/
+VISIBILITY_PLAN.md
