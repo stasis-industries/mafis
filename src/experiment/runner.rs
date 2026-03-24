@@ -488,6 +488,13 @@ fn parse_config_json(json: &str) -> Option<ExperimentConfig> {
                 intermittent_recovery_ticks: s.get("recovery").and_then(|r| r.as_u64()).unwrap_or(15) as u32,
                 ..Default::default()
             }),
+            "permanent_zone" | "perm_zone" => Some(FaultScenario {
+                enabled: true,
+                scenario_type: FaultScenarioType::PermanentZoneOutage,
+                perm_zone_at_tick: s.get("at_tick").and_then(|t| t.as_u64()).unwrap_or(100),
+                perm_zone_block_percent: s.get("block_percent").and_then(|p| p.as_f64()).unwrap_or(100.0) as f32,
+                ..Default::default()
+            }),
             "none" | _ => None,
         }
     });

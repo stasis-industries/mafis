@@ -3988,7 +3988,7 @@ function getDuration() {
 
 function showFaultParams(type) {
     document.querySelectorAll('.fl-params').forEach(el => el.style.display = 'none');
-    const map = { burst_failure: 'fl-params-burst', wear_based: 'fl-params-wear', zone_outage: 'fl-params-zone', intermittent_fault: 'fl-params-intermittent' };
+    const map = { burst_failure: 'fl-params-burst', wear_based: 'fl-params-wear', zone_outage: 'fl-params-zone', intermittent_fault: 'fl-params-intermittent', permanent_zone_outage: 'fl-params-perm-zone' };
     const panel = document.getElementById(map[type]);
     if (panel) panel.style.display = '';
 }
@@ -4003,7 +4003,7 @@ function updateFlBurstAbs() {
 
 function clampFlTickSliders() {
     const duration = getDuration();
-    ['fl-burst-tick', 'fl-zone-tick'].forEach(id => {
+    ['fl-burst-tick', 'fl-zone-tick', 'fl-perm-zone-tick'].forEach(id => {
         const el = document.getElementById(id);
         if (el) {
             el.max = duration;
@@ -4033,6 +4033,10 @@ function buildFaultItemFromForm() {
             item.mtbf = parseInt(document.getElementById('fl-inter-mtbf').value);
             item.recovery = parseInt(document.getElementById('fl-inter-rec').value);
             break;
+        case 'permanent_zone_outage':
+            item.at_tick = parseInt(document.getElementById('fl-perm-zone-tick').value);
+            item.block_percent = parseFloat(document.getElementById('fl-perm-zone-pct').value);
+            break;
     }
     return item;
 }
@@ -4043,6 +4047,7 @@ function addFault() {
     // Enforce: max 1 wear, max 1 intermittent
     if (type === 'wear_based' && faultList.some(f => f.type === 'wear_based')) return;
     if (type === 'intermittent_fault' && faultList.some(f => f.type === 'intermittent_fault')) return;
+    if (type === 'permanent_zone_outage' && faultList.some(f => f.type === 'permanent_zone_outage')) return;
 
     const item = buildFaultItemFromForm();
 
@@ -4085,11 +4090,11 @@ function syncFaultListToRust() {
 }
 
 function faultBadgeClass(type) {
-    return { burst_failure: 'burst', wear_based: 'wear', zone_outage: 'zone', intermittent_fault: 'intermittent' }[type] || 'burst';
+    return { burst_failure: 'burst', wear_based: 'wear', zone_outage: 'zone', intermittent_fault: 'intermittent', permanent_zone_outage: 'perm-zone' }[type] || 'burst';
 }
 
 function faultBadgeLabel(type) {
-    return { burst_failure: 'BURST', wear_based: 'WEAR', zone_outage: 'ZONE', intermittent_fault: 'INTER' }[type] || type;
+    return { burst_failure: 'BURST', wear_based: 'WEAR', zone_outage: 'ZONE', intermittent_fault: 'INTER', permanent_zone_outage: 'PERM' }[type] || type;
 }
 
 function faultSummary(item) {
@@ -4098,6 +4103,7 @@ function faultSummary(item) {
         case 'wear_based': return `${(item.heat_rate || 'medium')} intensity`;
         case 'zone_outage': return `${item.duration}t at t=${item.at_tick}`;
         case 'intermittent_fault': return `MTBF=${item.mtbf} rec=${item.recovery}t`;
+        case 'permanent_zone_outage': return `${item.block_percent}% at t=${item.at_tick}`;
         default: return '';
     }
 }
@@ -4133,9 +4139,11 @@ function updateFaultTypeOptions() {
     if (!sel) return;
     const hasWear = faultList.some(f => f.type === 'wear_based');
     const hasInter = faultList.some(f => f.type === 'intermittent_fault');
+    const hasPermZone = faultList.some(f => f.type === 'permanent_zone_outage');
     for (const opt of sel.options) {
         if (opt.value === 'wear_based') opt.disabled = hasWear;
         if (opt.value === 'intermittent_fault') opt.disabled = hasInter;
+        if (opt.value === 'permanent_zone_outage') opt.disabled = hasPermZone;
     }
     // If current selection is disabled, switch to burst
     if (sel.options[sel.selectedIndex]?.disabled) {
@@ -4173,6 +4181,12 @@ function bindFaultList() {
     // Intermittent params
     bindSlider('fl-inter-mtbf', 'fl-inter-mtbf-val', () => {});
     bindSlider('fl-inter-rec', 'fl-inter-rec-val', () => {});
+
+    // Permanent zone outage params
+    bindSlider('fl-perm-zone-tick', 'fl-perm-zone-tick-val', () => {});
+    bindSlider('fl-perm-zone-pct', 'fl-perm-zone-pct-val', v => {
+        document.getElementById('fl-perm-zone-pct-val').textContent = v + '%';
+    });
 
     // ADD button
     document.getElementById('btn-add-fault')?.addEventListener('click', addFault);
@@ -5986,6 +6000,10 @@ function configureFaultFromScenarioLabel(label) {
         faultList.push({ id: 'f_' + (++faultIdCounter), type: 'zone_outage', at_tick: 100, duration });
     } else if (label.startsWith('intermittent')) {
         faultList.push({ id: 'f_' + (++faultIdCounter), type: 'intermittent_fault', mtbf: 80, recovery: 15 });
+    } else if (label.startsWith('perm_zone_')) {
+        const match = label.match(/^perm_zone_(\d+)pct$/);
+        const blockPct = match ? parseInt(match[1]) : 100;
+        faultList.push({ id: 'f_' + (++faultIdCounter), type: 'permanent_zone_outage', at_tick: 100, block_percent: blockPct });
     } else {
         faultList.push({ id: 'f_' + (++faultIdCounter), type: 'burst_failure', kill_percent: 20, at_tick: 100 });
     }
@@ -6108,6 +6126,7 @@ function getShareableState() {
             if (f.type === 'wear_based') { item.rate = f.heat_rate; }
             if (f.type === 'zone_outage') { item.at = f.at_tick; item.dur = f.duration; }
             if (f.type === 'intermittent_fault') { item.mtbf = f.mtbf; item.rec = f.recovery; }
+            if (f.type === 'permanent_zone_outage') { item.at = f.at_tick; item.blk = f.block_percent; }
             return item;
         });
     }
@@ -6222,6 +6241,7 @@ async function applySharedState(hash) {
             if (f.type === 'wear_based') { item.heat_rate = f.rate || 'medium'; }
             if (f.type === 'zone_outage') { item.at_tick = f.at || 100; item.duration = f.dur || 50; }
             if (f.type === 'intermittent_fault') { item.mtbf = f.mtbf || 80; item.recovery = f.rec || 15; }
+            if (f.type === 'permanent_zone_outage') { item.at_tick = f.at || 100; item.block_percent = f.blk || 100; }
             faultList.push(item);
         });
     } else if (shared.f) {

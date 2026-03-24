@@ -744,6 +744,108 @@ impl SimulationRunner {
                         }
                     }
                 }
+                ScheduledAction::ZoneBlock { block_percent } => {
+                    // Find the zone type with the most alive agents (same as ZoneLatency).
+                    let zone_types = [
+                        ZoneType::Pickup,
+                        ZoneType::Delivery,
+                        ZoneType::Corridor,
+                        ZoneType::CrossAisle,
+                        ZoneType::Open,
+                        ZoneType::Recharging,
+                    ];
+                    let mut best_zone = None;
+                    let mut best_count = 0usize;
+                    for &zt in &zone_types {
+                        let count = (0..n)
+                            .filter(|&i| {
+                                self.agents[i].alive
+                                    && self.zones.zone_type.get(&self.agents[i].pos) == Some(&zt)
+                            })
+                            .count();
+                        if count > best_count {
+                            best_count = count;
+                            best_zone = Some(zt);
+                        }
+                    }
+
+                    if let Some(target_zone) = best_zone {
+                        // Collect all walkable cells in the target zone.
+                        let mut zone_cells: Vec<IVec2> = self
+                            .zones
+                            .zone_type
+                            .iter()
+                            .filter(|(pos, zt)| **zt == target_zone && self.grid.is_walkable(**pos))
+                            .map(|(pos, _)| *pos)
+                            .collect();
+                        // Sort for deterministic selection when block_percent < 100%
+                        zone_cells.sort_by(|a, b| a.y.cmp(&b.y).then(a.x.cmp(&b.x)));
+
+                        // Determine how many cells to block.
+                        let block_count = if block_percent >= 100.0 {
+                            zone_cells.len()
+                        } else {
+                            ((zone_cells.len() as f32 * block_percent / 100.0).round() as usize)
+                                .max(1)
+                                .min(zone_cells.len())
+                        };
+
+                        // Partial block: Fisher-Yates shuffle for deterministic subset.
+                        if block_count < zone_cells.len() {
+                            for i in 0..block_count {
+                                let j = self.rng.rng.random_range(i..zone_cells.len());
+                                zone_cells.swap(i, j);
+                            }
+                            zone_cells.truncate(block_count);
+                        }
+
+                        // Convert cells to a HashSet for O(1) agent-position lookups.
+                        let blocked_set: HashSet<IVec2> = zone_cells.iter().copied().collect();
+
+                        // Block cells in grid and remove from zone vectors.
+                        for cell in &zone_cells {
+                            self.grid.set_obstacle(*cell);
+                            self.zones.zone_type.remove(cell);
+                        }
+                        self.zones.pickup_cells.retain(|c| !blocked_set.contains(c));
+                        self.zones.delivery_cells.retain(|c| !blocked_set.contains(c));
+                        self.zones.corridor_cells.retain(|c| !blocked_set.contains(c));
+                        self.zones.recharging_cells.retain(|c| !blocked_set.contains(c));
+                        self.zones
+                            .queue_lines
+                            .retain(|ql| !blocked_set.contains(&ql.delivery_cell) && !ql.cells.iter().any(|c| blocked_set.contains(c)));
+
+                        // Kill agents standing on blocked cells.
+                        for i in 0..n {
+                            if !self.agents[i].alive {
+                                continue;
+                            }
+                            if blocked_set.contains(&self.agents[i].pos) {
+                                self.agents[i].alive = false;
+                                self.agents[i].planned_path.clear();
+                                fault_events.push(FaultRecord {
+                                    agent_index: i,
+                                    fault_type: FaultType::Breakdown,
+                                    source: FaultSource::Scheduled,
+                                    tick,
+                                    position: self.agents[i].pos,
+                                });
+                            }
+                        }
+
+                        // Reset goals for agents whose targets are now blocked.
+                        for i in 0..n {
+                            if !self.agents[i].alive {
+                                continue;
+                            }
+                            if !self.grid.is_walkable(self.agents[i].goal) {
+                                self.agents[i].goal = self.agents[i].pos;
+                                self.agents[i].task_leg = TaskLeg::Free;
+                                self.agents[i].planned_path.clear();
+                            }
+                        }
+                    }
+                }
             }
         }
     }
