@@ -38,6 +38,9 @@ impl ExperimentConfig {
                 FaultScenarioType::IntermittentFault => {
                     format!("intermittent_{}m{}r", s.intermittent_mtbf_ticks, s.intermittent_recovery_ticks)
                 }
+                FaultScenarioType::PermanentZoneOutage => {
+                    format!("perm_zone_{}pct", s.perm_zone_block_percent as u32)
+                }
             },
         }
     }
@@ -132,6 +135,14 @@ pub fn standard_scenarios() -> Vec<Option<FaultScenario>> {
             intermittent_recovery_ticks: 15,
             ..Default::default()
         }),
+        // Permanent zone outage: 100% block at tick 100
+        Some(FaultScenario {
+            enabled: true,
+            scenario_type: FaultScenarioType::PermanentZoneOutage,
+            perm_zone_at_tick: 100,
+            perm_zone_block_percent: 100.0,
+            ..Default::default()
+        }),
     ]
 }
 
@@ -166,10 +177,10 @@ mod tests {
             seeds: vec![42],
             tick_count: 500,
         };
-        // 2 x 2 x 5 x 1 x 1 x 1 = 20
-        assert_eq!(matrix.total_runs(), 20);
+        // 2 x 2 x 6 x 1 x 1 x 1 = 24
+        assert_eq!(matrix.total_runs(), 24);
         let configs = matrix.expand();
-        assert_eq!(configs.len(), 20);
+        assert_eq!(configs.len(), 24);
     }
 
     #[test]
@@ -201,7 +212,7 @@ mod tests {
     #[test]
     fn standard_scenarios_count() {
         let scenarios = standard_scenarios();
-        assert_eq!(scenarios.len(), 5); // none + 4 fault types
+        assert_eq!(scenarios.len(), 6); // none + 5 fault types
         assert!(scenarios[0].is_none());
         assert!(scenarios[1].is_some());
     }

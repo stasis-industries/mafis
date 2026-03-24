@@ -10,6 +10,8 @@ const SCENARIO_TYPES: &[(&str, &str)] = &[
     ("burst_failure", "Burst Failure"),
     ("wear_based", "Wear & Tear"),
     ("zone_outage", "Zone Outage"),
+    ("intermittent_fault", "Intermittent Fault"),
+    ("permanent_zone_outage", "Permanent Zone Outage"),
 ];
 
 pub struct FaultPanelOutput {

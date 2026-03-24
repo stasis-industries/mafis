@@ -344,6 +344,7 @@
                                     <option value="wear_based">Wear-Based</option>
                                     <option value="zone_outage">Zone Outage</option>
                                     <option value="intermittent_fault">Intermittent</option>
+                                    <option value="permanent_zone_outage">Perm. Zone Outage</option>
                                 </select>
                             </div>
 
@@ -410,6 +411,24 @@
                                     <div class="slider-row">
                                         <input type="range" id="fl-inter-rec" min="1" max="100" value="15" step="1">
                                         <span class="slider-value" id="fl-inter-rec-val">15</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Permanent zone outage params -->
+                            <div id="fl-params-perm-zone" class="fl-params" style="display:none">
+                                <div class="input-group" title="Tick at which zone becomes permanently blocked">
+                                    <label class="input-label">At tick</label>
+                                    <div class="slider-row">
+                                        <input type="range" id="fl-perm-zone-tick" min="1" max="500" value="100" step="1">
+                                        <span class="slider-value" id="fl-perm-zone-tick-val">100</span>
+                                    </div>
+                                </div>
+                                <div class="input-group" title="Percentage of zone cells to permanently block">
+                                    <label class="input-label">Block %</label>
+                                    <div class="slider-row">
+                                        <input type="range" id="fl-perm-zone-pct" min="1" max="100" value="100" step="1">
+                                        <span class="slider-value" id="fl-perm-zone-pct-val">100%</span>
                                     </div>
                                 </div>
                             </div>

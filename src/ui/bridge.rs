@@ -411,6 +411,8 @@ struct FaultScenarioSnapshot {
     wear_threshold: f32,
     zone_at_tick: u64,
     zone_latency_duration: u32,
+    perm_zone_at_tick: u64,
+    perm_zone_block_percent: f32,
 }
 
 #[derive(Serialize)]
@@ -1013,6 +1015,8 @@ fn sync_state_to_js(
                 wear_threshold: sc.wear_threshold,
                 zone_at_tick: sc.zone_at_tick,
                 zone_latency_duration: sc.zone_latency_duration,
+                perm_zone_at_tick: sc.perm_zone_at_tick,
+                perm_zone_block_percent: sc.perm_zone_block_percent,
             }
         },
         baseline_diff: {
@@ -1089,6 +1093,10 @@ fn sync_state_to_js(
                 ScheduledAction::ZoneLatency { duration } => (
                     "zone_outage".to_string(),
                     format!("Zone Outage — {} tick latency", duration),
+                ),
+                ScheduledAction::ZoneBlock { block_percent } => (
+                    "permanent_zone_outage".to_string(),
+                    format!("Permanent Zone Outage — {}% cells blocked", *block_percent as u32),
                 ),
             };
             ScheduleMarkerSnapshot {
@@ -1827,6 +1835,7 @@ fn parse_fault_list_json(json: &str) -> Option<crate::fault::scenario::FaultList
             "wear_based" => FaultScenarioType::WearBased,
             "zone_outage" => FaultScenarioType::ZoneOutage,
             "intermittent_fault" => FaultScenarioType::IntermittentFault,
+            "permanent_zone_outage" => FaultScenarioType::PermanentZoneOutage,
             _ => continue,
         };
 
@@ -1865,6 +1874,12 @@ fn parse_fault_list_json(json: &str) -> Option<crate::fault::scenario::FaultList
                     .and_then(|v| v.as_u64()).unwrap_or(80);
                 item.intermittent_recovery_ticks = v.get("recovery")
                     .and_then(|v| v.as_u64()).unwrap_or(15) as u32;
+            }
+            FaultScenarioType::PermanentZoneOutage => {
+                item.perm_zone_at_tick = v.get("at_tick")
+                    .and_then(|v| v.as_u64()).unwrap_or(100);
+                item.perm_zone_block_percent = v.get("block_percent")
+                    .and_then(|v| v.as_f64()).unwrap_or(100.0) as f32;
             }
         }
 

@@ -80,19 +80,35 @@ function getArrayU8(ptr, len) {
 
 function isLikeNone(x) { return x === undefined || x === null; }
 
-// -- Externref table (mirrors wasm-bindgen's addToExternrefTable0) -----------
+// -- Heap object table (mirrors wasm-bindgen's addHeapObject/getObject) --------
+// The WASM binary uses integer indices into a JS-side heap array to pass
+// opaque JS objects (globalThis, Performance, etc.) across the WASM boundary.
 
-function addToExternrefTable0(obj) {
-    const idx = wasm.__externref_table_alloc();
-    wasm.__wbindgen_externrefs.set(idx, obj);
+let heap = new Array(128).fill(undefined);
+heap.push(undefined, null, true, false);
+let heap_next = heap.length;
+
+function addHeapObject(obj) {
+    if (heap_next === heap.length) heap.push(heap.length + 1);
+    const idx = heap_next;
+    heap_next = heap[idx];
+    heap[idx] = obj;
     return idx;
+}
+
+function getObject(idx) { return heap[idx]; }
+
+function dropObject(idx) {
+    if (idx < 132) return;
+    heap[idx] = heap_next;
+    heap_next = idx;
 }
 
 function handleError(f, args) {
     try {
         return f.apply(null, args);
     } catch (e) {
-        return addToExternrefTable0(e);
+        wasm.__wbindgen_export3(addHeapObject(e));
     }
 }
 
@@ -122,14 +138,16 @@ function buildImports(module) {
         // --- wasm-bindgen internals ---
 
         if (name === '__wbindgen_init_externref_table') {
-            bg[name] = () => {
-                const table = wasm.__wbindgen_externrefs;
-                const offset = table.grow(4);
-                table.set(0, undefined);
-                table.set(offset + 0, undefined);
-                table.set(offset + 1, null);
-                table.set(offset + 2, true);
-                table.set(offset + 3, false);
+            // No-op: this binary uses heap-based object passing, not externref
+            bg[name] = () => {};
+        }
+        else if (name === '__wbindgen_object_drop_ref') {
+            bg[name] = (arg0) => { dropObject(arg0); };
+        }
+        else if (name === '__wbindgen_object_clone_ref') {
+            bg[name] = (arg0) => {
+                const ret = getObject(arg0);
+                return addHeapObject(ret);
             };
         }
         else if (name.includes('__wbindgen_throw')) {
@@ -181,7 +199,7 @@ function buildImports(module) {
         else if (name.includes('static_accessor_SELF')) {
             bg[name] = () => {
                 const ret = typeof self === 'undefined' ? null : self;
-                return isLikeNone(ret) ? 0 : addToExternrefTable0(ret);
+                return isLikeNone(ret) ? 0 : addHeapObject(ret);
             };
         }
         else if (name.includes('static_accessor_WINDOW')) {
@@ -190,30 +208,33 @@ function buildImports(module) {
         else if (name.includes('static_accessor_GLOBAL_THIS')) {
             bg[name] = () => {
                 const ret = typeof globalThis === 'undefined' ? null : globalThis;
-                return isLikeNone(ret) ? 0 : addToExternrefTable0(ret);
+                return isLikeNone(ret) ? 0 : addHeapObject(ret);
             };
         }
         else if (name.includes('static_accessor_GLOBAL') && !name.includes('GLOBAL_THIS')) {
             bg[name] = () => {
                 const ret = typeof global === 'undefined' ? null : global;
-                return isLikeNone(ret) ? 0 : addToExternrefTable0(ret);
+                return isLikeNone(ret) ? 0 : addHeapObject(ret);
             };
         }
 
         // --- Property accessors used by web-time and getrandom ---
-        // These receive externref objects directly and return values/externrefs.
+        // These receive heap indices and must dereference via getObject().
 
         else if (name.includes('_performance_') && !name.includes('observe')) {
-            bg[name] = (arg0) => arg0.performance;
+            bg[name] = (arg0) => {
+                const ret = getObject(arg0).performance;
+                return addHeapObject(ret);
+            };
         }
         else if (name.includes('_now_') && !name.includes('amount')) {
             bg[name] = function() {
                 if (arguments.length === 0) return Date.now();
-                return arguments[0].now();
+                return getObject(arguments[0]).now();
             };
         }
         else if (name.includes('_crypto_') && !name.includes('subtle')) {
-            bg[name] = (arg0) => arg0.crypto;
+            bg[name] = (arg0) => getObject(arg0).crypto;
         }
         else if (name.includes('getRandomValues')) {
             bg[name] = function() {
@@ -277,22 +298,38 @@ function experimentStart() {
 }
 
 function experimentRunSingle(configJson) {
-    const ptr = passString(configJson, wasmMalloc(), wasmRealloc());
-    const len = WASM_VECTOR_LEN;
-    const ret = wasm.experiment_run_single(ptr, len);
+    let deferred0;
+    let deferred1;
     try {
-        return getString(ret[0], ret[1]);
+        const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+        const ptr = passString(configJson, wasmMalloc(), wasmRealloc());
+        const len = WASM_VECTOR_LEN;
+        wasm.experiment_run_single(retptr, ptr, len);
+        const r0 = getDV().getInt32(retptr + 4 * 0, true);
+        const r1 = getDV().getInt32(retptr + 4 * 1, true);
+        deferred0 = r0;
+        deferred1 = r1;
+        return getString(r0, r1);
     } finally {
-        wasmFree()(ret[0], ret[1], 1);
+        wasm.__wbindgen_add_to_stack_pointer(16);
+        wasmFree()(deferred0, deferred1, 1);
     }
 }
 
 function experimentFinish() {
-    const ret = wasm.experiment_finish();
+    let deferred0;
+    let deferred1;
     try {
-        return getString(ret[0], ret[1]);
+        const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+        wasm.experiment_finish(retptr);
+        const r0 = getDV().getInt32(retptr + 4 * 0, true);
+        const r1 = getDV().getInt32(retptr + 4 * 1, true);
+        deferred0 = r0;
+        deferred1 = r1;
+        return getString(r0, r1);
     } finally {
-        wasmFree()(ret[0], ret[1], 1);
+        wasm.__wbindgen_add_to_stack_pointer(16);
+        wasmFree()(deferred0, deferred1, 1);
     }
 }
 
@@ -304,10 +341,10 @@ self.onmessage = async function(e) {
     switch (msg.type) {
         case 'init': {
             try {
-                // Use explicit URL from main thread if provided, else
-                // resolve relative to worker script location.
-                const wasmUrl = msg.wasmUrl || 'mafis_bg.wasm';
-                const module = await WebAssembly.compileStreaming(fetch(wasmUrl));
+                // Accept pre-compiled module (multi-worker) or fetch/compile from URL.
+                const module = (msg.module instanceof WebAssembly.Module)
+                    ? msg.module
+                    : await WebAssembly.compileStreaming(fetch(msg.wasmUrl || 'mafis_bg.wasm'));
                 const imports = buildImports(module);
                 const instance = await WebAssembly.instantiate(module, imports);
                 wasm = instance.exports;
@@ -370,6 +407,25 @@ self.onmessage = async function(e) {
                 }
             } catch (err) {
                 self.postMessage({ type: 'error', message: `Run failed: ${err.message}` });
+            }
+            break;
+        }
+
+        // runOne: single-config dispatch for work-stealing pool.
+        // Calls start→run_single→finish for exactly one config, then posts runOneDone.
+        // The caller is responsible for dispatching the next job on receipt.
+        case 'runOne': {
+            if (!ready) {
+                self.postMessage({ type: 'error', message: 'Worker not initialized' });
+                return;
+            }
+            try {
+                experimentStart();
+                const brief = experimentRunSingle(JSON.stringify(msg.config));
+                const resultJson = experimentFinish();
+                self.postMessage({ type: 'runOneDone', index: msg.index, brief, json: resultJson });
+            } catch (err) {
+                self.postMessage({ type: 'error', message: `runOne failed: ${err.message}` });
             }
             break;
         }

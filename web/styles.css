@@ -1523,6 +1523,7 @@ input[type="range"]:disabled::-webkit-slider-thumb {
 .fault-type-badge.wear { background: rgb(230, 140, 0); }
 .fault-type-badge.zone { background: rgb(143, 58, 222); }
 .fault-type-badge.intermittent { background: rgb(59, 176, 184); }
+.fault-type-badge.perm-zone { background: rgb(180, 0, 90); }
 
 .fault-item-summary {
     flex: 1;
