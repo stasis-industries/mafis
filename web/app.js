@@ -4563,10 +4563,101 @@ const EXPERIMENT_SCENARIOS = {
     none: null,
     burst_20: { type: 'burst', kill_percent: 20, at_tick: 100 },
     burst_50: { type: 'burst', kill_percent: 50, at_tick: 100 },
+    wear_low: { type: 'wear', rate: 'low', threshold: 80 },
     wear_medium: { type: 'wear', rate: 'medium', threshold: 80 },
     wear_high: { type: 'wear', rate: 'high', threshold: 60 },
     zone: { type: 'zone', at_tick: 100, duration: 50 },
+    intermittent: { type: 'intermittent', mtbf: 80, recovery: 15 },
 };
+
+// User-defined custom scenarios (added via experiment panel)
+let customScenarioCounter = 0;
+const customScenarios = {};
+
+function initCustomScenarioBuilder() {
+    const addBtn = document.getElementById('btn-add-custom-scenario');
+    const form = document.getElementById('exp-custom-form');
+    const typeEl = document.getElementById('exp-custom-type');
+    const saveBtn = document.getElementById('btn-save-custom-scenario');
+    const cancelBtn = document.getElementById('btn-cancel-custom-scenario');
+    if (!addBtn || !form) return;
+
+    addBtn.addEventListener('click', () => {
+        form.style.display = '';
+        showCustomParams(typeEl.value);
+    });
+
+    typeEl.addEventListener('change', () => showCustomParams(typeEl.value));
+
+    cancelBtn.addEventListener('click', () => { form.style.display = 'none'; });
+
+    saveBtn.addEventListener('click', () => {
+        const type = typeEl.value;
+        let scenario, label;
+
+        if (type === 'burst') {
+            const pct = parseInt(document.getElementById('exp-custom-burst-pct').value) || 30;
+            const tick = parseInt(document.getElementById('exp-custom-burst-tick').value) || 100;
+            scenario = { type: 'burst', kill_percent: pct, at_tick: tick };
+            label = `burst_${pct}pct_t${tick}`;
+        } else if (type === 'wear') {
+            const beta = parseFloat(document.getElementById('exp-custom-wear-beta').value) || 2.5;
+            const eta = parseInt(document.getElementById('exp-custom-wear-eta').value) || 500;
+            const thresh = parseInt(document.getElementById('exp-custom-wear-thresh').value) || 80;
+            scenario = { type: 'wear', rate: 'custom', beta, eta, threshold: thresh };
+            label = `wear_b${beta}_e${eta}`;
+        } else if (type === 'zone') {
+            const tick = parseInt(document.getElementById('exp-custom-zone-tick').value) || 100;
+            const dur = parseInt(document.getElementById('exp-custom-zone-dur').value) || 50;
+            scenario = { type: 'zone', at_tick: tick, duration: dur };
+            label = `zone_t${tick}_d${dur}`;
+        } else if (type === 'intermittent') {
+            const mtbf = parseInt(document.getElementById('exp-custom-int-mtbf').value) || 80;
+            const recovery = parseInt(document.getElementById('exp-custom-int-recovery').value) || 15;
+            scenario = { type: 'intermittent', mtbf, recovery };
+            label = `int_m${mtbf}_r${recovery}`;
+        }
+
+        if (scenario && label) {
+            const key = `custom_${++customScenarioCounter}`;
+            customScenarios[key] = scenario;
+            EXPERIMENT_SCENARIOS[key] = scenario;
+
+            // Add checkbox to scenario list
+            const grid = document.getElementById('exp-scenarios');
+            const lbl = document.createElement('label');
+            lbl.className = 'checkbox-label';
+            lbl.innerHTML = `<input type="checkbox" value="${key}" checked><span>${label}</span>`;
+            lbl.querySelector('input').addEventListener('change', updateExpRunCount);
+            grid.appendChild(lbl);
+
+            // Add tag to custom list
+            const list = document.getElementById('exp-custom-list');
+            const tag = document.createElement('span');
+            tag.className = 'exp-custom-tag';
+            tag.innerHTML = `${label} <span class="remove-tag" data-key="${key}">\u00d7</span>`;
+            tag.querySelector('.remove-tag').addEventListener('click', () => {
+                delete customScenarios[key];
+                delete EXPERIMENT_SCENARIOS[key];
+                tag.remove();
+                const cb = grid.querySelector(`input[value="${key}"]`);
+                if (cb) cb.closest('label').remove();
+                updateExpRunCount();
+            });
+            list.appendChild(tag);
+
+            form.style.display = 'none';
+            updateExpRunCount();
+        }
+    });
+}
+
+function showCustomParams(type) {
+    ['burst', 'wear', 'zone', 'intermittent'].forEach(t => {
+        const el = document.getElementById(`exp-custom-params-${t}`);
+        if (el) el.style.display = t === type ? '' : 'none';
+    });
+}
 
 const EXPERIMENT_PRESETS = {
     smoke: {
@@ -4818,6 +4909,9 @@ function initExperimentMode() {
 
     // Init map import for experiments
     initExpMapImport();
+
+    // Init custom scenario builder
+    initCustomScenarioBuilder();
 
     // Update run count on any config change
     // Use event delegation for #exp-topologies since checkboxes are dynamic

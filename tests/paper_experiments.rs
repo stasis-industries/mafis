@@ -174,6 +174,18 @@ fn topology_large() {
     write_experiment_results("topology_large", &result);
 }
 
+/// Braess resilience — 6,000 runs (~60 min).
+/// Run with: cargo test --release --test paper_experiments braess_resilience -- --ignored --nocapture
+#[test]
+#[ignore]
+fn braess_resilience() {
+    ensure_output_dir();
+    let matrix = paper::braess_resilience();
+    eprintln!("─── braess_resilience ({} runs) ───", matrix.total_runs());
+    let result = run_matrix(&matrix, None);
+    write_experiment_results("braess_resilience", &result);
+}
+
 fn write_experiment_results(name: &str, result: &MatrixResult) {
     // Per-run CSV
     {

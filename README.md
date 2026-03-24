@@ -8,20 +8,27 @@ A fault resilience observatory for lifelong multi-agent pathfinding — 30K line
 
 **[Live Demo](https://stasis-website.vercel.app/simulator)** | **Solo project by [Teddy Truong](https://github.com/teddytruong)**
 
-`5 solvers` | `396 tests` | `30K LOC Rust` | `2,520 experiments` | `WASM 3D` | `Deterministic replay` | `Shareable URLs`
+`5 solvers` | `397 tests` | `30K LOC Rust` | `8,520 experiments` | `WASM 3D` | `Deterministic replay` | `Shareable URLs`
 
 ---
 
-## Key Finding
+## Key Findings
 
-**Token Passing achieves 18x higher throughput than PIBT under faults — but at 850x the compute cost.**
+**1. Braess's paradox in fault-injected MAPF.** Under congestion, killing agents paradoxically *improves* throughput for reactive solvers — PIBT gains +32% when agents die at 40-agent density, because dead agents free corridors. The effect is architecture-dependent: Token Passing is the only solver where permanent failures *hurt* (−42% throughput), because it depends on fleet completeness for sequential planning.
 
-This resilience/cost tradeoff is unreported in the lifelong MAPF literature. Under the same fault conditions (zone outage, 40 agents, warehouse topology), Token Passing sustains 0.20 tasks/tick at 17,828 us/step while PIBT manages only 0.011 tasks/tick at 21 us/step. The decentralized replanning of Token Passing absorbs disruption better, but the quadratic constraint-index rebuild makes it impractical above ~100 agents.
+**2. The Braess threshold correlates with solver coordination depth.** Reactive solvers (PIBT) are always in Braess territory. Coordinated solvers (Token Passing) resist the paradox until extreme density (n=80). This was measured across 6,000 runs (5 solvers × 4 densities × 6 fault scenarios × 50 seeds).
 
-Scheduler choice, by contrast, has only a ~10% effect on throughput — the solver algorithm and fault type dominate.
+| Solver | Braess threshold | Permanent/Recoverable ratio at n=40 |
+|--------|-----------------|--------------------------------------|
+| PIBT | n=10 (always) | 1.32x (helped by deaths) |
+| RHCR variants | n=20-40 | 1.09-1.25x |
+| Token Passing | n=80 (extreme only) | 0.58x (hurt by deaths) |
+
+**3. Scheduler choice has only ~10% effect** — the solver algorithm and fault type dominate.
+
+Prior work ([Hoenig et al. 2019](https://whoenig.github.io/publications/2019_RA-L_Hoenig.pdf), [Li et al. 2024](https://arxiv.org/abs/2404.16162)) addresses **delay robustness** (temporary slowdowns). To our knowledge, no prior work measures lifelong MAPF solver throughput under **permanent fault injection** — crash failures, Weibull-modeled wear, and zone outages.
 
 <!-- TODO: Add "Open in Observatory" link once shareable URL is generated -->
-<!-- [Open in Observatory →](https://stasis-website.vercel.app/simulator#s=...) -->
 
 ---
 
@@ -157,22 +164,24 @@ All implemented from academic papers. No external solver crates.
 ## Experiment Infrastructure
 
 ```bash
-# Run the full 2,520-run matrix (~3.5 min, release mode)
+# Paper matrices (~3.5 min)
 cargo test --release --test paper_experiments full_paper_matrix -- --ignored --nocapture
 
-# Results written to results/ as CSV + JSON + LaTeX + Typst
+# Braess resilience (~30 min)
+cargo test --release --test paper_experiments braess_resilience -- --ignored --nocapture
 ```
 
-7 experiment matrices, 30 seeds each, 95% confidence intervals:
+8 experiment matrices, 30-50 seeds, 95% confidence intervals:
 
-| Experiment | Variables | Runs |
-|-----------|-----------|------|
-| Solver resilience | 4 solvers x 6 fault scenarios | 720 |
-| Topology effect | 4 topologies x 6 scenarios | 720 |
-| Scale sensitivity | 4 fleet sizes x 6 scenarios | 720 |
-| Scheduler effect | 2 schedulers x 6 scenarios | 360 |
+| Experiment | Variables | Runs | Seeds |
+|-----------|-----------|------|-------|
+| Solver resilience | 4 solvers x 6 scenarios | 720 | 30 |
+| Topology effect | 4 topologies x 6 scenarios | 720 | 30 |
+| Scale sensitivity | 4 fleet sizes x 6 scenarios | 720 | 30 |
+| Scheduler effect | 2 schedulers x 6 scenarios | 360 | 30 |
+| **Braess resilience** | **5 solvers x 4 densities x 6 scenarios** | **6,000** | **50** |
 
-**Engineering audit:** 24 verification tests — collision-free guarantees across all solvers, metrics formula correctness, determinism across all solver/scheduler combinations, RNG stream isolation, Weibull cross-validation, CI95 reference matching.
+**Engineering audit:** 24 verification tests — collision-free guarantees, metrics formulas, determinism, RNG isolation, Weibull cross-validation, CI95 matching.
 
 ---
 

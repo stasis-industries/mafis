@@ -4702,6 +4702,76 @@ body[data-phase="experiment"] #toolbar {
     margin-top: 8px;
 }
 
+/* Custom scenario builder */
+.exp-custom-scenario {
+    margin-top: 12px;
+    padding-top: 10px;
+    border-top: 1px solid var(--border);
+}
+
+.exp-custom-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.exp-custom-form {
+    background: var(--bg-input);
+    padding: 10px;
+    margin-top: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.exp-custom-params {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.exp-custom-params label {
+    font-family: 'DM Mono', monospace;
+    font-size: 10px;
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.input-narrow {
+    width: 70px;
+}
+
+.exp-custom-actions {
+    display: flex;
+    gap: 6px;
+    margin-top: 4px;
+}
+
+.exp-custom-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-family: 'DM Mono', monospace;
+    font-size: 10px;
+    padding: 3px 8px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    margin: 2px 4px 2px 0;
+}
+
+.exp-custom-tag .remove-tag {
+    cursor: pointer;
+    color: var(--text-muted);
+    font-size: 12px;
+}
+
+.exp-custom-tag .remove-tag:hover {
+    color: var(--state-fault);
+}
+
 .btn-small {
     font-size: 11px;
     padding: 4px 10px;

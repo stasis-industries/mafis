@@ -151,6 +151,11 @@ pub struct FaultScenario {
     pub intermittent_mtbf_ticks: u64,
     /// Ticks an agent is unavailable per fault event (latency injection).
     pub intermittent_recovery_ticks: u32,
+
+    // -- Custom Weibull override --
+    /// When set, overrides `wear_heat_rate` preset with custom (beta, eta).
+    #[serde(skip)]
+    pub custom_weibull: Option<(f32, f32)>,
 }
 
 impl Default for FaultScenario {
@@ -166,6 +171,7 @@ impl Default for FaultScenario {
             zone_latency_duration: 50,
             intermittent_mtbf_ticks: 80,
             intermittent_recovery_ticks: 15,
+            custom_weibull: None,
         }
     }
 }
@@ -186,7 +192,11 @@ impl FaultScenario {
 
         match self.scenario_type {
             FaultScenarioType::WearBased => {
-                let (beta, eta) = self.wear_heat_rate.weibull_params();
+                let (beta, eta) = if let Some((b, e)) = self.custom_weibull {
+                    (b, e)
+                } else {
+                    self.wear_heat_rate.weibull_params()
+                };
                 FaultConfig {
                     enabled: true,
                     weibull_enabled: true,

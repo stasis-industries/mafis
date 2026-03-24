@@ -975,6 +975,7 @@
                                 <div class="exp-check-grid" id="exp-solvers">
                                     <label class="checkbox-label"><input type="checkbox" value="pibt" checked><span>PIBT</span></label>
                                     <label class="checkbox-label"><input type="checkbox" value="rhcr_pibt"><span>RHCR-PIBT</span></label>
+                                    <label class="checkbox-label"><input type="checkbox" value="rhcr_pbs"><span>RHCR-PBS</span></label>
                                     <label class="checkbox-label"><input type="checkbox" value="rhcr_priority_astar"><span>RHCR-A*</span></label>
                                     <label class="checkbox-label"><input type="checkbox" value="token_passing"><span>Token Passing</span></label>
                                 </div>
@@ -995,6 +996,8 @@
                                 <div class="exp-check-grid" id="exp-schedulers">
                                     <label class="checkbox-label"><input type="checkbox" value="random" checked><span>Random</span></label>
                                     <label class="checkbox-label"><input type="checkbox" value="closest"><span>Closest</span></label>
+                                    <label class="checkbox-label"><input type="checkbox" value="balanced"><span>Balanced</span></label>
+                                    <label class="checkbox-label"><input type="checkbox" value="roundtrip"><span>Roundtrip</span></label>
                                 </div>
                             </div>
                             <div class="exp-check-group">
@@ -1003,9 +1006,48 @@
                                     <label class="checkbox-label"><input type="checkbox" value="none" checked><span>None (baseline)</span></label>
                                     <label class="checkbox-label"><input type="checkbox" value="burst_20" checked><span>Burst 20%</span></label>
                                     <label class="checkbox-label"><input type="checkbox" value="burst_50"><span>Burst 50%</span></label>
+                                    <label class="checkbox-label"><input type="checkbox" value="wear_low"><span>Wear Low</span></label>
                                     <label class="checkbox-label"><input type="checkbox" value="wear_medium" checked><span>Wear Medium</span></label>
                                     <label class="checkbox-label"><input type="checkbox" value="wear_high"><span>Wear High</span></label>
                                     <label class="checkbox-label"><input type="checkbox" value="zone" checked><span>Zone Outage</span></label>
+                                    <label class="checkbox-label"><input type="checkbox" value="intermittent"><span>Intermittent</span></label>
+                                </div>
+                                <!-- Custom scenario builder -->
+                                <div class="exp-custom-scenario" id="exp-custom-scenario">
+                                    <div class="exp-custom-header">
+                                        <span class="exp-check-label">Custom Scenarios</span>
+                                        <button class="btn-secondary btn-small" id="btn-add-custom-scenario">+ Add</button>
+                                    </div>
+                                    <div id="exp-custom-list"></div>
+                                    <div class="exp-custom-form" id="exp-custom-form" style="display:none">
+                                        <select class="input-field" id="exp-custom-type">
+                                            <option value="burst">Burst Failure</option>
+                                            <option value="wear">Wear-Based</option>
+                                            <option value="zone">Zone Outage</option>
+                                            <option value="intermittent">Intermittent</option>
+                                        </select>
+                                        <div class="exp-custom-params" id="exp-custom-params-burst">
+                                            <label>Kill %<input type="number" class="input-field input-narrow" id="exp-custom-burst-pct" value="30" min="1" max="100"></label>
+                                            <label>At tick<input type="number" class="input-field input-narrow" id="exp-custom-burst-tick" value="100" min="1" max="5000"></label>
+                                        </div>
+                                        <div class="exp-custom-params" id="exp-custom-params-wear" style="display:none">
+                                            <label>Beta<input type="number" class="input-field input-narrow" id="exp-custom-wear-beta" value="2.5" min="0.5" max="10" step="0.1"></label>
+                                            <label>Eta<input type="number" class="input-field input-narrow" id="exp-custom-wear-eta" value="500" min="50" max="5000"></label>
+                                            <label>Threshold<input type="number" class="input-field input-narrow" id="exp-custom-wear-thresh" value="80" min="10" max="100"></label>
+                                        </div>
+                                        <div class="exp-custom-params" id="exp-custom-params-zone" style="display:none">
+                                            <label>At tick<input type="number" class="input-field input-narrow" id="exp-custom-zone-tick" value="100" min="1" max="5000"></label>
+                                            <label>Duration<input type="number" class="input-field input-narrow" id="exp-custom-zone-dur" value="50" min="1" max="1000"></label>
+                                        </div>
+                                        <div class="exp-custom-params" id="exp-custom-params-intermittent" style="display:none">
+                                            <label>MTBF<input type="number" class="input-field input-narrow" id="exp-custom-int-mtbf" value="80" min="5" max="1000"></label>
+                                            <label>Recovery<input type="number" class="input-field input-narrow" id="exp-custom-int-recovery" value="15" min="1" max="200"></label>
+                                        </div>
+                                        <div class="exp-custom-actions">
+                                            <button class="btn-primary btn-small" id="btn-save-custom-scenario">ADD TO MATRIX</button>
+                                            <button class="btn-secondary btn-small" id="btn-cancel-custom-scenario">CANCEL</button>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                         </div>

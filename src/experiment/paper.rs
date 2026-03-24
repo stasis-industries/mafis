@@ -23,6 +23,21 @@ const SEEDS: &[u64] = &[
     10000, 20000, 30000, 40000, 50000,
 ];
 
+/// Extended seeds — 50 for tighter CIs on the Braess experiment.
+const SEEDS_50: &[u64] = &[
+    42, 123, 456, 789, 1024,
+    2048, 3141, 9999, 1337, 7777,
+    11, 22, 33, 44, 55,
+    101, 202, 303, 404, 505,
+    1111, 2222, 3333, 4444, 5555,
+    10000, 20000, 30000, 40000, 50000,
+    // 20 additional seeds for tighter confidence intervals
+    60000, 70000, 80000, 90000, 100000,
+    111, 222, 333, 444, 555,
+    666, 777, 888, 999, 1010,
+    2020, 3030, 4040, 5050, 6060,
+];
+
 /// Standard simulation length — 500 ticks gives ~100 tasks at steady state.
 const TICK_COUNT: u64 = 500;
 
@@ -247,6 +262,38 @@ pub fn scheduler_effect() -> ExperimentMatrix {
 // Full paper matrix (all experiments combined)
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Experiment 5: Braess Resilience (Solver × Density × Fault Category)
+// ---------------------------------------------------------------------------
+
+/// **RQ5: Does fault type interact with fleet density and solver architecture?**
+///
+/// Independent variables: solver (5), fleet size (4), fault scenario (6)
+/// Controlled: topology (medium), scheduler (random)
+///
+/// Tests the Braess hypothesis: under congestion, permanent agent removal
+/// can paradoxically improve throughput for reactive solvers by reducing
+/// corridor competition, while coordinated solvers suffer.
+///
+/// 5 solvers x 4 densities x 6 scenarios x 50 seeds = 6,000 runs
+pub fn braess_resilience() -> ExperimentMatrix {
+    ExperimentMatrix {
+        solvers: vec![
+            "pibt".into(),
+            "rhcr_pibt".into(),
+            "rhcr_pbs".into(),
+            "rhcr_priority_astar".into(),
+            "token_passing".into(),
+        ],
+        topologies: vec!["warehouse_medium".into()],
+        scenarios: paper_scenarios(),
+        schedulers: vec!["random".into()],
+        agent_counts: vec![10, 20, 40, 80],
+        seeds: SEEDS_50.to_vec(),
+        tick_count: TICK_COUNT,
+    }
+}
+
 /// All experiment matrices for the paper.
 ///
 /// Total: 720 + 900 + 720 + 360 = 2700 runs
@@ -327,6 +374,12 @@ mod tests {
         let all = all_paper_experiments();
         let total: usize = all.iter().map(|(_, m)| m.total_runs()).sum();
         assert_eq!(total, 2520);
+    }
+
+    #[test]
+    fn braess_resilience_count() {
+        let m = braess_resilience();
+        assert_eq!(m.total_runs(), 6000); // 5 x 4 x 6 x 50
     }
 
     #[test]

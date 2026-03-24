@@ -451,24 +451,41 @@ fn parse_config_json(json: &str) -> Option<ExperimentConfig> {
                 ..Default::default()
             }),
             "wear" => {
-                let rate = match s.get("rate").and_then(|r| r.as_str()).unwrap_or("medium") {
+                let rate_str = s.get("rate").and_then(|r| r.as_str()).unwrap_or("medium");
+                let rate = match rate_str {
                     "low" => WearHeatRate::Low,
                     "high" => WearHeatRate::High,
-                    _ => WearHeatRate::Medium,
+                    "medium" => WearHeatRate::Medium,
+                    _ => WearHeatRate::Medium, // "custom" or unknown → use Medium as base
                 };
-                Some(FaultScenario {
+                let mut scenario = FaultScenario {
                     enabled: true,
                     scenario_type: FaultScenarioType::WearBased,
                     wear_heat_rate: rate,
                     wear_threshold: s.get("threshold").and_then(|t| t.as_f64()).unwrap_or(80.0) as f32,
                     ..Default::default()
-                })
+                };
+                // Custom Weibull parameters override the preset
+                if let (Some(beta), Some(eta)) = (
+                    s.get("beta").and_then(|b| b.as_f64()),
+                    s.get("eta").and_then(|e| e.as_f64()),
+                ) {
+                    scenario.custom_weibull = Some((beta as f32, eta as f32));
+                }
+                Some(scenario)
             }
             "zone" => Some(FaultScenario {
                 enabled: true,
                 scenario_type: FaultScenarioType::ZoneOutage,
                 zone_at_tick: s.get("at_tick").and_then(|t| t.as_u64()).unwrap_or(100),
                 zone_latency_duration: s.get("duration").and_then(|d| d.as_u64()).unwrap_or(50) as u32,
+                ..Default::default()
+            }),
+            "intermittent" => Some(FaultScenario {
+                enabled: true,
+                scenario_type: FaultScenarioType::IntermittentFault,
+                intermittent_mtbf_ticks: s.get("mtbf").and_then(|t| t.as_u64()).unwrap_or(80) as u32,
+                intermittent_recovery_ticks: s.get("recovery").and_then(|r| r.as_u64()).unwrap_or(15) as u32,
                 ..Default::default()
             }),
             "none" | _ => None,
