@@ -1,220 +1,137 @@
 # MAFIS — Multi-Agent Fault Injection Simulator
 
+Most MAPF tools measure how fast solvers find paths. MAFIS measures what happens when things go *wrong*.
+
 A fault resilience observatory for lifelong multi-agent pathfinding — 30K lines of Rust, running in your browser.
 
-**[Live Demo](https://stasis-website.vercel.app/simulator)** | **Solo project by [Teddy Truong](https://github.com/teddytruong)**
-
-`5 solvers` | `408 tests` | `30K LOC Rust` | `11,420 experiments` | `WASM 3D` | `Deterministic replay` | `Shareable URLs`
+**[Live Demo](https://stasis-website.vercel.app/simulator)** | **[Docs](https://stasis-website.vercel.app/docs)** | **Solo project by [Teddy Truong](https://github.com/onsraa)**
 
 ---
 
-## Key Findings
+## What it does
 
-**1. Braess's paradox in fault-injected MAPF.** Under congestion, killing agents paradoxically *improves* throughput for reactive solvers — dead agents free corridors. The effect is architecture-dependent and confirms at 95% confidence across 8,480 runs (7,000 braess + 1,000 perm_zone + 480 cross-topology), BH-FDR corrected across 140 tests.
+MAFIS runs two simulations in parallel: a fault-free *baseline* and a *faulted* run with the same seed, same agents, same grid. Every metric is a deviation from that baseline — so when throughput drops, you know how much, and you know it was the fault that caused it.
 
-| Solver | Braess threshold | Peak ratio | Cliff's d | p_adj |
-|--------|-----------------|-----------|-----------|-------|
-| PIBT | **n=10** | 2.090 [1.71, 2.47] at n=80 | 0.511 | <0.001 |
-| RHCR-PIBT | **n=80** | 1.608 [1.33, 1.89] | 0.347 | 0.015 |
-| RHCR-PBS | **none** | — | — | — |
-| RHCR-A* | **none** | — | — | — |
-| Token Passing | **none** | 0.688 [0.64, 0.73] at n=10 | -0.991 | <0.001 |
+Inject faults. Observe degradation. Measure recovery. Compare solvers.
 
-*Confirmed = 95% CI lower > 1.0 AND BH-adjusted p < 0.05. 9 confirmed effects, all under burst faults.*
-
-**PIBT shows the strongest effect** — confirmed from n=10 through n=80, peaking at 2.09× (throughput doubles when 20% of agents are killed). RHCR-PIBT resists until extreme density (n=80).
-
-**2. Token Passing is uniquely vulnerable to permanent faults.** The only solver with no confirmed Braess benefit — and worst-in-class under all permanent-fault scenarios:
-
-| Scenario | TP ratio at n=10 | TP ratio at n=40 | Cliff's d |
-|----------|-----------------|-----------------|-----------|
-| Burst 50% | 0.417 (p<0.001) | 0.489 (p<0.001) | -1.000 |
-| Wear (high) | 0.259 (p<0.001) | 0.472 (p<0.001) | -1.000 |
-| Perm. Zone | **0.178** (p<0.001) | 0.371 (p<0.001) | -1.000 |
-
-Actionable implication: Token Passing should not be deployed in environments with high permanent-fault risk at low fleet density.
-
-**3. Permanent-localized faults (zone outage) show density-dependent vulnerability not seen in other fault types.** Blocking a zone permanently is catastrophic at low density (lost space fraction is large) but neutral or beneficial at high density (zone removal relieves corridor competition — a second Braess mechanism):
-
-| Solver | Perm. Zone at n=10 | Perm. Zone at n=80 |
-|--------|-------------------|-------------------|
-| PIBT | 0.785 (p=0.011) | **1.000** (p=0.997) |
-| RHCR-PIBT | 0.531 (p<0.001) | 0.963 (p=0.717) |
-| RHCR-A* | 0.503 (p<0.001) | **1.057** (p=0.895) |
-
-**4. Closest scheduler underperforms random under faults (0.81-0.92×).** With fair delivery randomization, the closest scheduler's locality benefit is outweighed by corridor congestion from agent clustering. Solver algorithm and fault type remain the dominant factors.
-
-Prior work ([Hoenig et al. 2019](https://whoenig.github.io/publications/2019_RA-L_Hoenig.pdf), [Li et al. 2024](https://arxiv.org/abs/2404.16162)) addresses **delay robustness** (temporary slowdowns). To our knowledge, no prior work measures lifelong MAPF solver throughput under **permanent fault injection** — crash failures, Weibull-modeled wear, and permanent zone loss.
+The simulation is deterministic. Same seed, same config, same results. Every number is reproducible.
 
 ---
 
-## What It Does
+## The instrument
 
-MAFIS runs lifelong MAPF simulations in 3D, injects faults across three categories, and measures how the system degrades and recovers — compared against a deterministic fault-free baseline run in parallel.
+### Solvers
 
-Every simulation is seeded and reproducible. Every metric is differential: faulted vs baseline, same seed, same agents.
+Five lifelong solvers, implemented from the literature. No external solver crates.
 
----
+| Solver | Reference | Characteristic |
+|--------|-----------|----------------|
+| PIBT | Okumura 2022 | One-step reactive, priority inheritance |
+| RHCR (PBS) | Li et al. 2021 | Windowed Priority-Based Search |
+| RHCR (PIBT-Window) | Li et al. 2021 | Unrolled PIBT for H steps |
+| RHCR (Priority A*) | Li et al. 2021 | Sequential spacetime A* |
+| Token Passing | Ma et al. 2017 | Decentralized sequential via shared token |
 
-## Architecture
+### Fault taxonomy
 
-```
-                           ┌─────────────────────────────┐
-                           │      Bevy 0.18 ECS          │
-                           │  FixedUpdate (deterministic) │
-                           └──────────┬──────────────────┘
-                                      │
-              ┌───────────────────────┼───────────────────────┐
-              ▼                       ▼                       ▼
-    ┌─────────────────┐   ┌─────────────────┐   ┌─────────────────┐
-    │   core/          │   │   solver/        │   │   fault/         │
-    │   Tick loop      │   │   5 MAPF solvers │   │   Weibull wear   │
-    │   Task scheduler │──▶│   A* + BFS       │   │   Burst/zone/    │
-    │   Queue manager  │   │   heuristics     │   │   intermittent/  │
-    │   Agent FSM      │   └─────────────────┘   │   perm_zone      │
-    └────────┬────────┘                          └─────────────────┘
-             │
-    ┌────────▼────────┐   ┌─────────────────┐   ┌─────────────────┐
-    │   analysis/      │   │   render/        │   │   ui/             │
-    │   ADG + cascade  │   │   3D visuals     │   │   Bevy↔JS bridge  │
-    │   Fault metrics  │   │   MaterialPalette│   │   wasm_bindgen    │
-    │   Heatmap        │   │   Orbit camera   │   │   HTML/CSS/JS     │
-    │   Baseline engine│   └─────────────────┘   │   uPlot charts    │
-    └────────┬────────┘                          └─────────────────┘
-             │
-    ┌────────▼────────┐
-    │   experiment/    │   ← Headless: 7,000 runs, 50 seeds, 95% CIs
-    │   Runner + stats │     CSV / JSON / LaTeX / Typst export
-    │   Paper matrices │
-    └─────────────────┘
-```
+Three categories of faults, modeled after real-world failure modes.
 
-```
-src/
-  core/        Tick loop, agents, grid, task scheduling, topology, delivery queues
-  solver/      PIBT + 3 RHCR variants + Token Passing, shared A* and heuristics
-  fault/       Weibull wear model, 3-category fault system, fault schedule
-  analysis/    ADG, cascade BFS, fault metrics, heatmap, resilience scorecard, baseline engine
-  render/      3D environment, robot visuals (MaterialPalette), orbit camera
-  ui/          Bevy-JS bridge (wasm-bindgen), HTML/CSS/JS controls, uPlot charts
-  experiment/  Headless experiment runner, CSV/JSON/LaTeX/Typst export
+| Category | Scenario | What it models |
+|----------|----------|----------------|
+| *Recoverable* | Zone outage | Sensor network failure, temporary zone lockdown |
+| *Recoverable* | Intermittent | Battery reconnect, sensor recalibration |
+| *Permanent-distributed* | Burst failure | Power surge, software crash across fleet |
+| *Permanent-distributed* | Wear-based | Mechanical degradation (Weibull-calibrated) |
+| *Permanent-localized* | Perm. zone outage | Fire suppression, structural collapse, flooding |
 
-topologies/    5 JSON warehouse layouts (Amazon, FedEx, Ocado inspired)
-web/           HTML/CSS/JS shell, generated WASM artifacts
-analysis/      Python analysis scripts (Braess ratios, significance tests, charts)
-```
+Weibull presets are calibrated to published AGV reliability data — from well-maintained fleets (CASUN AGV, MTTF ~798 ticks) to high-stress deployments (Carlson & Murphy 2006, MTTF ~137 ticks).
+
+### Topologies
+
+Five industry-inspired warehouse layouts, defined as JSON.
+
+| Topology | Size | Inspired by |
+|----------|------|-------------|
+| Warehouse Small | 22x9 | Amazon Kiva (small FC) |
+| Warehouse Medium | 32x21 | Amazon Kiva (standard FC) |
+| Kiva Large | 57x33 | Amazon Robotics (large FC) |
+| Sorting Center | 40x20 | FedEx/UPS hub (3 chokepoints) |
+| Compact Grid | 24x24 | Ocado micro-fulfillment |
+
+### Resilience metrics
+
+All metrics are *differential* — faulted run compared to the paired baseline.
+
+| Metric | What it measures |
+|--------|-----------------|
+| Fault Tolerance | Fraction of baseline throughput retained under fault |
+| NRR | Normalized Recovery Ratio — how quickly the system bounces back |
+| Critical Time | Fraction of post-fault ticks below 50% baseline throughput |
+| Impacted Area | Cumulative task deficit relative to baseline |
+| Throughput Recovery | Ticks until per-tick throughput returns to baseline rate |
+| Survival Rate | Fraction of fleet still operational at simulation end |
 
 ---
 
-## Solvers
+## The engine
 
-All implemented from academic papers. No external solver crates.
+Built with **Rust** and **Bevy 0.18 ECS**. Compiled to **WebAssembly** — no installation, runs in any modern browser.
 
-| Solver | Paper | Characteristic |
-|--------|-------|----------------|
-| **PIBT** | Okumura 2022 | One-step reactive, O(n log n), lifelong-native |
-| **RHCR (PBS)** | Li et al. 2021 | Windowed Priority-Based Search |
-| **RHCR (PIBT-Window)** | Li et al. 2021 | Unrolled PIBT for H steps |
-| **RHCR (Priority A*)** | Li et al. 2021 | Sequential spacetime A* |
-| **Token Passing** | Ma et al. 2017 | Decentralized sequential via shared token |
-
----
-
-## Fault Taxonomy
-
-Three categories, seven scenarios:
-
-| Category | Scenario | Model | Effect |
-|----------|----------|-------|--------|
-| **Recoverable** | Zone Outage | Latency on busiest zone | Temporary regional disruption |
-| **Recoverable** | Intermittent | Exponential inter-arrival | Recurring temporary unavailability |
-| **Permanent-distributed** | Burst Failure | Kill X% of fleet at tick T | Sudden capacity loss |
-| **Permanent-distributed** | Wear-Based | Weibull inverse CDF per agent | Progressive mechanical degradation |
-| **Permanent-localized** | Perm. Zone Outage | Zone cells → permanent obstacles | Zone flooding / structural collapse |
-
-**Weibull presets** calibrated to published AGV reliability data:
-
-| Level | Beta | Eta | MTTF | Source |
-|-------|------|-----|------|--------|
-| Low | 2.0 | 900 | ~798 ticks | CASUN AGV (well-maintained) |
-| Medium | 2.5 | 500 | ~444 ticks | Canadian AGV survey |
-| High | 3.5 | 150 | ~137 ticks | Carlson & Murphy 2006 |
+- Deterministic ECS tick loop, independent of frame rate
+- Instanced rendering for up to 500 agents
+- Bevy-to-JS bridge via `wasm_bindgen` with adaptive polling
+- Dual heatmaps (density decay + cumulative traffic)
+- Orbit camera, click-to-select, 8-state task visualization
+- Shareable URLs — configuration encodes to a URL fragment, no server required
 
 ---
 
-## Topologies
+## Experiment infrastructure
 
-5 industry-inspired layouts:
+MAFIS includes a headless experiment runner for large-scale studies. No browser needed — Rayon-parallelized, outputs CSV, JSON, LaTeX, Typst, and SVG.
 
-| Topology | Size | Model |
-|----------|------|-------|
-| Warehouse Small | 22×9 | Amazon Kiva (small FC) |
-| Warehouse Medium | 32×21 | Amazon Kiva (standard FC) |
-| Kiva Large | 57×33 | Amazon Robotics (large FC) |
-| Sorting Center | 40×20 | FedEx/UPS (3 chokepoints) |
-| Compact Grid | 24×24 | Ocado micro-fulfillment |
+| Experiment | Design | Runs |
+|-----------|--------|------|
+| Solver resilience | 4 solvers x 7 scenarios x 30 seeds | 840 |
+| Topology effect | 4 topologies x 7 scenarios x 30 seeds | 840 |
+| Scale sensitivity | 4 fleet sizes x 7 scenarios x 30 seeds | 840 |
+| Scheduler effect | 2 schedulers x 7 scenarios x 30 seeds | 420 |
+| Braess resilience | 5 solvers x 4 densities x 7 scenarios x 50 seeds | 7,000 |
+| Cross-topology | 2 solvers x 2 topologies x 2 scenarios x 2 densities x 30 seeds | 480 |
 
----
+Statistical tooling: Benjamini-Hochberg FDR correction, Cliff's delta effect sizes, 95% CIs. Analysis script in pure Python (no dependencies).
 
-## Metrics
-
-### Differential (faulted vs baseline, same seed)
-
-| Metric | Definition |
-|--------|-----------|
-| **Fault Tolerance** | `P_fault / P_nominal` — fraction of baseline throughput retained |
-| **Throughput Recovery** | Ticks until per-tick throughput returns to baseline rate |
-| **Deficit Recovery** | Ticks until cumulative task deficit closes |
-| **NRR** | `1 - throughput_recovery/MTBF` — Normalized Recovery Ratio |
-| **Critical Time** | Fraction of post-fault ticks below 50% baseline throughput |
-| **Impacted Area** | Cumulative task deficit as % of baseline |
-
-### Per-Agent / Per-Event
-
-| Metric | Definition |
-|--------|-----------|
-| **Survival Rate** | Alive agents / initial fleet at simulation end |
-| **Propagation Rate** | Avg fraction of fleet affected per fault event |
-| **Wait Ratio** | Living agent-ticks spent waiting / total living agent-ticks |
-| **MTBF** | Mean ticks between fault events |
+Preliminary observations from these experiments are documented on the [blog](https://stasis-website.vercel.app/blog).
 
 ---
 
-## Experiment Infrastructure
+## Ecosystem
+
+MAFIS answers one question: *how do multi-agent systems behave under faults?*
+
+Everything else has a home:
+
+- **[MAPF Tracker](https://tracker.pathfinding.ai/)** — solver benchmarks on clean instances
+- **[MovingAI](https://movingai.com/benchmarks/)** — standard grid instances
+- **[SMART MAPF](https://smart-mapf.com/)** — kinodynamic execution fidelity
+
+---
+
+## Quick start
+
+**Browser (no install):** [stasis-website.vercel.app/simulator](https://stasis-website.vercel.app/simulator)
+
+**Build from source:**
 
 ```bash
-# Run all paper experiments (~20 min, results/ output)
-cargo test run_braess_perm_zone -- --ignored --nocapture
-
-# Braess analysis: ratios, Mann-Whitney U, LaTeX table, SVG charts
-python3 analysis/braess_analysis.py
-```
-
-| Experiment | Variables | Runs | Seeds |
-|-----------|-----------|------|-------|
-| Solver resilience | 4 solvers × 7 scenarios | 840 | 30 |
-| Topology effect | 4 topologies × 7 scenarios | 840 | 30 |
-| Scale sensitivity | 4 fleet sizes × 7 scenarios | 840 | 30 |
-| Scheduler effect | 2 schedulers × 7 scenarios | 420 | 30 |
-| **Braess resilience** | **5 solvers × 4 densities × 7 scenarios** | **7,000** | **50** |
-
-**Engineering audit:** 408 tests — collision-free guarantees, metrics formulas, determinism, RNG isolation, Weibull cross-validation, CI95 matching, fault scenario roundtrips.
-
----
-
-## Quick Start
-
-```bash
-# Prerequisites
 rustup target add wasm32-unknown-unknown
 cargo install wasm-bindgen-cli basic-http-server
 
-# Build
 sh topologies/build-manifest.sh
 cargo build --release --target wasm32-unknown-unknown
 wasm-bindgen --out-dir web --target web \
   target/wasm32-unknown-unknown/release/mafis.wasm
-basic-http-server web   # → http://localhost:4000
+basic-http-server web   # localhost:4000
 ```
 
 **Fast feedback (no WASM build):**
@@ -226,6 +143,23 @@ cargo test    # 408 tests        (~20s)
 
 ---
 
-## License
+## Architecture
+
+```
+src/
+  core/        Tick loop, agents, grid, task scheduling, topology, delivery queues
+  solver/      PIBT + 3 RHCR variants + Token Passing, shared A* and heuristics
+  fault/       Weibull wear model, 3-category fault system, fault schedule
+  analysis/    ADG, cascade BFS, fault metrics, heatmap, resilience scorecard
+  render/      3D environment, robot visuals (MaterialPalette), orbit camera
+  ui/          Bevy-JS bridge (wasm-bindgen), HTML/CSS/JS controls, uPlot charts
+  experiment/  Headless experiment runner, statistical export
+
+topologies/    5 JSON warehouse layouts
+web/           HTML/CSS/JS shell, generated WASM artifacts
+analysis/      Python analysis scripts
+```
+
+---
 
 MIT
