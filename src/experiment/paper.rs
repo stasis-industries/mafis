@@ -457,6 +457,46 @@ mod tests {
         );
     }
 
+    /// Cross-topology validation: does the Braess effect replicate on other layouts?
+    ///
+    /// Tests burst_20 + burst_50 on sorting_center and compact_grid at n=20,40
+    /// with 30 seeds each. 2 solvers × 2 topologies × 2 scenarios × 2 densities × 30 seeds = 480 runs.
+    ///
+    /// Usage: cargo test run_cross_topology -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn run_cross_topology() {
+        use crate::experiment::export::write_runs_csv;
+        use crate::experiment::runner::run_matrix;
+        use std::fs;
+
+        let matrix = ExperimentMatrix {
+            solvers: vec!["pibt".into(), "token_passing".into()],
+            topologies: vec!["sorting_center".into(), "compact_grid".into()],
+            scenarios: vec![Some(burst_20()), Some(burst_50())],
+            schedulers: vec!["random".into()],
+            agent_counts: vec![20, 40],
+            seeds: SEEDS.to_vec(),
+            tick_count: TICK_COUNT,
+        };
+
+        let total = matrix.total_runs();
+        eprintln!("Cross-topology validation: {} runs...", total);
+
+        use crate::experiment::runner::ExperimentProgress;
+        use std::sync::{Arc, Mutex};
+        let progress = Arc::new(Mutex::new(ExperimentProgress {
+            current: 0, total, label: String::new(),
+        }));
+        let result = run_matrix(&matrix, Some(&progress));
+        eprintln!("Done in {}ms", result.wall_time_total_ms);
+
+        fs::create_dir_all("results").unwrap();
+        let mut f = fs::File::create("results/cross_topology_runs.csv").unwrap();
+        write_runs_csv(&mut f, &result.runs).unwrap();
+        eprintln!("Saved: cross_topology_runs.csv ({} rows)", result.runs.len() * 2);
+    }
+
     #[test]
     fn smoke_test_runs_fast() {
         let result = crate::experiment::runner::run_matrix(&smoke_test(), None);

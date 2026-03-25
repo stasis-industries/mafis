@@ -51,6 +51,7 @@ directories = "6"
 [features]
 default = []
 mapf-pilot = []
+headless = []  # Desktop experiment-only: no 3D rendering, no observatory
 
 [profile.dev.package."*"]
 opt-level = 3
@@ -64,5 +65,14 @@ opt-level = "z"
 codegen-units = 1
 incremental = false
 debug = false
+strip = true
+panic = "abort"
+
+# Desktop experiment runner: optimize for speed, not size
+[profile.release-desktop]
+inherits = "release"
+lto = "thin"
+opt-level = 3
+codegen-units = 1
 strip = true
 panic = "abort"

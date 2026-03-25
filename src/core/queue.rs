@@ -426,14 +426,31 @@ impl QueueManager {
             }
             match &agent.task_leg {
                 TaskLeg::Queuing { line_index, .. } => {
+                    // Try the stored line_index first, then fall back to
+                    // searching all queue lines by position. This handles
+                    // snapshots from before line_index was saved (hardcoded 0)
+                    // and any other case where line_index is stale.
+                    let mut found = false;
                     let li = *line_index;
                     if li < self.queues.len() && li < queue_lines.len() {
-                        // Find which slot this agent occupies based on position
                         let line = &queue_lines[li];
                         for (slot_idx, &cell) in line.cells.iter().enumerate() {
                             if cell == agent.pos && slot_idx < self.queues[li].slots.len() {
                                 self.queues[li].slots[slot_idx] = Some(agent_idx);
+                                found = true;
                                 break;
+                            }
+                        }
+                    }
+                    // Fallback: search all queue lines by position
+                    if !found {
+                        'outer: for (qi, line) in queue_lines.iter().enumerate() {
+                            if qi >= self.queues.len() { break; }
+                            for (slot_idx, &cell) in line.cells.iter().enumerate() {
+                                if cell == agent.pos && slot_idx < self.queues[qi].slots.len() {
+                                    self.queues[qi].slots[slot_idx] = Some(agent_idx);
+                                    break 'outer;
+                                }
                             }
                         }
                     }

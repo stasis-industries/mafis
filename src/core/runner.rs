@@ -833,6 +833,9 @@ impl SimulationRunner {
                             }
                         }
 
+                        // Rebuild queue manager — queue_lines changed.
+                        self.queue_manager.reset(&self.zones.queue_lines);
+
                         // Reset goals for agents whose targets are now blocked.
                         for i in 0..n {
                             if !self.agents[i].alive {
@@ -842,6 +845,24 @@ impl SimulationRunner {
                                 self.agents[i].goal = self.agents[i].pos;
                                 self.agents[i].task_leg = TaskLeg::Free;
                                 self.agents[i].planned_path.clear();
+                            }
+                        }
+
+                        // Also reset agents whose queue targets were removed.
+                        for i in 0..n {
+                            if !self.agents[i].alive {
+                                continue;
+                            }
+                            match &self.agents[i].task_leg {
+                                TaskLeg::TravelToQueue { line_index, .. }
+                                | TaskLeg::Queuing { line_index, .. }
+                                    if *line_index >= self.zones.queue_lines.len() =>
+                                {
+                                    self.agents[i].goal = self.agents[i].pos;
+                                    self.agents[i].task_leg = TaskLeg::Free;
+                                    self.agents[i].planned_path.clear();
+                                }
+                                _ => {}
                             }
                         }
                     }

@@ -198,19 +198,21 @@ impl AgentSnapshot {
             "travel_to_queue" if self.task_leg_data.len() >= 2 => {
                 let f = self.task_leg_data[0];
                 let t = self.task_leg_data[1];
+                let li = self.task_leg_data.get(2).map(|d| d[0] as usize).unwrap_or(0);
                 TaskLeg::TravelToQueue {
                     from: IVec2::new(f[0], f[1]),
                     to: IVec2::new(t[0], t[1]),
-                    line_index: 0,
+                    line_index: li,
                 }
             }
             "queuing" if self.task_leg_data.len() >= 2 => {
                 let f = self.task_leg_data[0];
                 let t = self.task_leg_data[1];
+                let li = self.task_leg_data.get(2).map(|d| d[0] as usize).unwrap_or(0);
                 TaskLeg::Queuing {
                     from: IVec2::new(f[0], f[1]),
                     to: IVec2::new(t[0], t[1]),
-                    line_index: 0,
+                    line_index: li,
                 }
             }
             "charging" => TaskLeg::Charging,
@@ -279,13 +281,13 @@ pub fn record_tick_snapshot(
                 vec![[from.x, from.y], [to.x, to.y]],
             ),
             TaskLeg::Charging => ("charging", vec![]),
-            TaskLeg::TravelToQueue { from, to, .. } => (
+            TaskLeg::TravelToQueue { from, to, line_index } => (
                 "travel_to_queue",
-                vec![[from.x, from.y], [to.x, to.y]],
+                vec![[from.x, from.y], [to.x, to.y], [*line_index as i32, 0]],
             ),
-            TaskLeg::Queuing { from, to, .. } => (
+            TaskLeg::Queuing { from, to, line_index } => (
                 "queuing",
-                vec![[from.x, from.y], [to.x, to.y]],
+                vec![[from.x, from.y], [to.x, to.y], [*line_index as i32, 0]],
             ),
         };
         // Read planned path from runner (zero-copy) when available,

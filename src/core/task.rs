@@ -270,11 +270,11 @@ impl TaskScheduler for ClosestFirstScheduler {
     fn assign_delivery(
         &self,
         zones: &ZoneMap,
-        pos: IVec2,
+        _pos: IVec2,
         occupied: &HashSet<IVec2>,
-        _rng: &mut ChaCha8Rng,
+        rng: &mut ChaCha8Rng,
     ) -> Option<IVec2> {
-        Self::nearest_from_cells(&zones.delivery_cells, pos, occupied)
+        random_cell_from(&zones.delivery_cells, occupied, rng)
     }
 
     fn assign_pickups_batch(
@@ -737,18 +737,25 @@ mod tests {
     }
 
     #[test]
-    fn closest_scheduler_picks_nearest_delivery() {
+    fn closest_scheduler_assigns_random_delivery() {
         let zones = test_zones();
         let scheduler = ClosestFirstScheduler;
-        let mut rng = test_rng();
         let occupied = HashSet::new();
         let pos = IVec2::new(4, 2);
 
-        let delivery = scheduler.assign_delivery(&zones, pos, &occupied, &mut rng);
-        assert!(delivery.is_some());
-        let d = delivery.unwrap();
-        let dist = (d.x - pos.x).abs() + (d.y - pos.y).abs();
-        assert!(dist <= 2, "closest delivery should be nearby, got dist={dist}");
+        // Delivery assignment is now random (not nearest) to prevent
+        // short-cycle inflation in compact maps. Verify it picks a valid
+        // delivery cell and distributes across multiple cells over many seeds.
+        let mut seen: HashSet<IVec2> = HashSet::new();
+        for seed in 0..50u64 {
+            let mut rng = ChaCha8Rng::seed_from_u64(seed);
+            let delivery = scheduler.assign_delivery(&zones, pos, &occupied, &mut rng);
+            assert!(delivery.is_some());
+            let d = delivery.unwrap();
+            assert!(zones.delivery_cells.contains(&d), "must be a valid delivery cell");
+            seen.insert(d);
+        }
+        assert!(seen.len() > 1, "delivery should distribute across multiple cells, got {}", seen.len());
     }
 
     #[test]

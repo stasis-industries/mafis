@@ -1,31 +1,54 @@
 use bevy::prelude::*;
+#[cfg(any(target_arch = "wasm32", not(feature = "headless")))]
 use bevy::ecs::system::SystemParam;
 use std::collections::HashSet;
 
+#[cfg(any(target_arch = "wasm32", not(feature = "headless")))]
 use crate::constants;
+#[cfg(any(target_arch = "wasm32", not(feature = "headless")))]
 use crate::core::agent::{AgentActionStats, AgentRegistry, LogicalAgent};
+#[cfg(any(target_arch = "wasm32", not(feature = "headless")))]
 use crate::core::grid::GridMap;
+#[cfg(any(target_arch = "wasm32", not(feature = "headless")))]
 use crate::core::seed::SeededRng;
+#[cfg(any(target_arch = "wasm32", not(feature = "headless")))]
 use crate::core::state::{LoadingPhase, LoadingProgress, SimState, SimulationConfig};
+#[cfg(any(target_arch = "wasm32", not(feature = "headless")))]
 use crate::core::phase::{ResilienceBaseline, SimulationPhase};
+#[cfg(any(target_arch = "wasm32", not(feature = "headless")))]
 use crate::core::task::LifelongConfig;
+#[cfg(any(target_arch = "wasm32", not(feature = "headless")))]
 use crate::core::topology::{ActiveTopology, ZoneMap, ZoneType};
+#[cfg(any(target_arch = "wasm32", not(feature = "headless")))]
 use crate::fault::heat::HeatState;
+#[cfg(any(target_arch = "wasm32", not(feature = "headless")))]
 use crate::render::environment::{
     EnvironmentMarker, ObstacleMarker, spawn_floor_and_lines, spawn_queue_arrows,
     spawn_zone_markers,
 };
+#[cfg(any(target_arch = "wasm32", not(feature = "headless")))]
 use crate::render::orbit_camera::OrbitCamera;
+#[cfg(any(target_arch = "wasm32", not(feature = "headless")))]
 use crate::solver::pibt::PibtSolver;
+#[cfg(any(target_arch = "wasm32", not(feature = "headless")))]
 use crate::solver::traits::MAPFSolver;
+#[cfg(any(target_arch = "wasm32", not(feature = "headless")))]
 use crate::solver::ActiveSolver;
+#[cfg(any(target_arch = "wasm32", not(feature = "headless")))]
 use crate::solver::heuristics::DistanceMapCache;
+#[cfg(any(target_arch = "wasm32", not(feature = "headless")))]
 use crate::analysis::cascade::CascadeState;
+#[cfg(any(target_arch = "wasm32", not(feature = "headless")))]
 use crate::analysis::fault_metrics::FaultMetrics;
+#[cfg(any(target_arch = "wasm32", not(feature = "headless")))]
 use crate::analysis::history::TickHistory;
+#[cfg(any(target_arch = "wasm32", not(feature = "headless")))]
 use crate::analysis::heatmap::HeatmapState;
+#[cfg(any(target_arch = "wasm32", not(feature = "headless")))]
 use crate::analysis::metrics::SimMetrics;
+#[cfg(any(target_arch = "wasm32", not(feature = "headless")))]
 use crate::analysis::scorecard::{ResilienceScorecard, ScorecardState};
+#[cfg(any(target_arch = "wasm32", not(feature = "headless")))]
 use crate::analysis::dependency::{ActionDependencyGraph, AdgThrottle, BetweennessCriticality};
 
 
@@ -33,6 +56,7 @@ use crate::analysis::dependency::{ActionDependencyGraph, AdgThrottle, Betweennes
 // SystemParam bundles (to stay under Bevy's 16-param limit)
 // ---------------------------------------------------------------------------
 
+#[cfg(any(target_arch = "wasm32", not(feature = "headless")))]
 #[derive(SystemParam)]
 struct LoadingResources<'w> {
     grid: ResMut<'w, GridMap>,
@@ -57,6 +81,7 @@ struct LoadingResources<'w> {
 }
 
 /// Resources that must be reset between simulation runs for determinism.
+#[cfg(any(target_arch = "wasm32", not(feature = "headless")))]
 #[derive(SystemParam)]
 struct ResetResources<'w> {
     solver: ResMut<'w, ActiveSolver>,
@@ -147,6 +172,11 @@ impl Default for UiState {
         }
     }
 }
+
+// Everything below is observatory-only (render-dependent).
+#[cfg(any(target_arch = "wasm32", not(feature = "headless")))]
+mod observatory_controls {
+use super::*;
 
 /// Custom map data from the map maker, ready for 3D preview in Idle state.
 #[derive(Resource)]
@@ -945,3 +975,8 @@ impl Plugin for ControlsPlugin {
             .add_systems(OnEnter(SimState::Idle), despawn_on_reset);
     }
 }
+
+} // mod observatory_controls
+
+#[cfg(any(target_arch = "wasm32", not(feature = "headless")))]
+pub use observatory_controls::*;

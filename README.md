@@ -4,33 +4,33 @@ A fault resilience observatory for lifelong multi-agent pathfinding — 30K line
 
 **[Live Demo](https://stasis-website.vercel.app/simulator)** | **Solo project by [Teddy Truong](https://github.com/teddytruong)**
 
-`5 solvers` | `408 tests` | `30K LOC Rust` | `7,000 experiments` | `WASM 3D` | `Deterministic replay` | `Shareable URLs`
+`5 solvers` | `408 tests` | `30K LOC Rust` | `11,420 experiments` | `WASM 3D` | `Deterministic replay` | `Shareable URLs`
 
 ---
 
 ## Key Findings
 
-**1. Braess's paradox in fault-injected MAPF.** Under congestion, killing agents paradoxically *improves* throughput for reactive solvers — dead agents free corridors. The effect is architecture-dependent and confirms at 95% confidence across 7,000 runs (5 solvers × 4 densities × 7 scenarios × 50 seeds).
+**1. Braess's paradox in fault-injected MAPF.** Under congestion, killing agents paradoxically *improves* throughput for reactive solvers — dead agents free corridors. The effect is architecture-dependent and confirms at 95% confidence across 8,480 runs (7,000 braess + 1,000 perm_zone + 480 cross-topology), BH-FDR corrected across 140 tests.
 
-| Solver | Braess threshold | Ratio at n=40, burst 20% | p-value |
-|--------|-----------------|--------------------------|---------|
-| PIBT | **n=10** (always) | 1.586 [1.375, 1.797] | 0.008 |
-| RHCR-PIBT | **n=10** | 1.587 [1.250, 1.923] | 0.009 |
-| RHCR-PBS | **n=20** | 1.300 [1.159, 1.441] | 0.147 |
-| RHCR-A* | **n=40** | 1.549 [1.363, 1.735] | <0.001 |
-| Token Passing | **none** | 0.748 [0.673, 0.823] | <0.001 |
+| Solver | Braess threshold | Peak ratio | Cliff's d | p_adj |
+|--------|-----------------|-----------|-----------|-------|
+| PIBT | **n=10** | 2.090 [1.71, 2.47] at n=80 | 0.511 | <0.001 |
+| RHCR-PIBT | **n=80** | 1.608 [1.33, 1.89] | 0.347 | 0.015 |
+| RHCR-PBS | **none** | — | — | — |
+| RHCR-A* | **none** | — | — | — |
+| Token Passing | **none** | 0.688 [0.64, 0.73] at n=10 | -0.991 | <0.001 |
 
-*95% CI lower bound > 1.0 = confirmed Braess benefit. Mann-Whitney U test.*
+*Confirmed = 95% CI lower > 1.0 AND BH-adjusted p < 0.05. 9 confirmed effects, all under burst faults.*
 
-**The Braess threshold correlates with solver coordination depth.** Reactive solvers congested at any density; coordinated solvers resist the paradox longer.
+**PIBT shows the strongest effect** — confirmed from n=10 through n=80, peaking at 2.09× (throughput doubles when 20% of agents are killed). RHCR-PIBT resists until extreme density (n=80).
 
 **2. Token Passing is uniquely vulnerable to permanent faults.** The only solver with no confirmed Braess benefit — and worst-in-class under all permanent-fault scenarios:
 
-| Scenario | TP ratio at n=10 | TP ratio at n=40 | Interpretation |
-|----------|-----------------|-----------------|----------------|
-| Burst 50% | 0.445 (p<0.001) | 0.546 (p<0.001) | Fleet gaps break sequential TOKEN |
-| Wear (high) | 0.263 (p<0.001) | 0.590 (p<0.001) | Progressive death cascade |
-| Perm. Zone | **0.178** (p<0.001) | 0.371 (p<0.001) | Worst scenario — space loss collapses TOKEN |
+| Scenario | TP ratio at n=10 | TP ratio at n=40 | Cliff's d |
+|----------|-----------------|-----------------|-----------|
+| Burst 50% | 0.417 (p<0.001) | 0.489 (p<0.001) | -1.000 |
+| Wear (high) | 0.259 (p<0.001) | 0.472 (p<0.001) | -1.000 |
+| Perm. Zone | **0.178** (p<0.001) | 0.371 (p<0.001) | -1.000 |
 
 Actionable implication: Token Passing should not be deployed in environments with high permanent-fault risk at low fleet density.
 
@@ -42,7 +42,7 @@ Actionable implication: Token Passing should not be deployed in environments wit
 | RHCR-PIBT | 0.531 (p<0.001) | 0.963 (p=0.717) |
 | RHCR-A* | 0.503 (p<0.001) | **1.057** (p=0.895) |
 
-**4. Scheduler choice has only ~10% effect** — solver algorithm and fault type dominate.
+**4. Closest scheduler underperforms random under faults (0.81-0.92×).** With fair delivery randomization, the closest scheduler's locality benefit is outweighed by corridor congestion from agent clustering. Solver algorithm and fault type remain the dominant factors.
 
 Prior work ([Hoenig et al. 2019](https://whoenig.github.io/publications/2019_RA-L_Hoenig.pdf), [Li et al. 2024](https://arxiv.org/abs/2404.16162)) addresses **delay robustness** (temporary slowdowns). To our knowledge, no prior work measures lifelong MAPF solver throughput under **permanent fault injection** — crash failures, Weibull-modeled wear, and permanent zone loss.
 

@@ -30,13 +30,6 @@ const EXPERIMENT_NAMES: &[&str] = &[
     "topology_large",
 ];
 
-const SOLVER_IDS: &[&str] = &[
-    "pibt",
-    "rhcr_pbs",
-    "rhcr_pibt",
-    "rhcr_priority_astar",
-    "token_passing",
-];
 
 // ---------------------------------------------------------------------------
 // Context-aware tab completion
@@ -44,23 +37,14 @@ const SOLVER_IDS: &[&str] = &[
 
 struct MafisHelper {
     commands: Vec<(&'static str, Vec<&'static str>)>,
-    // Dynamic completions scanned from the project
     result_files: Vec<String>,
-    topology_ids: Vec<String>,
-    constant_names: Vec<String>,
-    doc_names: Vec<String>,
 }
 
 impl MafisHelper {
     fn new(root: Option<&Path>) -> Self {
         let mut helper = Self {
             commands: vec![
-                ("check", vec![]),
-                ("build", vec!["--native"]),
-                ("test", vec!["--release"]),
-                ("serve", vec!["--no-build", "--port"]),
-                ("dev", vec!["--test"]),
-                ("clean", vec![]),
+                ("desktop", vec!["--debug"]),
                 ("experiment", vec!["list", "run", "smoke", "run-all"]),
                 (
                     "results",
@@ -68,28 +52,14 @@ impl MafisHelper {
                         "list", "show", "summary", "compare", "clean", "open",
                     ],
                 ),
-                ("topology", vec!["list", "info", "preview", "mapmaker"]),
-                ("solver", vec!["list", "info"]),
-                ("config", vec!["show", "get"]),
-                ("status", vec![]),
-                ("version", vec![]),
-                ("docs", vec![]),
-                ("count", vec![]),
-                ("lint", vec![]),
-                ("logo", vec![]),
-                ("clear", vec![]),
-                ("rain", vec![]),
-                ("fortune", vec![]),
-                ("tree", vec![]),
-                ("completions", vec!["bash", "zsh", "fish", "powershell", "elvish"]),
+                ("test", vec!["--release"]),
+                ("serve", vec!["--no-build", "--port"]),
+                ("build", vec!["--native"]),
                 ("help", vec![]),
                 ("exit", vec![]),
                 ("quit", vec![]),
             ],
             result_files: vec![],
-            topology_ids: vec![],
-            constant_names: vec![],
-            doc_names: vec![],
         };
 
         if let Some(root) = root {
@@ -114,71 +84,18 @@ impl MafisHelper {
             self.result_files.sort();
         }
 
-        // Topology IDs (from web/topologies/*.json)
-        let topo_pattern = root
-            .join("web/topologies/*.json")
-            .to_string_lossy()
-            .to_string();
-        self.topology_ids = glob::glob(&topo_pattern)
-            .ok()
-            .into_iter()
-            .flatten()
-            .filter_map(|p| p.ok())
-            .filter_map(|p| {
-                p.file_stem()
-                    .map(|s| s.to_string_lossy().to_string())
-            })
-            .collect();
-        self.topology_ids.sort();
-
-        // Constant names (from src/constants.rs)
-        if let Ok(content) = std::fs::read_to_string(root.join("src/constants.rs")) {
-            self.constant_names = content
-                .lines()
-                .filter(|l| l.trim().starts_with("pub const "))
-                .filter_map(|l| {
-                    l.trim()
-                        .strip_prefix("pub const ")
-                        .and_then(|rest| rest.split(':').next())
-                        .map(|name| name.trim().to_string())
-                })
-                .collect();
-        }
-
-        // Doc names
-        if let Ok(entries) = std::fs::read_dir(root.join("docs")) {
-            self.doc_names = entries
-                .filter_map(|e| e.ok())
-                .filter(|e| {
-                    e.path()
-                        .extension()
-                        .is_some_and(|ext| ext == "md")
-                })
-                .filter_map(|e| {
-                    e.path()
-                        .file_stem()
-                        .map(|s| s.to_string_lossy().to_string())
-                })
-                .collect();
-            self.doc_names.sort();
-        }
     }
 
-    /// Get dynamic completions for a command + subcommand context.
     fn dynamic_completions(&self, cmd: &str, subcmd: &str) -> &[String] {
         match (cmd, subcmd) {
             ("results", "show") | ("results", "compare") => &self.result_files,
-            ("topology", "preview") | ("topology", "info") => &self.topology_ids,
-            ("config", "get") => &self.constant_names,
             _ => &[],
         }
     }
 
-    /// Get static completions for a command + subcommand context.
     fn static_completions(cmd: &str, subcmd: &str) -> &'static [&'static str] {
         match (cmd, subcmd) {
             ("experiment", "run") => EXPERIMENT_NAMES,
-            ("solver", "info") => SOLVER_IDS,
             _ => &[],
         }
     }
@@ -227,12 +144,6 @@ impl Completer for MafisHelper {
             } else {
                 pos - prefix.len()
             };
-
-            // For single-arg commands (docs), jump to dynamic
-            if cmd == "docs" {
-                let matches = complete_from_strings(&self.doc_names, prefix);
-                return Ok((word_start, matches));
-            }
 
             if let Some((_, subs)) = self.commands.iter().find(|(name, _)| *name == cmd) {
                 let matches: Vec<Pair> = subs
@@ -322,27 +233,12 @@ impl Helper for MafisHelper {}
 fn print_compact_help() {
     let (r, g, b) = style::DIM;
     let commands: &[(&str, &str)] = &[
-        ("check", "Type & borrow check"),
-        ("build [--native]", "WASM or native build"),
+        ("desktop [--debug]", "Launch experiment runner GUI"),
+        ("experiment list|run|smoke|run-all", "Run experiments (headless)"),
+        ("results list|show|summary|compare|clean|open", "View results"),
         ("test [filter] [--release]", "Run tests"),
-        ("serve [--no-build] [--port N]", "Build + HTTP serve"),
-        ("dev [--test]", "Watch + auto-check"),
-        ("clean", "Clean artifacts"),
-        ("experiment list|run|smoke|run-all", "Experiments"),
-        ("results list|show|summary|compare|clean|open", "Results"),
-        ("topology list|info|preview|mapmaker", "Topologies"),
-        ("solver list|info", "Solvers"),
-        ("config show|get <KEY>", "Constants"),
-        ("status", "Health check"),
-        ("count", "Lines of code"),
-        ("lint", "Clippy"),
-        ("docs [topic]", "Documentation"),
-        ("version / logo", "Info"),
-        ("clear", "Clear terminal"),
-        ("rain", "Matrix rain animation"),
-        ("fortune", "Random MAPF fact"),
-        ("tree", "Project structure"),
-        ("completions <shell>", "Shell completions"),
+        ("serve [--no-build] [--port N]", "Build + serve WASM observatory"),
+        ("build [--native]", "WASM or native build"),
         ("exit / quit / Ctrl+D", "Exit"),
     ];
     println!();
@@ -449,9 +345,7 @@ pub fn run() -> anyhow::Result<()> {
                 match line {
                     "exit" | "quit" => break,
                     "clear" | "cls" => {
-                        if let Err(e) = commands::dispatch(crate::app::Command::Clear) {
-                            style::print_error(&format!("{e}"));
-                        }
+                        print!("\x1B[2J\x1B[1;1H");
                     }
                     "?" => print_compact_help(),
                     "help" => {

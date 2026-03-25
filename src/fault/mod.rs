@@ -46,10 +46,10 @@ impl Plugin for FaultPlugin {
         // internally via its tick() method. Only manual fault processing
         // (user-initiated kills/latency/obstacles) remains as ECS systems.
 
-        // Manual fault processor and replay are excluded from test builds: they
-        // require Assets<Mesh> / Assets<StandardMaterial> (render assets) to spawn
-        // obstacle visuals. Integration tests inject faults directly via ECS.
-        #[cfg(not(test))]
+        // Manual fault processor and replay are excluded from test and headless
+        // builds: they require Assets<Mesh> / Assets<StandardMaterial> (render assets)
+        // to spawn obstacle visuals. Integration tests inject faults directly via ECS.
+        #[cfg(not(any(test, feature = "headless")))]
         {
             use crate::core::state::SimState;
             app.add_systems(

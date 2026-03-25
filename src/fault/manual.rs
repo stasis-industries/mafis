@@ -1,16 +1,24 @@
-#[cfg(not(test))]
+#[cfg(not(any(test, feature = "headless")))]
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 
+#[cfg(not(any(test, feature = "headless")))]
 use crate::constants;
+#[cfg(not(any(test, feature = "headless")))]
 use crate::core::agent::{AgentIndex, AgentRegistry, LogicalAgent};
+#[cfg(not(any(test, feature = "headless")))]
 use crate::core::grid::GridMap;
+#[cfg(not(any(test, feature = "headless")))]
 use crate::core::state::SimulationConfig;
+#[cfg(not(any(test, feature = "headless")))]
 use crate::render::environment::{grid_to_world, ObstacleMarker};
 
+#[cfg(not(any(test, feature = "headless")))]
 use super::breakdown::{Dead, FaultEvent, LatencyFault};
-use super::config::{FaultSource, FaultType};
-#[cfg(not(test))]
+use super::config::FaultSource;
+#[cfg(not(any(test, feature = "headless")))]
+use super::config::FaultType;
+#[cfg(not(any(test, feature = "headless")))]
 use super::heat::HeatState;
 
 /// Manual fault injection commands from the UI / bridge.
@@ -56,6 +64,15 @@ pub struct ManualFaultLog {
 }
 
 impl ManualFaultLog {
+    /// Insert an entry maintaining chronological (tick-sorted) order.
+    /// Entries placed during Replay at earlier ticks must not break the
+    /// sorted invariant that `restore_world_state` and `replay_manual_faults`
+    /// depend on (both use `break` on tick > target).
+    pub fn insert_sorted(&mut self, entry: ManualFaultEntry) {
+        let pos = self.entries.partition_point(|e| e.tick <= entry.tick);
+        self.entries.insert(pos, entry);
+    }
+
     pub fn truncate_after_tick(&mut self, tick: u64) {
         self.entries.retain(|e| e.tick <= tick);
         self.replay_from = None;
@@ -86,7 +103,7 @@ pub struct RewindRequest {
 // apply_rewind system (render-dependent, excluded from test builds)
 // ---------------------------------------------------------------------------
 
-#[cfg(not(test))]
+#[cfg(not(any(test, feature = "headless")))]
 #[derive(SystemParam)]
 pub struct RewindResources<'w> {
     grid: ResMut<'w, GridMap>,
@@ -101,9 +118,11 @@ pub struct RewindResources<'w> {
     ui_state: Res<'w, crate::ui::controls::UiState>,
     dist_cache: ResMut<'w, crate::solver::heuristics::DistanceMapCache>,
     rewind_req: ResMut<'w, RewindRequest>,
+    baseline_diff: ResMut<'w, crate::analysis::baseline::BaselineDiff>,
+    baseline_store: Res<'w, crate::analysis::baseline::BaselineStore>,
 }
 
-#[cfg(not(test))]
+#[cfg(not(any(test, feature = "headless")))]
 /// Applies pending rewind requests. Runs in Update after BridgeSet.
 pub fn apply_rewind(
     mut commands: Commands,
@@ -143,10 +162,37 @@ pub fn apply_rewind(
                 sim.analysis.truncate_to_tick(snapshot.tick);
             }
 
-            // Don't truncate snapshots, fault log, or metrics — they stay
-            // for timeline navigation. Only un-fire scheduled events so they
-            // re-fire when the simulation reaches those ticks again.
+            // Un-fire scheduled events so they re-fire when the simulation
+            // reaches those ticks again.
             res.fault_schedule.un_fire_after_tick(target_tick);
+
+            // Truncate snapshots beyond the rewind point — the old timeline
+            // no longer represents reality (simulation will diverge due to
+            // new faults). Without this, record_tick_snapshot skips new
+            // recordings because it sees tick <= last snapshot tick.
+            res.tick_history.truncate_after_tick(target_tick);
+
+            // Don't truncate manual fault log — entries beyond target_tick
+            // are replayed by replay_manual_faults at their original ticks.
+            // restore_world_state already sets replay_from to the first
+            // entry after target_tick.
+
+            // Recompute BaselineDiff from scratch so cumulative metrics
+            // (deficit_integral, surplus_integral, recovery_tick) reflect
+            // only the ticks up to the rewind point. From this point on,
+            // update_baseline_diff will accumulate correctly as the
+            // simulation re-runs with the injected faults.
+            if let Some(ref record) = res.baseline_store.record {
+                if let Some(ref sim) = sim {
+                    let tasks = &sim.analysis.tasks_completed_series;
+                    let tp = &sim.analysis.throughput_series;
+                    res.baseline_diff.recompute(record, tasks, tp);
+                } else {
+                    res.baseline_diff.clear();
+                }
+            } else {
+                res.baseline_diff.clear();
+            }
 
             res.tick_history.replay_cursor = None;
 
@@ -155,7 +201,7 @@ pub fn apply_rewind(
     }
 }
 
-#[cfg(not(test))]
+#[cfg(not(any(test, feature = "headless")))]
 fn find_snapshot(
     history: &crate::analysis::history::TickHistory,
     tick: u64,
@@ -164,7 +210,7 @@ fn find_snapshot(
     history.snapshots.get(idx)
 }
 
-#[cfg(not(test))]
+#[cfg(not(any(test, feature = "headless")))]
 fn restore_world_state(
     commands: &mut Commands,
     res: &mut RewindResources,
@@ -323,7 +369,7 @@ fn restore_world_state(
 
 /// Restore `SimulationRunner` state to match the snapshot.
 /// Must be called after `restore_world_state` so `res.grid` is already rebuilt.
-#[cfg(not(test))]
+#[cfg(not(any(test, feature = "headless")))]
 fn restore_runner_state(
     sim: &mut Option<ResMut<crate::core::live_sim::LiveSim>>,
     res: &RewindResources,
@@ -397,6 +443,7 @@ fn restore_runner_state(
 /// and the runner without going through the ManualFaultCommand message pipeline
 /// (avoids re-logging). Does NOT re-register events in fault_metrics (the originals
 /// are still there).
+#[cfg(not(any(test, feature = "headless")))]
 pub fn replay_manual_faults(
     mut commands: Commands,
     mut fault_log: ResMut<ManualFaultLog>,
@@ -451,32 +498,26 @@ pub fn replay_manual_faults(
         match &entry.action {
             ManualFaultAction::KillAgent { agent_index, pos } => {
                 if let Some(entity) = agent_registry.get_entity(AgentIndex(*agent_index)) {
-                    commands.entity(entity).insert(Dead);
-                    grid.set_obstacle(*pos);
+                    // Use the agent's current position — after rewind the agent
+                    // may have taken a different path and won't be at the stored pos.
+                    let kill_pos = agents_query.get(entity)
+                        .map(|a| a.current_pos)
+                        .unwrap_or(*pos);
 
-                    // Spawn obstacle visual
-                    let m = obstacle_mesh.get_or_insert_with(|| meshes.add(Cuboid::new(0.9, 0.6, 0.9)));
-                    let mt = obstacle_mat.get_or_insert_with(|| {
-                        materials.add(StandardMaterial {
-                            base_color: Color::srgb(0.35, 0.20, 0.18),
-                            perceptual_roughness: 0.7,
-                            ..default()
-                        })
-                    });
-                    let world = grid_to_world(*pos);
-                    commands.spawn((
-                        Mesh3d(m.clone()),
-                        MeshMaterial3d(mt.clone()),
-                        Transform::from_xyz(world.x, 0.3, world.z),
-                        ObstacleMarker,
-                    ));
+                    commands.entity(entity).insert(Dead);
+                    grid.set_obstacle(kill_pos);
+
+                    // No obstacle visual — the Dead component changes the agent's
+                    // color to dark red via the rendering system. Spawning a brown
+                    // obstacle cube on top makes KillAgent visually identical to
+                    // PlaceObstacle, which confuses the user.
 
                     // Also apply to runner
                     if let Some(ref mut sim) = sim
                         && *agent_index < sim.runner.agents.len() {
                             sim.runner.agents[*agent_index].alive = false;
                             sim.runner.agents[*agent_index].planned_path.clear();
-                            sim.runner.grid_mut().set_obstacle(*pos);
+                            sim.runner.grid_mut().set_obstacle(kill_pos);
                         }
                 }
             }
@@ -531,6 +572,7 @@ pub fn replay_manual_faults(
 
 /// Processes manual fault commands. Runs in Update (works when Paused).
 /// Applies faults to both ECS (immediate visual) and runner (persistence).
+#[cfg(not(any(test, feature = "headless")))]
 pub fn process_manual_faults(
     mut commands: Commands,
     mut manual_cmds: MessageReader<ManualFaultCommand>,
@@ -544,6 +586,7 @@ pub fn process_manual_faults(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut sim: Option<ResMut<crate::core::live_sim::LiveSim>>,
+    mut tick_history: ResMut<crate::analysis::history::TickHistory>,
 ) {
     // Lazily-created shared handles for manual obstacle visuals
     let mut obstacle_mesh: Option<Handle<Mesh>> = None;
@@ -572,6 +615,23 @@ pub fn process_manual_faults(
         ));
     };
 
+    // Check replay_cursor instead of State<SimState> — Bevy state transitions
+    // are deferred to the next frame, but replay_cursor is set immediately by
+    // SeekToTick in the bridge. When seek + fault arrive in the same JS polling
+    // batch, the state is still Finished/Paused but the cursor is already set.
+    let is_replay = tick_history.replay_cursor.is_some();
+    let effective_tick = if is_replay {
+        tick_history.current_snapshot()
+            .map(|s| s.tick)
+            .unwrap_or(sim_config.tick)
+    } else {
+        sim_config.tick
+    };
+
+    // Track whether we've already applied causality truncation this frame
+    // (idempotent, but avoids redundant work for multiple commands).
+    let mut causality_applied = false;
+
     for cmd in manual_cmds.read() {
         match cmd {
             ManualFaultCommand::KillAgent(id) | ManualFaultCommand::KillAgentScheduled(id) => {
@@ -582,21 +642,37 @@ pub fn process_manual_faults(
                 };
                 if let Some(entity) = agent_registry.get_entity(AgentIndex(*id))
                     && let Ok(agent) = agents_query.get(entity) {
-                        let pos = agent.current_pos;
+                        // During replay, ECS current_pos is stale (from last running tick).
+                        // Use snapshot position which matches what the user sees.
+                        let pos = if is_replay {
+                            tick_history.current_snapshot()
+                                .and_then(|snap| snap.agents.iter().find(|a| a.index == *id))
+                                .map(|a| a.pos)
+                                .unwrap_or(agent.current_pos)
+                        } else {
+                            agent.current_pos
+                        };
                         commands.entity(entity).insert(Dead);
                         grid.set_obstacle(pos);
                         fault_events.write(FaultEvent {
                             entity,
                             fault_type: FaultType::Breakdown,
                             source,
-                            tick: sim_config.tick,
+                            tick: effective_tick,
                             position: pos,
                         });
                         fault_metrics.register_manual_event(
-                            sim_config.tick, FaultType::Breakdown, source, pos,
+                            effective_tick, FaultType::Breakdown, source, pos,
                         );
-                        fault_log.entries.push(ManualFaultEntry {
-                            tick: sim_config.tick,
+                        // Causality: changing the past invalidates the future.
+                        if is_replay && !causality_applied {
+                            fault_log.truncate_after_tick(effective_tick);
+                            tick_history.truncate_after_tick(effective_tick);
+                            if let Some(ref mut s) = sim { s.analysis.truncate_to_tick(effective_tick); }
+                            causality_applied = true;
+                        }
+                        fault_log.insert_sorted(ManualFaultEntry {
+                            tick: effective_tick,
                             action: ManualFaultAction::KillAgent { agent_index: *id, pos },
                             source,
                         });
@@ -617,10 +693,16 @@ pub fn process_manual_faults(
                         &mut obstacle_mesh, &mut obstacle_mat, *cell,
                     );
                     fault_metrics.register_manual_event(
-                        sim_config.tick, FaultType::Breakdown, FaultSource::Manual, *cell,
+                        effective_tick, FaultType::Breakdown, FaultSource::Manual, *cell,
                     );
-                    fault_log.entries.push(ManualFaultEntry {
-                        tick: sim_config.tick,
+                    if is_replay && !causality_applied {
+                        fault_log.truncate_after_tick(effective_tick);
+                        tick_history.truncate_after_tick(effective_tick);
+                        if let Some(ref mut s) = sim { s.analysis.truncate_to_tick(effective_tick); }
+                        causality_applied = true;
+                    }
+                    fault_log.insert_sorted(ManualFaultEntry {
+                        tick: effective_tick,
                         action: ManualFaultAction::PlaceObstacle(*cell),
                         source: FaultSource::Manual,
                     });
@@ -651,14 +733,20 @@ pub fn process_manual_faults(
                                 entity,
                                 fault_type: FaultType::Latency,
                                 source,
-                                tick: sim_config.tick,
+                                tick: effective_tick,
                                 position: pos,
                             });
                             fault_metrics.register_manual_event(
-                                sim_config.tick, FaultType::Latency, source, pos,
+                                effective_tick, FaultType::Latency, source, pos,
                             );
-                            fault_log.entries.push(ManualFaultEntry {
-                                tick: sim_config.tick,
+                            if is_replay && !causality_applied {
+                                fault_log.truncate_after_tick(effective_tick);
+                                tick_history.truncate_after_tick(effective_tick);
+                                if let Some(ref mut s) = sim { s.analysis.truncate_to_tick(effective_tick); }
+                                causality_applied = true;
+                            }
+                            fault_log.insert_sorted(ManualFaultEntry {
+                                tick: effective_tick,
                                 action: ManualFaultAction::InjectLatency {
                                     agent_id: *agent_id,
                                     duration: dur,

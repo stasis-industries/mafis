@@ -259,11 +259,10 @@ impl Plugin for AnalysisPlugin {
                 (cleanup_analysis_state, heatmap::despawn_heatmap_tiles),
             );
 
-        // Render-dependent systems are excluded in test builds to allow headless
-        // integration tests without render asset plugins.
+        // Render-dependent systems are excluded in test and headless builds.
         // `update_heatmap_visuals` requires Assets<Mesh/Image/StandardMaterial> +
         // HeatmapTexture which are only available with the render plugin stack.
-        #[cfg(not(test))]
+        #[cfg(not(any(test, feature = "headless")))]
         {
             app.add_systems(Startup, heatmap::setup_heatmap_palette)
                 .add_systems(

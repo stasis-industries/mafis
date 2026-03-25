@@ -6,6 +6,7 @@ pub mod core;
 pub mod experiment;
 pub mod export;
 pub mod fault;
+#[cfg(any(target_arch = "wasm32", not(feature = "headless")))]
 pub mod render;
 pub mod solver;
 pub mod ui;
@@ -30,10 +31,12 @@ impl Plugin for MapfFisPlugin {
             solver::SolverPlugin,
             fault::FaultPlugin,
             analysis::AnalysisPlugin,
-            export::ExportPlugin,
-            render::RenderPlugin,
             ui::UiPlugin,
         ));
+
+        // Render + Export only in observatory mode (WASM or non-headless desktop)
+        #[cfg(any(target_arch = "wasm32", not(feature = "headless")))]
+        app.add_plugins((render::RenderPlugin, export::ExportPlugin));
 
         #[cfg(feature = "mapf-pilot")]
         app.add_plugins(pilot_bridge::PilotBridgePlugin);

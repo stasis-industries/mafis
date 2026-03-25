@@ -93,6 +93,7 @@ pub struct ExperimentHandle {
     pub progress: Arc<Mutex<RunnerProgress>>,
     pub done: Arc<AtomicBool>,
     pub result: Arc<Mutex<Option<MatrixResult>>>,
+    pub start_time: std::time::Instant,
 }
 
 /// Stage for full-page experiment mode.
@@ -1056,6 +1057,24 @@ fn fullpage_running(
             ui.add_space(12.0);
 
             ui.weak(&p.label);
+
+            // ETA estimation
+            let elapsed_secs = h.start_time.elapsed().as_secs_f64();
+            if p.current > 0 && p.current < p.total {
+                let avg_per_run = elapsed_secs / p.current as f64;
+                let remaining = (p.total - p.current) as f64 * avg_per_run;
+                if remaining < 60.0 {
+                    ui.weak(format!("~{:.0}s remaining", remaining));
+                } else {
+                    ui.weak(format!("~{:.1} min remaining", remaining / 60.0));
+                }
+            }
+            ui.add_space(4.0);
+            ui.weak(format!(
+                "{} threads  |  {:.1}s elapsed",
+                rayon::current_num_threads(),
+                elapsed_secs,
+            ));
         } else {
             ui.spinner();
             ui.weak("Starting...");
@@ -1068,6 +1087,7 @@ fn fullpage_running(
 fn fullpage_results(
     ui: &mut egui::Ui,
     gui: &mut ExperimentGuiState,
+    #[cfg_attr(feature = "headless", allow(unused))]
     commands: &mut Vec<ExperimentCommand>,
 ) {
     if gui.last_result.is_none() {
@@ -1181,14 +1201,15 @@ fn fullpage_results(
                                 let s = &summaries[idx];
                                 let is_selected = gui.selected_row == Some(idx);
 
-                                // 3D button
+                                // 3D button — observatory only
+                                #[cfg(not(feature = "headless"))]
                                 if ui.small_button("3D").clicked() {
                                     commands.push(ExperimentCommand::SimulateIn3D {
                                         solver: s.solver_name.clone(),
                                         topology: s.topology_name.clone(),
                                         scheduler: s.scheduler_name.clone(),
                                         num_agents: s.num_agents,
-                                        seed: 42, // Use first seed
+                                        seed: 42,
                                         tick_count: gui.tick_count,
                                     });
                                 }
@@ -1284,6 +1305,7 @@ fn fullpage_results(
                             gui.show_drill_down = false;
                         }
 
+                        #[cfg(not(feature = "headless"))]
                         if ui.button("SIMULATE IN OBSERVATORY").clicked() {
                             commands.push(ExperimentCommand::SimulateIn3D {
                                 solver: sel.solver_name.clone(),
@@ -1385,6 +1407,8 @@ pub enum ExperimentCommand {
     Launch(ExperimentMatrix),
     ClearHandle,
     /// Pre-configure the simulator with a specific experiment config.
+    /// Observatory only — not available in headless experiment mode.
+    #[cfg(not(feature = "headless"))]
     SimulateIn3D {
         solver: String,
         topology: String,
@@ -1426,5 +1450,6 @@ pub fn launch_experiment(matrix: ExperimentMatrix) -> ExperimentHandle {
         progress: runner_progress,
         done,
         result,
+        start_time: std::time::Instant::now(),
     }
 }
