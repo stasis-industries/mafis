@@ -97,3 +97,58 @@ impl Plugin for SolverPlugin {
         app.insert_resource(default_active_solver());
     }
 }
+
+// ---------------------------------------------------------------------------
+// Factory integration tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod factory_tests {
+    use super::*;
+
+    #[test]
+    fn factory_creates_rt_lacam() {
+        let solver = lifelong_solver_from_name("rt_lacam", 100, 10);
+        assert!(solver.is_some());
+        assert_eq!(solver.unwrap().name(), "rt_lacam");
+    }
+
+    #[test]
+    fn factory_creates_tpts() {
+        let solver = lifelong_solver_from_name("tpts", 100, 10);
+        assert!(solver.is_some());
+        assert_eq!(solver.unwrap().name(), "tpts");
+    }
+
+    #[test]
+    fn factory_creates_pibt_apf() {
+        let solver = lifelong_solver_from_name("pibt+apf", 100, 10);
+        assert!(solver.is_some());
+        assert_eq!(solver.unwrap().name(), "pibt+apf");
+    }
+
+    #[test]
+    fn factory_unknown_base_returns_none() {
+        assert!(lifelong_solver_from_name("unknown+apf", 100, 10).is_none());
+    }
+
+    #[test]
+    fn factory_unknown_layer_returns_none() {
+        assert!(lifelong_solver_from_name("pibt+unknown", 100, 10).is_none());
+    }
+
+    #[test]
+    fn factory_existing_solvers_still_work() {
+        for &(name, _) in SOLVER_NAMES.iter().filter(|(n, _)| !n.contains('+')) {
+            assert!(
+                lifelong_solver_from_name(name, 100, 10).is_some(),
+                "factory should create '{name}'"
+            );
+        }
+    }
+
+    #[test]
+    fn solver_names_has_eight_entries() {
+        assert_eq!(SOLVER_NAMES.len(), 8);
+    }
+}
