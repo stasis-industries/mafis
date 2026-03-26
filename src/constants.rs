@@ -161,6 +161,52 @@ pub const TOKEN_ASTAR_MAX_TIME: u64 = 200;
 /// 5000 is enough for paths up to ~80 steps on uncongested grids.
 pub const ASTAR_MAX_EXPANSIONS: u64 = 5_000;
 
+// ── RT-LaCAM (Real-Time Configuration-Space Search) ─────────────
+
+/// Maximum DFS nodes expanded per tick. Controls per-tick compute budget.
+/// WASM: 2000 keeps tick time under ~3ms. Desktop: 10000 for deeper search.
+#[cfg(target_arch = "wasm32")]
+pub const RT_LACAM_NODE_BUDGET: usize = 2_000;
+#[cfg(not(target_arch = "wasm32"))]
+pub const RT_LACAM_NODE_BUDGET: usize = 10_000;
+
+/// Maximum plan horizon (steps). Plans longer than this are committed.
+pub const RT_LACAM_MAX_HORIZON: usize = 30;
+
+/// Minimum plan horizon. Scales with grid size.
+pub const RT_LACAM_MIN_HORIZON: usize = 8;
+
+/// Maximum visited-set size before search restart (bounds memory).
+pub const RT_LACAM_MAX_VISITED: usize = 50_000;
+
+/// Fixed seed for Zobrist hash generation (not from shared sim RNG).
+pub const RT_LACAM_ZOBRIST_SEED: u64 = 0xDEAD_BEEF_CAFE_BABE;
+
+// ── TPTS (Token Passing with Task Swaps) ────────────────────────
+
+/// Maximum pairwise swap checks per replan cycle.
+pub const TPTS_MAX_SWAP_CHECKS: usize = 200;
+
+/// Manhattan distance radius for swap candidate search.
+pub const TPTS_SWAP_RADIUS: i32 = 15;
+
+/// Ticks to wait before re-evaluating a previously swapped pair.
+pub const TPTS_SWAP_COOLDOWN: u64 = 10;
+
+// ── APF Guidance (Artificial Potential Fields) ──────────────────
+
+/// Steps ahead to look along optimal path for APF construction.
+pub const APF_LOOKAHEAD_STEPS: usize = 5;
+
+/// Attractive field strength (negative = pull toward future positions).
+pub const APF_ATTRACTIVE_STRENGTH: f64 = -0.3;
+
+/// Repulsive field radius around other agents (cells).
+pub const APF_REPULSIVE_RADIUS: i32 = 2;
+
+/// Repulsive field strength (positive = push away).
+pub const APF_REPULSIVE_STRENGTH: f64 = 0.5;
+
 /// Default duration for latency injection (ticks).
 pub const DEFAULT_LATENCY_DURATION: u32 = 20;
 
