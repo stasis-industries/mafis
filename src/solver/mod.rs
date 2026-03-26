@@ -14,6 +14,7 @@ pub mod windowed;
 pub mod guidance;
 pub mod rt_lacam;
 pub mod tpts;
+pub mod apf_guidance;
 
 use bevy::prelude::*;
 
@@ -22,6 +23,8 @@ use self::rhcr::{RhcrConfig, RhcrMode, RhcrSolver};
 use self::token_passing::TokenPassingSolver;
 use self::rt_lacam::RtLaCAMSolver;
 use self::tpts::TptsSolver;
+use self::apf_guidance::ApfGuidance;
+use self::guidance::GuidedSolver;
 use self::lifelong::LifelongSolver;
 
 // ---------------------------------------------------------------------------
@@ -37,6 +40,7 @@ pub const SOLVER_NAMES: &[(&str, &str)] = &[
     ("token_passing", "Token Passing — Decentralized Sequential Planning"),
     ("rt_lacam", "RT-LaCAM — Real-Time Configuration-Space Search"),
     ("tpts", "TPTS — Token Passing with Task Swaps"),
+    ("pibt+apf", "PIBT+APF — Priority Inheritance with Potential Fields"),
 ];
 
 /// Create a LifelongSolver by name with auto-computed defaults.
@@ -46,6 +50,18 @@ pub fn lifelong_solver_from_name(
     grid_area: usize,
     num_agents: usize,
 ) -> Option<Box<dyn LifelongSolver>> {
+    // Check for guidance composition: "base+layer"
+    if let Some((base_name, layer_name)) = name.split_once('+') {
+        let base = lifelong_solver_from_name(base_name, grid_area, num_agents)?;
+        return match layer_name {
+            "apf" => {
+                let layer = ApfGuidance::new(grid_area, num_agents);
+                Some(Box::new(GuidedSolver::new(base, layer)))
+            }
+            _ => None,
+        };
+    }
+
     match name {
         "pibt" => Some(Box::new(PibtLifelongSolver::new())),
         "rhcr_pbs" => {

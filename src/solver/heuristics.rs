@@ -177,6 +177,11 @@ impl DistanceMapCache {
         self.cache.retain(|goal, _| active.contains(goal));
     }
 
+    /// Get a cached distance map without computing. Returns None if not cached.
+    pub fn get_cached(&self, goal: IVec2) -> Option<&DistanceMap> {
+        self.cache.get(&goal)
+    }
+
     pub fn clear(&mut self) {
         self.cache.clear();
         self.grid_w = 0;
