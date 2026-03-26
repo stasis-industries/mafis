@@ -6241,7 +6241,7 @@ async function applySharedState(hash) {
             if (f.type === 'wear_based') { item.heat_rate = f.rate || 'medium'; }
             if (f.type === 'zone_outage') { item.at_tick = f.at || 100; item.duration = f.dur || 50; }
             if (f.type === 'intermittent_fault') { item.mtbf = f.mtbf || 80; item.recovery = f.rec || 15; }
-            if (f.type === 'permanent_zone_outage') { item.at_tick = f.at || 100; item.block_percent = f.blk || 100; }
+            if (f.type === 'permanent_zone_outage') { item.at_tick = f.at || 100; item.block_percent = f.blk || 30; }
             faultList.push(item);
         });
     } else if (shared.f) {

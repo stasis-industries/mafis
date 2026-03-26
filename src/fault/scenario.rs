@@ -183,7 +183,7 @@ impl Default for FaultScenario {
             intermittent_mtbf_ticks: 80,
             intermittent_recovery_ticks: 15,
             perm_zone_at_tick: 100,
-            perm_zone_block_percent: 100.0,
+            perm_zone_block_percent: 30.0,
             custom_weibull: None,
         }
     }
@@ -329,7 +329,7 @@ impl Default for FaultItem {
             intermittent_mtbf_ticks: 80,
             intermittent_recovery_ticks: 15,
             perm_zone_at_tick: 100,
-            perm_zone_block_percent: 100.0,
+            perm_zone_block_percent: 30.0,
         }
     }
 }

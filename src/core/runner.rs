@@ -781,6 +781,39 @@ impl SimulationRunner {
                         // Sort for deterministic selection when block_percent < 100%
                         zone_cells.sort_by(|a, b| a.y.cmp(&b.y).then(a.x.cmp(&b.x)));
 
+                        // Spatial quadrant fallback: on non-warehouse maps every cell has
+                        // ZoneType::Open, so "the busiest zone" is the entire map.  Instead,
+                        // divide the walkable area into four quadrants and target only the one
+                        // with the most alive agents (~25 % of cells rather than 100 %).
+                        if target_zone == ZoneType::Open && !zone_cells.is_empty() {
+                            let min_x = zone_cells.iter().map(|c| c.x).min().unwrap_or(0);
+                            let max_x = zone_cells.iter().map(|c| c.x).max().unwrap_or(0);
+                            let min_y = zone_cells.iter().map(|c| c.y).min().unwrap_or(0);
+                            let max_y = zone_cells.iter().map(|c| c.y).max().unwrap_or(0);
+                            let mid_x = (min_x + max_x) / 2;
+                            let mid_y = (min_y + max_y) / 2;
+                            // Quadrant index: bit-0 = east half, bit-1 = south half.
+                            let mut quad_counts = [0usize; 4];
+                            for i in 0..n {
+                                if !self.agents[i].alive { continue; }
+                                let p = self.agents[i].pos;
+                                let qi = (if p.x >= mid_x { 1 } else { 0 })
+                                       + (if p.y >= mid_y { 2 } else { 0 });
+                                quad_counts[qi] += 1;
+                            }
+                            let best_quad = quad_counts
+                                .iter()
+                                .enumerate()
+                                .max_by_key(|(_, c)| *c)
+                                .map(|(i, _)| i)
+                                .unwrap_or(0);
+                            zone_cells.retain(|c| {
+                                let in_x = if best_quad & 1 == 1 { c.x >= mid_x } else { c.x < mid_x };
+                                let in_y = if best_quad & 2 == 2 { c.y >= mid_y } else { c.y < mid_y };
+                                in_x && in_y
+                            });
+                        }
+
                         // Determine how many cells to block.
                         let block_count = if block_percent >= 100.0 {
                             zone_cells.len()

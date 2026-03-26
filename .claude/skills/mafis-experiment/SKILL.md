@@ -97,7 +97,7 @@ Systematically vary multiple parameters:
 | Variable | Values | Why |
 |----------|--------|-----|
 | **Scheduler** | random, closest, balanced, roundtrip | Affects task distribution; ~10% throughput effect (not dominant) |
-| **Fault scenario** | None, BurstFailure, WearBased, ZoneOutage, IntermittentFault | Different failure modes stress different aspects |
+| **Fault scenario** | None, BurstFailure, WearBased, IntermittentFault, PermanentZoneOutage | Different failure modes stress different aspects |
 | **Wear intensity** | Low, Medium, High (Weibull presets) | Gradual degradation curve |
 | **Topology** | warehouse_medium, warehouse_medium, warehouse_large | Scale effects |
 | **Agent count** | 8, 30, 80 (match topology) | Density effects |
@@ -122,8 +122,8 @@ Systematically vary multiple parameters:
 | None | No faults | — | Baseline reference |
 | BurstFailure | Kill X% of robots at tick T | burst_fraction, burst_tick | Worst-case robustness |
 | WearBased | Weibull wear model — busiest robots fail | WearHeatRate (Low/Medium/High) | Realistic degradation |
-| ZoneOutage | Latency on all robots in highest-traffic zone | zone_duration_ticks | Spatial fault tolerance |
 | IntermittentFault | Exponential inter-arrival temporary faults | mtbf_ticks, recovery_ticks | Transient disruption patterns |
+| PermanentZoneOutage | Block cells in highest-traffic zone as permanent obstacles | perm_zone_block_percent, perm_zone_at_tick | Spatial topology disruption, forced rerouting |
 
 ### Weibull Wear Presets
 

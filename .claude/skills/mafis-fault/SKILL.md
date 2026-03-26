@@ -7,7 +7,7 @@ description: >
   injection, work on fault detection thresholds, or modify the heat-to-failure pipeline. Also
   trigger for: "add a fault", "modify heat", "change the wear model", "fault scenario", "kill
   an agent", "inject latency", "fault schedule", "Weibull", "breakdown", "overheat", "fault
-  config", "intermittent fault", "burst failure", "zone outage", "fault type", or any work in
+  config", "intermittent fault", "burst failure", "zone block", "permanent zone outage", "fault type", or any work in
   src/fault/. This skill contains the complete fault architecture: types, scenarios, Weibull
   wear model, manual injection, scheduled events, rewind integration, and the ECS system ordering.
 ---
@@ -49,10 +49,10 @@ pub enum FaultSource {
 
 ```rust
 pub enum FaultScenarioType {
-    BurstFailure,       // Kill X% of robots at tick T
-    WearBased,          // Weibull wear model — busiest robots fail
-    ZoneOutage,         // Latency on all robots in highest-traffic zone
-    IntermittentFault,  // Exponential inter-arrival temporary faults
+    BurstFailure,           // Kill X% of robots at tick T
+    WearBased,              // Weibull wear model — busiest robots fail
+    IntermittentFault,      // Exponential inter-arrival temporary faults
+    PermanentZoneOutage,    // Block cells in highest-traffic zone (permanent obstacles)
 }
 ```
 
@@ -73,16 +73,21 @@ pub enum FaultScenarioType {
 | Medium | 2.5 | 500 | ~445t | ~63% |
 | High | 3.5 | 150 | ~137t | ~90% |
 
-### ZoneOutage
-- Identifies highest-traffic zone via heatmap
-- Injects latency on all agents in that zone for N ticks
-- Tests spatial fault tolerance and rerouting
-
 ### IntermittentFault
 - Each agent independently samples next fault from `Exp(1/mtbf_ticks)`
 - Faults inject latency (not death) — agent recovers after `recovery_ticks`
 - Models transient disruptions (sensor glitches, communication drops)
 - Parameters: `intermittent_mtbf_ticks: u64`, `intermittent_recovery_ticks: u32`
+
+### PermanentZoneOutage
+- Identifies highest-traffic zone via agent distribution
+- Blocks `block_percent` of cells in that zone as permanent obstacles
+- Dead cells become impassable — agents must reroute permanently
+- Blocked cells spawn `ObstacleMarker` visuals automatically via `sync_runner_to_ecs`
+- **Zone targeting**: uses `find_busiest_zone_cells()` in `SimulationRunner`
+  - On warehouse maps: finds zone type (pickup/delivery/corridor) with most agents
+  - Spatial quadrant fallback: when only one zone type exists (e.g., `ZoneType::Open` on non-warehouse maps), divides grid into 4 quadrants and picks the busiest one (~25% of agents), avoiding injecting faults on all agents at once
+- Parameters: `perm_zone_block_percent: f32` (0.0-1.0), `perm_zone_at_tick: u64`
 
 ## FaultConfig Resource
 
@@ -189,9 +194,23 @@ On rewind:
 pub struct FaultSchedule {
     pub events: Vec<ScheduledEvent>,
 }
+
+// ScheduledAction variants (used by FaultSchedule events):
+pub enum ScheduledAction {
+    KillRandomAgents(usize),               // BurstFailure
+    ZoneBlock { block_percent: f32 },      // PermanentZoneOutage
+}
 ```
 
 Built by `FaultScenario::build_schedule()` when a scenario is activated. Events are processed at their target ticks by `replay_manual_faults` using `ManualFaultCommand::*Scheduled` variants.
+
+## Obstacle Visuals for Scheduled Faults
+
+`ZoneBlock` fires inside `SimulationRunner::tick()`, adding permanent obstacles to the grid.
+`sync_runner_to_ecs` detects the change (obstacle count diff) and spawns `ObstacleMarker` visuals:
+- Dark brown `Cuboid::new(0.9, 0.6, 0.9)` at 0.3 world height
+- Uses `meshes: Option<ResMut<Assets<Mesh>>>` / `materials: Option<ResMut<Assets<StandardMaterial>>>` as `Option` params so headless test apps without the render plugin don't panic
+- Diff computed before overwriting ECS grid: `runner.grid().obstacles().difference(grid.obstacles())`
 
 ## Adding a New Fault Type
 
@@ -213,3 +232,5 @@ Built by `FaultScenario::build_schedule()` when a scenario is activated. Events 
 | Intermittent faults not deterministic | Must consume RNG in consistent order within SimulationRunner |
 | Dead agent still blocking after restart | Grid must be rebuilt from topology, obstacles re-placed from log |
 | LatencyFault persists forever | Check remaining decrements and component is removed at 0 |
+| ZoneBlock obstacles invisible | sync_runner_to_ecs spawns ObstacleMarker only when obstacle count diff detected — check meshes/materials are available |
+| PermanentZoneOutage hits all agents on non-warehouse map | find_busiest_zone_cells uses spatial quadrant fallback when only one ZoneType exists |
