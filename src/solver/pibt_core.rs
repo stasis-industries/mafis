@@ -157,7 +157,7 @@ impl PibtCore {
         grid: &GridMap,
         dist_maps: &[&DistanceMap],
     ) -> &[Action] {
-        self.one_step_inner(positions, goals, grid, dist_maps, &[], &[])
+        self.one_step_impl(positions, goals, grid, dist_maps, &[], &[], None)
     }
 
     /// Run one PIBT step with task-awareness (reference PIBT_MAPD behavior).
@@ -173,7 +173,23 @@ impl PibtCore {
         dist_maps: &[&DistanceMap],
         has_task: &[bool],
     ) -> &[Action] {
-        self.one_step_inner(positions, goals, grid, dist_maps, &[], has_task)
+        self.one_step_impl(positions, goals, grid, dist_maps, &[], has_task, None)
+    }
+
+    /// Run one PIBT step with task-awareness and a cell-level guidance bias.
+    ///
+    /// `bias_fn(pos, agent_index) -> f64` is added to the raw distance when
+    /// sorting candidates. Lower total = preferred. Pass `None` for normal behavior.
+    pub fn one_step_with_bias(
+        &mut self,
+        positions: &[IVec2],
+        goals: &[IVec2],
+        grid: &GridMap,
+        dist_maps: &[&DistanceMap],
+        has_task: &[bool],
+        bias_fn: &dyn Fn(IVec2, usize) -> f64,
+    ) -> &[Action] {
+        self.one_step_impl(positions, goals, grid, dist_maps, &[], has_task, Some(bias_fn))
     }
 
     /// Run one PIBT step with pre-decided constraints.
@@ -187,12 +203,12 @@ impl PibtCore {
         dist_maps: &[&DistanceMap],
         constraints: &[(usize, IVec2)],
     ) -> &[Action] {
-        self.one_step_inner(positions, goals, grid, dist_maps, constraints, &[])
+        self.one_step_impl(positions, goals, grid, dist_maps, constraints, &[], None)
     }
 
-    /// Internal: full PIBT step with optional constraints and task-awareness.
+    /// Internal: full PIBT step with optional constraints, task-awareness, and bias.
     /// Returns a slice borrowing from self.actions_buf (zero allocation after first call).
-    fn one_step_inner(
+    fn one_step_impl(
         &mut self,
         positions: &[IVec2],
         goals: &[IVec2],
@@ -200,6 +216,7 @@ impl PibtCore {
         dist_maps: &[&DistanceMap],
         constraints: &[(usize, IVec2)],
         has_task: &[bool],
+        bias_fn: Option<&dyn Fn(IVec2, usize) -> f64>,
     ) -> &[Action] {
         let n = positions.len();
 
@@ -300,6 +317,7 @@ impl PibtCore {
                 &self.current_occ,
                 &mut self.next_occ,
                 self.shuffle_seed,
+                bias_fn,
             );
         }
 
@@ -403,6 +421,7 @@ pub fn pibt_one_step_constrained(
             &current_occ,
             &mut next_occ,
             shuffle_seed,
+            None,
         );
     }
 
@@ -429,6 +448,7 @@ fn pibt_assign_grid(
     current_occ: &OccGrid,
     next_occ: &mut OccGrid,
     shuffle_seed: u64,
+    bias_fn: Option<&dyn Fn(IVec2, usize) -> f64>,
 ) -> bool {
     if depth > current.len() {
         next_pos[agent] = current[agent];
@@ -459,19 +479,33 @@ fn pibt_assign_grid(
         .wrapping_add(agent as u64)
         .wrapping_add(depth as u64);
     candidates.sort_unstable_by(|&a, &b| {
-        let da = dist_maps[agent].get(a);
-        let db = dist_maps[agent].get(b);
-        da.cmp(&db).then_with(|| {
-            // Tie-break: prefer unoccupied cells (reference C++ behavior)
+        let da_raw = dist_maps[agent].get(a);
+        let db_raw = dist_maps[agent].get(b);
+        // Tie-break helpers (shared by both branches)
+        let occ_cmp = || {
             let occ_a = current_occ.get(a).is_some() as u8;
             let occ_b = current_occ.get(b).is_some() as u8;
             occ_a.cmp(&occ_b)
-        }).then_with(|| {
-            // Final tie-break: deterministic shuffle via hash
+        };
+        let hash_cmp = || {
             let ha = hash_base.wrapping_mul(a.x as u64 + 1).wrapping_add(a.y as u64);
             let hb = hash_base.wrapping_mul(b.x as u64 + 1).wrapping_add(b.y as u64);
             ha.cmp(&hb)
-        })
+        };
+        if let Some(bf) = bias_fn {
+            // Bias path: sort by (distance + bias) as f64, then original tie-breaks
+            let da = da_raw as f64 + bf(a, agent);
+            let db = db_raw as f64 + bf(b, agent);
+            da.partial_cmp(&db)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(occ_cmp)
+                .then_with(hash_cmp)
+        } else {
+            // Original integer path — zero overhead when bias is None
+            da_raw.cmp(&db_raw)
+                .then_with(occ_cmp)
+                .then_with(hash_cmp)
+        }
     });
 
     for &candidate in candidates.iter() {
@@ -500,7 +534,7 @@ fn pibt_assign_grid(
 
                 if pibt_assign_grid(
                     blocker_id, next_pos, decided, current, goals, grid, dist_maps,
-                    priorities, depth + 1, current_occ, next_occ, shuffle_seed,
+                    priorities, depth + 1, current_occ, next_occ, shuffle_seed, bias_fn,
                 ) {
                     return true;
                 }
