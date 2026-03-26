@@ -10,6 +10,7 @@ pub mod rhcr;
 pub mod token_passing;
 pub mod traits;
 pub mod windowed;
+pub mod guidance;
 
 use bevy::prelude::*;
 
