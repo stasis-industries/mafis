@@ -1637,7 +1637,7 @@ function bindKeyboard() {
                 case '2': setTool('walkable'); break;
                 case '3': setTool('pickup'); break;
                 case '4': setTool('delivery'); break;
-                case '5': setTool('recharging'); break;
+                // case '5': recharging not yet modelled — shortcut disabled
                 case '6': setTool('robot'); break;
                 case 'q': case 'Q': setMode('click'); break;
                 case 'w': case 'W': setMode('paint'); break;

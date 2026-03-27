@@ -4142,6 +4142,27 @@ body[data-phase="results"] #panel-right > .view-results-wrapper {
     border: 1px solid var(--border-strong);
 }
 
+.mm-tool-btn.mm-planned {
+    opacity: 0.45;
+    cursor: not-allowed;
+    pointer-events: none;
+}
+
+.mm-tool-btn.mm-planned:hover {
+    background: transparent;
+    color: var(--text-secondary);
+}
+
+.mm-planned-badge {
+    margin-left: auto;
+    font-family: 'DM Mono', monospace;
+    font-size: 9px;
+    letter-spacing: 0.03em;
+    color: var(--text-muted);
+    opacity: 0.7;
+    white-space: nowrap;
+}
+
 /* --------------------------------------------------------------------------
    Map Maker — Draw mode
    -------------------------------------------------------------------------- */
