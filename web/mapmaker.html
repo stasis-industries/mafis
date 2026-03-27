@@ -53,10 +53,17 @@
                         <span>Delivery</span>
                         <kbd>4</kbd>
                     </button>
-                    <button class="mm-tool-btn" data-tool="recharging" title="Recharging zone [5]">
-                        <span class="mm-tool-swatch" style="background:#4d8cd9"></span>
+                    <button class="mm-tool-btn mm-planned" data-tool="recharging" disabled
+                        title="Recharging zones are not yet modelled in the fault-resilience pipeline — planned for a future experiment condition">
+                        <span class="mm-tool-swatch" style="background:#4d8cd9; opacity:0.5"></span>
                         <span>Recharging</span>
-                        <kbd>5</kbd>
+                        <span class="mm-planned-badge">not modelled</span>
+                    </button>
+                    <button class="mm-tool-btn mm-planned" data-tool="parking" disabled
+                        title="Parking zones are not yet modelled — planned as a holding-area condition for fault-recovery experiments">
+                        <span class="mm-tool-swatch" style="background:#7a5ea8; opacity:0.5"></span>
+                        <span>Parking</span>
+                        <span class="mm-planned-badge">not modelled</span>
                     </button>
                     <button class="mm-tool-btn" data-tool="robot" title="Place robot [6]">
                         <span class="mm-tool-swatch mm-tool-robot"></span>
