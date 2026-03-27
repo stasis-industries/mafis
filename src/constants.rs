@@ -194,18 +194,22 @@ pub const TPTS_SWAP_RADIUS: i32 = 15;
 pub const TPTS_SWAP_COOLDOWN: u64 = 10;
 
 // ── APF Guidance (Artificial Potential Fields) ──────────────────
+// Paper: Pertzovsky et al., "Enhancing Lifelong MAPF by Using APFs"
+// arXiv:2505.22753. Formula: w * gamma^(-dist) for dist <= d_max.
+// Recommended PIBT+APF params from Table 1: w=0.1, d_max=2, gamma=3, t_max=2.
 
-/// Steps ahead to look along optimal path for APF construction.
-pub const APF_LOOKAHEAD_STEPS: usize = 5;
+/// Steps ahead to project each agent's path for APF construction (t_max).
+pub const APF_LOOKAHEAD_STEPS: usize = 2;
 
-/// Attractive field strength (negative = pull toward future positions).
-pub const APF_ATTRACTIVE_STRENGTH: f64 = -0.3;
+/// Repulsive field weight (w). Paper recommends 0.1 for PIBT+APF.
+pub const APF_WEIGHT: f64 = 0.1;
 
-/// Repulsive field radius around other agents (cells).
-pub const APF_REPULSIVE_RADIUS: i32 = 2;
+/// Repulsive field radius in Manhattan distance (d_max).
+pub const APF_RADIUS: i32 = 2;
 
-/// Repulsive field strength (positive = push away).
-pub const APF_REPULSIVE_STRENGTH: f64 = 0.5;
+/// Decay rate for exponential field falloff (gamma).
+/// Formula: w * gamma^(-dist). Higher gamma = faster decay.
+pub const APF_GAMMA: f64 = 3.0;
 
 /// Default duration for latency injection (ticks).
 pub const DEFAULT_LATENCY_DURATION: u32 = 20;

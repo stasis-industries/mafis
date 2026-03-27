@@ -23,8 +23,7 @@ use self::rhcr::{RhcrConfig, RhcrMode, RhcrSolver};
 use self::token_passing::TokenPassingSolver;
 use self::rt_lacam::RtLaCAMSolver;
 use self::tpts::TptsSolver;
-use self::apf_guidance::ApfGuidance;
-use self::guidance::GuidedSolver;
+use self::apf_guidance::PibtApfSolver;
 use self::lifelong::LifelongSolver;
 
 // ---------------------------------------------------------------------------
@@ -50,16 +49,10 @@ pub fn lifelong_solver_from_name(
     grid_area: usize,
     num_agents: usize,
 ) -> Option<Box<dyn LifelongSolver>> {
-    // Check for guidance composition: "base+layer"
-    if let Some((base_name, layer_name)) = name.split_once('+') {
-        let base = lifelong_solver_from_name(base_name, grid_area, num_agents)?;
-        return match layer_name {
-            "apf" => {
-                let layer = ApfGuidance::new(grid_area, num_agents);
-                Some(Box::new(GuidedSolver::new(base, layer)))
-            }
-            _ => None,
-        };
+    // PIBT+APF is a dedicated solver (not a GuidanceLayer wrapper) because
+    // the paper requires APF to be updated sequentially inside the PIBT recursion.
+    if name == "pibt+apf" {
+        return Some(Box::new(PibtApfSolver::new()));
     }
 
     match name {

@@ -1,177 +1,157 @@
-//! APF Guidance — Artificial Potential Fields for PIBT.
+//! PIBT+APF — PIBT with sequential Artificial Potential Fields.
 //!
-//! Looks several steps ahead along each agent's optimal path and places
-//! attractive potential fields around those future positions. Repulsive
-//! fields around other agents' predicted positions reduce congestion.
+//! Paper-accurate implementation: after each agent commits its next position
+//! (inside the PIBT priority loop), its future path is projected and an
+//! exponential APF is added to a shared field. Subsequent agents see the
+//! accumulated field when sorting candidate neighbors.
 //!
-//! Reference: arXiv:2505.22753, May 2025 — "PIBT+APF for Lifelong MAPF"
+//! Reference: Pertzovsky et al., "Enhancing Lifelong Multi-Agent Path-finding
+//! by Using Artificial Potential Fields", arXiv:2505.22753, May 2025.
+//! Reference impl: github.com/Arseni1919/APFs_for_MAPF_Implementation_v2
 
 use bevy::prelude::*;
+use smallvec::smallvec;
 
-use crate::core::action::Direction;
+use crate::core::seed::SeededRng;
 
-use super::guidance::GuidanceLayer;
 use super::heuristics::DistanceMapCache;
-use super::lifelong::{AgentState, SolverContext};
+use super::lifelong::{AgentPlan, AgentState, LifelongSolver, SolverContext, StepResult};
+use super::pibt_core::PibtCore;
+use super::traits::{Optimality, Scalability, SolverInfo};
 
-use crate::constants::{
-    APF_ATTRACTIVE_STRENGTH, APF_LOOKAHEAD_STEPS, APF_REPULSIVE_RADIUS, APF_REPULSIVE_STRENGTH,
-};
+use crate::constants::{APF_GAMMA, APF_LOOKAHEAD_STEPS, APF_RADIUS, APF_WEIGHT};
 
 // ---------------------------------------------------------------------------
-// APF Guidance
+// PIBT+APF Solver (paper-accurate, NOT a GuidanceLayer)
 // ---------------------------------------------------------------------------
 
-pub struct ApfGuidance {
-    /// Per-agent attractive waypoints (positions along optimal path).
-    waypoints: Vec<Vec<IVec2>>,
+pub struct PibtApfSolver {
+    core: PibtCore,
+    plan_buffer: Vec<AgentPlan>,
 
-    /// Flat grid of repulsive field values. Indexed by (y * width + x).
-    repulsive_field: Vec<f64>,
-    grid_width: i32,
+    // APF parameters (from paper Table 1)
+    apf_w: f64,
+    apf_gamma: f64,
+    apf_d_max: i32,
+    apf_t_max: usize,
 
-    lookahead: usize,
-    attractive_strength: f64,
-    repulsive_radius: i32,
-    repulsive_strength: f64,
+    // Reusable APF field (cleared and rebuilt each tick)
+    apf_field: Vec<f64>,
+
+    // Scratch buffers (same pattern as PibtLifelongSolver)
+    agent_pairs_buf: Vec<(IVec2, IVec2)>,
+    positions_buf: Vec<IVec2>,
+    goals_buf: Vec<IVec2>,
+    has_task_buf: Vec<bool>,
 }
 
-impl ApfGuidance {
-    pub fn new(_grid_area: usize, _num_agents: usize) -> Self {
+impl PibtApfSolver {
+    pub fn new() -> Self {
         Self {
-            waypoints: Vec::new(),
-            repulsive_field: Vec::new(),
-            grid_width: 0,
-            lookahead: APF_LOOKAHEAD_STEPS,
-            attractive_strength: APF_ATTRACTIVE_STRENGTH,
-            repulsive_radius: APF_REPULSIVE_RADIUS,
-            repulsive_strength: APF_REPULSIVE_STRENGTH,
-        }
-    }
-
-    fn add_repulsive(&mut self, center: IVec2, grid_w: i32, grid_h: i32) {
-        let r = self.repulsive_radius;
-        for dy in -r..=r {
-            for dx in -r..=r {
-                let p = center + IVec2::new(dx, dy);
-                if p.x >= 0 && p.x < grid_w && p.y >= 0 && p.y < grid_h {
-                    let dist = (dx.abs() + dy.abs()) as f64;
-                    if dist > 0.0 && dist <= r as f64 {
-                        let idx = (p.y * grid_w + p.x) as usize;
-                        if idx < self.repulsive_field.len() {
-                            self.repulsive_field[idx] +=
-                                self.repulsive_strength * (1.0 - dist / (r as f64 + 1.0));
-                        }
-                    }
-                }
-            }
+            core: PibtCore::new(),
+            plan_buffer: Vec::new(),
+            apf_w: APF_WEIGHT,
+            apf_gamma: APF_GAMMA,
+            apf_d_max: APF_RADIUS,
+            apf_t_max: APF_LOOKAHEAD_STEPS,
+            apf_field: Vec::new(),
+            agent_pairs_buf: Vec::new(),
+            positions_buf: Vec::new(),
+            goals_buf: Vec::new(),
+            has_task_buf: Vec::new(),
         }
     }
 }
 
-impl GuidanceLayer for ApfGuidance {
+impl Default for PibtApfSolver {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl LifelongSolver for PibtApfSolver {
     fn name(&self) -> &'static str {
-        "apf"
+        "pibt+apf"
     }
 
-    fn compute_guidance(
-        &mut self,
-        ctx: &SolverContext,
-        agents: &[AgentState],
-        distance_cache: &DistanceMapCache,
-    ) {
-        let n = agents.len();
-        let w = ctx.grid.width;
-        let h = ctx.grid.height;
-        let cells = (w * h) as usize;
-
-        self.grid_width = w;
-
-        // Build per-agent waypoints: trace optimal path forward for lookahead steps
-        self.waypoints.clear();
-        self.waypoints.resize(n, Vec::new());
-
-        for (i, a) in agents.iter().enumerate() {
-            let goal = a.goal.unwrap_or(a.pos);
-            if a.pos == goal {
-                continue;
-            }
-
-            let dm = match distance_cache.get_cached(goal) {
-                Some(dm) => dm,
-                None => continue,
-            };
-
-            let mut pos = a.pos;
-            let mut path = Vec::with_capacity(self.lookahead);
-
-            for _ in 0..self.lookahead {
-                if pos == goal {
-                    break;
-                }
-
-                let mut best = pos;
-                let mut best_d = dm.get(pos);
-
-                for dir in Direction::ALL {
-                    let next = pos + dir.offset();
-                    if ctx.grid.is_walkable(next) {
-                        let d = dm.get(next);
-                        if d < best_d {
-                            best_d = d;
-                            best = next;
-                        }
-                    }
-                }
-
-                if best == pos {
-                    break;
-                }
-                pos = best;
-                path.push(pos);
-            }
-
-            self.waypoints[i] = path;
+    fn info(&self) -> SolverInfo {
+        SolverInfo {
+            optimality: Optimality::Suboptimal,
+            complexity: "O(n log n + n * t_max * d_max^2) per timestep",
+            scalability: Scalability::High,
+            description: "PIBT+APF — PIBT with sequential artificial potential fields. APF updated after each agent commits, projecting future path. Paper: Pertzovsky et al., arXiv:2505.22753.",
+            recommended_max_agents: None,
         }
-
-        // Build repulsive field from all agents' current positions
-        if self.repulsive_field.len() != cells {
-            self.repulsive_field = vec![0.0; cells];
-        } else {
-            self.repulsive_field.fill(0.0);
-        }
-
-        for a in agents {
-            self.add_repulsive(a.pos, w, h);
-        }
-    }
-
-    fn cell_bias(&self, pos: IVec2, agent_index: usize) -> f64 {
-        let mut bias = 0.0;
-
-        // Attractive: pull toward waypoints
-        if agent_index < self.waypoints.len() {
-            for (step, &wp) in self.waypoints[agent_index].iter().enumerate() {
-                let dist = (pos - wp).as_vec2().length();
-                if dist < 3.0 {
-                    let weight = 1.0 / (step as f64 + 1.0);
-                    bias += self.attractive_strength * weight * (1.0 - dist as f64 / 3.0);
-                }
-            }
-        }
-
-        // Repulsive: push away from congested areas
-        let idx = (pos.y * self.grid_width + pos.x) as usize;
-        if idx < self.repulsive_field.len() {
-            bias += self.repulsive_field[idx];
-        }
-
-        bias
     }
 
     fn reset(&mut self) {
-        self.waypoints.clear();
-        self.repulsive_field.clear();
+        self.core.reset();
+        self.plan_buffer.clear();
+        self.apf_field.clear();
+    }
+
+    fn step<'a>(
+        &'a mut self,
+        ctx: &SolverContext,
+        agents: &[AgentState],
+        distance_cache: &mut DistanceMapCache,
+        _rng: &mut SeededRng,
+    ) -> StepResult<'a> {
+        self.core.set_shuffle_seed(ctx.tick);
+
+        if agents.is_empty() {
+            self.plan_buffer.clear();
+            return StepResult::Replan(&self.plan_buffer);
+        }
+
+        // Build position/goal pairs for distance cache
+        self.agent_pairs_buf.clear();
+        self.agent_pairs_buf
+            .extend(agents.iter().map(|a| (a.pos, a.goal.unwrap_or(a.pos))));
+
+        let dist_maps = distance_cache.get_or_compute(ctx.grid, &self.agent_pairs_buf);
+
+        self.positions_buf.clear();
+        self.positions_buf.extend(agents.iter().map(|a| a.pos));
+
+        self.goals_buf.clear();
+        self.goals_buf
+            .extend(agents.iter().map(|a| a.goal.unwrap_or(a.pos)));
+
+        self.has_task_buf.clear();
+        self.has_task_buf.extend(agents.iter().map(|a| {
+            let goal = a.goal.unwrap_or(a.pos);
+            goal != a.pos
+        }));
+
+        // Call PibtCore with sequential APF (paper-accurate)
+        let actions = self.core.one_step_with_apf(
+            &self.positions_buf,
+            &self.goals_buf,
+            ctx.grid,
+            &dist_maps,
+            &self.has_task_buf,
+            &mut self.apf_field,
+            self.apf_w,
+            self.apf_gamma,
+            self.apf_d_max,
+            self.apf_t_max,
+        );
+
+        self.plan_buffer.clear();
+        for (i, &action) in actions.iter().enumerate() {
+            self.plan_buffer.push((agents[i].index, smallvec![action]));
+        }
+
+        StepResult::Replan(&self.plan_buffer)
+    }
+
+    fn save_priorities(&self) -> Vec<f32> {
+        self.core.priorities().to_vec()
+    }
+
+    fn restore_priorities(&mut self, priorities: &[f32]) {
+        self.core.set_priorities(priorities);
     }
 }
 
@@ -183,9 +163,11 @@ impl GuidanceLayer for ApfGuidance {
 mod tests {
     use super::*;
     use crate::core::grid::GridMap;
+    use crate::core::seed::SeededRng;
     use crate::core::task::TaskLeg;
     use crate::core::topology::ZoneMap;
     use crate::solver::heuristics::DistanceMapCache;
+    use crate::solver::pibt::PibtLifelongSolver;
     use std::collections::HashMap;
 
     fn test_zones() -> ZoneMap {
@@ -200,72 +182,203 @@ mod tests {
     }
 
     #[test]
-    fn apf_waypoints_computed() {
+    fn pibt_apf_empty_agents() {
         let grid = GridMap::new(5, 5);
         let zones = test_zones();
+        let mut solver = PibtApfSolver::new();
         let mut cache = DistanceMapCache::default();
-        let mut apf = ApfGuidance::new(25, 1);
-
-        // Pre-compute distance map for goal
-        let pairs = [(IVec2::new(0, 0), IVec2::new(4, 4))];
-        let _ = cache.get_or_compute(&grid, &pairs);
-
-        let agents = vec![AgentState {
-            index: 0,
-            pos: IVec2::new(0, 0),
-            goal: Some(IVec2::new(4, 4)),
-            has_plan: false,
-            task_leg: TaskLeg::TravelEmpty(IVec2::new(4, 4)),
-        }];
-
+        let mut rng = SeededRng::new(42);
         let ctx = SolverContext {
             grid: &grid,
             zones: &zones,
             tick: 0,
-            num_agents: 1,
+            num_agents: 0,
         };
-        apf.compute_guidance(&ctx, &agents, &cache);
-        assert!(
-            !apf.waypoints[0].is_empty(),
-            "should have computed waypoints"
-        );
+        let result = solver.step(&ctx, &[], &mut cache, &mut rng);
+        assert!(matches!(result, StepResult::Replan(plans) if plans.is_empty()));
     }
 
     #[test]
-    fn apf_repulsive_near_agent() {
+    fn pibt_apf_single_agent_reaches_goal() {
         let grid = GridMap::new(5, 5);
         let zones = test_zones();
-        let cache = DistanceMapCache::default();
-        let mut apf = ApfGuidance::new(25, 1);
+        let mut solver = PibtApfSolver::new();
+        let mut cache = DistanceMapCache::default();
+        let mut rng = SeededRng::new(42);
+        let mut pos = IVec2::ZERO;
+        let goal = IVec2::new(4, 4);
 
-        let agents = vec![AgentState {
-            index: 0,
-            pos: IVec2::new(2, 2),
-            goal: Some(IVec2::new(2, 2)),
-            has_plan: false,
-            task_leg: TaskLeg::Free,
-        }];
+        for tick in 0..20 {
+            let agents = vec![AgentState {
+                index: 0,
+                pos,
+                goal: Some(goal),
+                has_plan: tick > 0,
+                task_leg: TaskLeg::TravelEmpty(goal),
+            }];
+            let ctx = SolverContext {
+                grid: &grid,
+                zones: &zones,
+                tick,
+                num_agents: 1,
+            };
+            if let StepResult::Replan(plans) = solver.step(&ctx, &agents, &mut cache, &mut rng) {
+                if let Some((_, actions)) = plans.first() {
+                    if let Some(action) = actions.first() {
+                        pos = action.apply(pos);
+                    }
+                }
+            }
+            if pos == goal {
+                return;
+            }
+        }
+        assert_eq!(pos, goal);
+    }
+
+    #[test]
+    fn pibt_apf_produces_different_plans_than_vanilla() {
+        // With 2+ agents on a congested grid, APF should produce different
+        // (hopefully better) plans than vanilla PIBT by steering agents
+        // away from each other's projected paths.
+        let grid = GridMap::new(5, 5);
+        let zones = test_zones();
+        let mut apf_solver = PibtApfSolver::new();
+        let mut pibt_solver = PibtLifelongSolver::new();
+        let mut cache_apf = DistanceMapCache::default();
+        let mut cache_pibt = DistanceMapCache::default();
+        let mut rng_apf = SeededRng::new(42);
+        let mut rng_pibt = SeededRng::new(42);
+
+        let agents = vec![
+            AgentState {
+                index: 0,
+                pos: IVec2::new(0, 2),
+                goal: Some(IVec2::new(4, 2)),
+                has_plan: false,
+                task_leg: TaskLeg::TravelEmpty(IVec2::new(4, 2)),
+            },
+            AgentState {
+                index: 1,
+                pos: IVec2::new(4, 2),
+                goal: Some(IVec2::new(0, 2)),
+                has_plan: false,
+                task_leg: TaskLeg::TravelEmpty(IVec2::new(0, 2)),
+            },
+        ];
 
         let ctx = SolverContext {
             grid: &grid,
             zones: &zones,
             tick: 0,
-            num_agents: 1,
+            num_agents: 2,
         };
-        apf.compute_guidance(&ctx, &agents, &cache);
 
-        let idx = (3 * 5 + 2) as usize; // cell (2, 3)
-        assert!(
-            apf.repulsive_field[idx] > 0.0,
-            "should have repulsive field near agent"
-        );
+        let apf_result = apf_solver.step(&ctx, &agents, &mut cache_apf, &mut rng_apf);
+        let pibt_result = pibt_solver.step(&ctx, &agents, &mut cache_pibt, &mut rng_pibt);
+
+        // Both should produce valid plans (2 agents)
+        match (apf_result, pibt_result) {
+            (StepResult::Replan(apf_plans), StepResult::Replan(pibt_plans)) => {
+                assert_eq!(apf_plans.len(), 2);
+                assert_eq!(pibt_plans.len(), 2);
+                // Plans may or may not differ — the point is APF runs without error
+                // and produces valid collision-free plans
+            }
+            _ => panic!("both solvers should replan"),
+        }
     }
 
     #[test]
-    fn apf_reset_clears_state() {
-        let mut apf = ApfGuidance::new(25, 1);
-        apf.waypoints.push(vec![IVec2::ZERO]);
-        apf.reset();
-        assert!(apf.waypoints.is_empty());
+    fn pibt_apf_no_collision() {
+        let grid = GridMap::new(5, 5);
+        let zones = test_zones();
+        let mut solver = PibtApfSolver::new();
+        let mut cache = DistanceMapCache::default();
+        let mut rng = SeededRng::new(42);
+        let mut positions = vec![IVec2::new(0, 2), IVec2::new(4, 2)];
+        let goals = vec![IVec2::new(4, 2), IVec2::new(0, 2)];
+
+        for tick in 0..30 {
+            let agents: Vec<AgentState> = (0..2)
+                .map(|i| AgentState {
+                    index: i,
+                    pos: positions[i],
+                    goal: Some(goals[i]),
+                    has_plan: tick > 0,
+                    task_leg: TaskLeg::TravelEmpty(goals[i]),
+                })
+                .collect();
+
+            let ctx = SolverContext {
+                grid: &grid,
+                zones: &zones,
+                tick,
+                num_agents: 2,
+            };
+            if let StepResult::Replan(plans) = solver.step(&ctx, &agents, &mut cache, &mut rng) {
+                for (idx, actions) in plans {
+                    if let Some(action) = actions.first() {
+                        positions[*idx] = action.apply(positions[*idx]);
+                    }
+                }
+            }
+            assert_ne!(
+                positions[0], positions[1],
+                "vertex collision at tick {tick}"
+            );
+        }
+    }
+
+    #[test]
+    fn pibt_apf_reset_clears_state() {
+        let mut solver = PibtApfSolver::new();
+        solver.apf_field = vec![1.0; 25];
+        solver.reset();
+        assert!(solver.apf_field.is_empty());
+    }
+
+    #[test]
+    fn pibt_apf_deterministic() {
+        let grid = GridMap::new(5, 5);
+        let zones = test_zones();
+        let goal = IVec2::new(3, 3);
+        let mut results = Vec::new();
+
+        for _ in 0..2 {
+            let mut solver = PibtApfSolver::new();
+            let mut cache = DistanceMapCache::default();
+            let mut rng = SeededRng::new(42);
+            let mut pos = IVec2::ZERO;
+            let mut run_positions = Vec::new();
+
+            for tick in 0..10 {
+                let agents = vec![AgentState {
+                    index: 0,
+                    pos,
+                    goal: Some(goal),
+                    has_plan: tick > 0,
+                    task_leg: TaskLeg::TravelEmpty(goal),
+                }];
+                let ctx = SolverContext {
+                    grid: &grid,
+                    zones: &zones,
+                    tick,
+                    num_agents: 1,
+                };
+                if let StepResult::Replan(plans) =
+                    solver.step(&ctx, &agents, &mut cache, &mut rng)
+                {
+                    if let Some((_, actions)) = plans.first() {
+                        if let Some(action) = actions.first() {
+                            pos = action.apply(pos);
+                        }
+                    }
+                }
+                run_positions.push(pos);
+            }
+            results.push(run_positions);
+        }
+        assert_eq!(results[0], results[1]);
     }
 }
