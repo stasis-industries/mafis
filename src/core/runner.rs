@@ -223,6 +223,9 @@ pub struct SimulationRunner {
     available_agents_buf: Vec<usize>,
     /// Reusable buffer for detected fault decisions.
     faults_buf: Vec<(usize, FaultType)>,
+    /// Number of post-hoc collision violations detected (release mode only).
+    /// Always 0 if solver and collision resolution are correct.
+    pub collision_violations: u64,
 }
 
 // ---------------------------------------------------------------------------
@@ -372,6 +375,7 @@ impl SimulationRunner {
             scheduled_actions_buf: Vec::new(),
             available_agents_buf: Vec::new(),
             faults_buf: Vec::new(),
+            collision_violations: 0,
         }
     }
 
@@ -1073,6 +1077,58 @@ impl SimulationRunner {
                 action,
                 was_forced,
             });
+        }
+
+        // ── Post-hoc collision validator (LoRR-inspired) ────────────────
+        // Independent safety net: verify no two alive agents share a position
+        // AFTER collision resolution applied moves. This catches bugs in the
+        // resolution logic itself, not just in the solver.
+        #[cfg(debug_assertions)]
+        {
+            let mut seen_positions: std::collections::HashMap<IVec2, usize> =
+                std::collections::HashMap::with_capacity(n);
+            for (i, a) in self.agents.iter().enumerate() {
+                if !a.alive { continue; }
+                if let Some(&prev) = seen_positions.get(&a.pos) {
+                    panic!(
+                        "POST-HOC COLLISION VALIDATOR: tick {} — agents {} and {} \
+                         both at {:?} after collision resolution. \
+                         This is a bug in resolve_collisions_fast().",
+                        self.tick, prev, i, a.pos
+                    );
+                }
+                seen_positions.insert(a.pos, i);
+            }
+        }
+
+        // Release-mode: lightweight check with counter (no HashMap)
+        #[cfg(not(debug_assertions))]
+        {
+            // Use the collision grid we already have for O(1) duplicate detection
+            let col = &mut self.collision;
+            col.clear_targets();
+            let mut collision_found = false;
+            for (i, a) in self.agents.iter().enumerate() {
+                if !a.alive { continue; }
+                let idx = col.idx(a.pos);
+                if idx < col.grid_size {
+                    if col.target_count[idx] > 0 {
+                        collision_found = true;
+                        // Log but don't panic in release — the simulation can
+                        // continue, but the collision is recorded for analysis.
+                        #[cfg(not(target_arch = "wasm32"))]
+                        eprintln!(
+                            "WARNING: post-hoc collision at tick {} pos {:?} (agent {})",
+                            self.tick, a.pos, i
+                        );
+                    }
+                    col.target_count[idx] += 1;
+                    col.dirty_targets.push(idx);
+                }
+            }
+            if collision_found {
+                self.collision_violations += 1;
+            }
         }
 
         moves
