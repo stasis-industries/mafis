@@ -343,6 +343,107 @@ impl TopologyRegistry {
 }
 
 // ---------------------------------------------------------------------------
+// MovingAI .map file parser
+// ---------------------------------------------------------------------------
+
+/// Parse a MovingAI benchmark .map file into (GridMap, ZoneMap).
+///
+/// Format:
+/// ```text
+/// type octile
+/// height 32
+/// width 32
+/// map
+/// ....@@@@....
+/// .....@......
+/// ```
+///
+/// `.` and `G` = walkable. `@`, `T`, `O`, `W` = obstacle.
+/// All walkable cells become corridors (no pickup/delivery zones).
+/// For lifelong benchmarks, pickup/delivery zones should be assigned
+/// separately via `assign_random_zones()`.
+pub fn parse_movingai_map(text: &str) -> Option<(GridMap, ZoneMap)> {
+    let lines: Vec<&str> = text.lines().collect();
+    let mut width: i32 = 0;
+    let mut height: i32 = 0;
+    let mut map_start: Option<usize> = None;
+
+    for (i, line) in lines.iter().enumerate() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("height") {
+            height = trimmed.split_whitespace().nth(1)?.parse().ok()?;
+        }
+        if trimmed.starts_with("width") {
+            width = trimmed.split_whitespace().nth(1)?.parse().ok()?;
+        }
+        if trimmed == "map" {
+            map_start = Some(i + 1);
+            break;
+        }
+    }
+
+    let map_start = map_start?;
+    if width <= 0 || height <= 0 {
+        return None;
+    }
+
+    let mut obstacles = std::collections::HashSet::new();
+    for y in 0..height {
+        let line_idx = map_start + y as usize;
+        if line_idx >= lines.len() {
+            break;
+        }
+        let row = lines[line_idx];
+        for (x, ch) in row.chars().enumerate() {
+            if x as i32 >= width {
+                break;
+            }
+            // '.' and 'G' are walkable. Everything else is obstacle.
+            if ch != '.' && ch != 'G' {
+                obstacles.insert(IVec2::new(x as i32, y as i32));
+            }
+        }
+    }
+
+    let grid = GridMap::with_obstacles(width, height, obstacles);
+
+    // Build a basic ZoneMap: all walkable cells are corridors.
+    // For lifelong MAPF benchmarks, call assign_random_zones() to designate
+    // some cells as pickup/delivery.
+    let mut corridor_cells = Vec::new();
+    for y in 0..height {
+        for x in 0..width {
+            let pos = IVec2::new(x, y);
+            if grid.is_walkable(pos) {
+                corridor_cells.push(pos);
+            }
+        }
+    }
+
+    let zones = ZoneMap {
+        pickup_cells: Vec::new(),
+        delivery_cells: Vec::new(),
+        corridor_cells,
+        recharging_cells: Vec::new(),
+        zone_type: std::collections::HashMap::new(),
+        queue_lines: Vec::new(),
+    };
+
+    Some((grid, zones))
+}
+
+/// Assign random pickup and delivery zones to a ZoneMap from corridor cells.
+/// Takes the first `n_pickup` corridor cells as pickups and the last `n_delivery`
+/// as deliveries (deterministic given the cell ordering).
+pub fn assign_random_zones(zones: &mut ZoneMap, n_pickup: usize, n_delivery: usize) {
+    if zones.corridor_cells.len() < n_pickup + n_delivery {
+        return;
+    }
+    zones.pickup_cells = zones.corridor_cells[..n_pickup].to_vec();
+    zones.delivery_cells = zones.corridor_cells[zones.corridor_cells.len() - n_delivery..].to_vec();
+}
+
+// ---------------------------------------------------------------------------
 // Plugin
 // ---------------------------------------------------------------------------
 
