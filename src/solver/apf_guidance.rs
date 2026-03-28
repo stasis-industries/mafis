@@ -456,6 +456,91 @@ mod tests {
         }
     }
 
+    /// Paper property: idle agents (has_task = false) contribute to the APF
+    /// field by adding repulsion at their current position.
+    ///
+    /// The paper (Pertzovsky et al., arXiv:2505.22753) states that all agents —
+    /// including idle ones — contribute to the potential field so that tasked
+    /// agents are repelled from occupied idle positions. This is the fix
+    /// verified here: `one_step_with_apf` pre-decides idle agents and
+    /// immediately adds their APF contribution before any tasked agent runs.
+    ///
+    /// We verify that:
+    /// 1. After a step with at least one idle agent, `apf_field` has nonzero
+    ///    values at that idle agent's cell.
+    /// 2. With APF weight = 0 (disabled), the same cell has a zero contribution,
+    ///    confirming the idle-agent APF is not an artifact of something else.
+    #[test]
+    fn paper_property_idle_agents_contribute_apf() {
+        let grid = GridMap::new(5, 5);
+        let zones = test_zones();
+
+        // Agent 0: idle at (2,2) — no goal (goal = pos → has_task = false)
+        // Agents 1 and 2: tasked, with goals that do NOT lie at (2,2)
+        let idle_pos = IVec2::new(2, 2);
+        let agents = vec![
+            AgentState {
+                index: 0,
+                pos: idle_pos,
+                goal: Some(idle_pos), // goal == pos → has_task = false
+                has_plan: false,
+                task_leg: TaskLeg::Free,
+            },
+            AgentState {
+                index: 1,
+                pos: IVec2::new(0, 2),
+                goal: Some(IVec2::new(4, 2)),
+                has_plan: false,
+                task_leg: TaskLeg::TravelEmpty(IVec2::new(4, 2)),
+            },
+            AgentState {
+                index: 2,
+                pos: IVec2::new(4, 0),
+                goal: Some(IVec2::new(0, 0)),
+                has_plan: false,
+                task_leg: TaskLeg::TravelEmpty(IVec2::new(0, 0)),
+            },
+        ];
+        let ctx = SolverContext {
+            grid: &grid,
+            zones: &zones,
+            tick: 0,
+            num_agents: 3,
+        };
+
+        // --- With standard (nonzero) APF weight ---
+        let mut solver_apf = PibtApfSolver::new();
+        let mut cache_apf = DistanceMapCache::default();
+        let mut rng_apf = SeededRng::new(42);
+        let _ = solver_apf.step(&ctx, &agents, &mut cache_apf, &mut rng_apf);
+
+        let w = grid.width as usize;
+        let idle_idx = idle_pos.y as usize * w + idle_pos.x as usize;
+        let apf_at_idle = solver_apf.apf_field.get(idle_idx).copied().unwrap_or(0.0);
+        assert!(
+            apf_at_idle > 0.0,
+            "APF field should be nonzero at idle agent position ({idle_pos:?}); got {apf_at_idle}"
+        );
+
+        // --- Control: APF weight = 0 → no APF contribution from any agent ---
+        let mut solver_zero = PibtApfSolver {
+            apf_w: 0.0,
+            apf_gamma: 3.0,
+            apf_d_max: 2,
+            apf_t_max: 2,
+            ..PibtApfSolver::new()
+        };
+        let mut cache_zero = DistanceMapCache::default();
+        let mut rng_zero = SeededRng::new(42);
+        let _ = solver_zero.step(&ctx, &agents, &mut cache_zero, &mut rng_zero);
+
+        let apf_at_idle_zero = solver_zero.apf_field.get(idle_idx).copied().unwrap_or(0.0);
+        assert_eq!(
+            apf_at_idle_zero, 0.0,
+            "APF field with w=0 must be zero everywhere; got {apf_at_idle_zero} at idle pos"
+        );
+    }
+
     /// Paper property: APF with nonzero weight must produce a non-trivial
     /// repulsive field (field values > 0 near agents).
     /// Reference: Pertzovsky et al., Eq. 4: APF_i(v,t) = w * gamma^(-dist).

@@ -244,13 +244,21 @@ impl PibtCore {
         }
         self.next_occ.reset(grid_w, grid_h);
 
-        // Pre-decide idle agents
+        // Pre-decide idle agents and add their APF contribution.
+        // Paper assumes all agents contribute to the field, not just tasked ones.
+        // Under fault conditions (many immobile agents), this repels tasked agents
+        // away from occupied idle positions.
         if !has_task.is_empty() {
             for i in 0..n {
                 if !has_task[i] && !self.decided_buf[i] {
                     self.next_pos_buf[i] = positions[i];
                     self.decided_buf[i] = true;
                     self.next_occ.set(positions[i], i);
+                    // Idle agent stays in place — add APF at its position
+                    add_apf_for_agent(
+                        positions[i], goals[i], grid, dist_maps[i],
+                        apf_field, grid_w, grid_h, apf_w, apf_gamma, apf_d_max, apf_t_max,
+                    );
                 }
             }
         }

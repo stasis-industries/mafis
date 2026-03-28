@@ -4,7 +4,9 @@
 //! It does NOT produce plans itself — it biases the solver's decisions.
 //!
 //! Use via GuidedSolver<G>: wraps any LifelongSolver + GuidanceLayer.
-//! Factory creates these via "base+layer" syntax (e.g., "pibt+apf").
+//! Factory creates these via "base+layer" syntax (e.g., "pibt+ggo").
+//! Note: PIBT+APF is NOT a GuidedSolver — it requires sequential APF
+//! update inside PIBT recursion, so it uses PibtApfSolver directly.
 
 use bevy::prelude::*;
 

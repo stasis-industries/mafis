@@ -21,6 +21,12 @@
 //! 3. **Swap cooldown**: not in the paper. Added to prevent oscillation
 //!    caused by the lack of recursive GetTask (without recursion, the same
 //!    pair would swap back and forth every tick).
+//!
+//! 4. **Bidirectional total-cost criterion**: the paper (Algorithm 2, line 26)
+//!    only requires agent `ai` to reach `aj`'s goal faster. MAFIS additionally
+//!    requires total A* cost to strictly decrease after the swap. This reduces
+//!    swap frequency but prevents swaps that improve one agent at a greater
+//!    cost to the other.
 
 use bevy::prelude::*;
 use smallvec::smallvec;
@@ -291,36 +297,7 @@ impl TptsSolver {
                     continue; // Manhattan says no benefit — skip A*
                 }
 
-                // Paper criterion (Algorithm 2, line 26): compare arrival times.
-                // Manhattan pre-filter passed — now do the expensive A* check.
-                let cost_i_to_goal_j = self.astar_cost(agents[i].pos, goal_j, grid, dist_cache);
-                let cost_j_to_goal_j = self.astar_cost(agents[j].pos, goal_j, grid, dist_cache);
-
-                let (cost_i_j, cost_j_j) = match (cost_i_to_goal_j, cost_j_to_goal_j) {
-                    (Some(a), Some(b)) => (a, b),
-                    _ => continue, // can't evaluate — skip
-                };
-
-                // Agent i must reach goal_j STRICTLY faster than agent j
-                if cost_i_j >= cost_j_j {
-                    continue;
-                }
-
-                // Also check the reverse: agent j should reach goal_i reasonably
-                let cost_j_to_goal_i = self.astar_cost(agents[j].pos, goal_i, grid, dist_cache);
-                let cost_i_to_goal_i = self.astar_cost(agents[i].pos, goal_i, grid, dist_cache);
-
-                let (cost_j_i, cost_i_i) = match (cost_j_to_goal_i, cost_i_to_goal_i) {
-                    (Some(a), Some(b)) => (a, b),
-                    _ => continue,
-                };
-
-                // Total cost must decrease
-                if cost_i_j + cost_j_i >= cost_i_i + cost_j_j {
-                    continue;
-                }
-
-                // Tentative swap — snapshot token state (paper line 21)
+                // Look up local indices for constraint index manipulation
                 let local_i = match self.agent_map.get(agents[i].index) {
                     Some(&l) if l < self.token.paths.len() => l,
                     _ => continue,
@@ -330,11 +307,56 @@ impl TptsSolver {
                     _ => continue,
                 };
 
-                let snapshot = TokenSnapshot::save(&self.token, local_i, local_j);
-
-                // Remove both agents' paths from constraint index
+                // Remove both agents' paths from constraints before cost evaluation
+                // (avoids self-interference in A* cost probes)
                 self.master_ci.remove_path(&self.token.paths[local_i], TOKEN_PATH_MAX_TIME);
                 self.master_ci.remove_path(&self.token.paths[local_j], TOKEN_PATH_MAX_TIME);
+
+                // Paper criterion (Algorithm 2, line 26): compare arrival times.
+                // Manhattan pre-filter passed — now do the expensive A* check.
+                let cost_i_to_goal_j = self.astar_cost(agents[i].pos, goal_j, grid, dist_cache);
+                let cost_j_to_goal_j = self.astar_cost(agents[j].pos, goal_j, grid, dist_cache);
+
+                let (cost_i_j, cost_j_j) = match (cost_i_to_goal_j, cost_j_to_goal_j) {
+                    (Some(a), Some(b)) => (a, b),
+                    _ => {
+                        // Restore paths and skip
+                        self.master_ci.add_path(&self.token.paths[local_i], TOKEN_PATH_MAX_TIME);
+                        self.master_ci.add_path(&self.token.paths[local_j], TOKEN_PATH_MAX_TIME);
+                        continue;
+                    }
+                };
+
+                // Agent i must reach goal_j STRICTLY faster than agent j
+                if cost_i_j >= cost_j_j {
+                    self.master_ci.add_path(&self.token.paths[local_i], TOKEN_PATH_MAX_TIME);
+                    self.master_ci.add_path(&self.token.paths[local_j], TOKEN_PATH_MAX_TIME);
+                    continue;
+                }
+
+                // Also check the reverse: agent j should reach goal_i reasonably
+                let cost_j_to_goal_i = self.astar_cost(agents[j].pos, goal_i, grid, dist_cache);
+                let cost_i_to_goal_i = self.astar_cost(agents[i].pos, goal_i, grid, dist_cache);
+
+                let (cost_j_i, cost_i_i) = match (cost_j_to_goal_i, cost_i_to_goal_i) {
+                    (Some(a), Some(b)) => (a, b),
+                    _ => {
+                        self.master_ci.add_path(&self.token.paths[local_i], TOKEN_PATH_MAX_TIME);
+                        self.master_ci.add_path(&self.token.paths[local_j], TOKEN_PATH_MAX_TIME);
+                        continue;
+                    }
+                };
+
+                // Total cost must decrease
+                if cost_i_j + cost_j_i >= cost_i_i + cost_j_j {
+                    self.master_ci.add_path(&self.token.paths[local_i], TOKEN_PATH_MAX_TIME);
+                    self.master_ci.add_path(&self.token.paths[local_j], TOKEN_PATH_MAX_TIME);
+                    continue;
+                }
+
+                // Tentative swap — snapshot token state (paper line 21)
+                // Paths are already removed from master_ci above — proceed directly to planning
+                let snapshot = TokenSnapshot::save(&self.token, local_i, local_j);
 
                 // Plan agent i toward goal_j
                 let plan_i = self.plan_path(agents[i].pos, goal_j, grid, dist_cache);
@@ -844,6 +866,77 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// Paper property: swap cost evaluation uses unbiased A* (paths removed
+    /// before probing). This is the regression test for the critical fix that
+    /// removes both agents' token paths from the constraint index before calling
+    /// astar_cost(), preventing self-interference in cost estimation.
+    ///
+    /// If paths were NOT removed before probing, each agent's own token path
+    /// would inflate its A* cost (it would have to route around itself), making
+    /// beneficial swaps appear non-beneficial. The fix ensures costs are
+    /// computed on a "clean" constraint index.
+    ///
+    /// We verify this by constructing a scenario where agent 0 is close to
+    /// agent 1's goal and vice versa, giving each agent a long pre-existing
+    /// TOKEN path. Without the fix, the A* probe would route around the full
+    /// existing path and inflate the cost, suppressing the swap.
+    #[test]
+    fn paper_property_swap_cost_unbiased() {
+        let grid = GridMap::new(10, 10);
+        let mut solver = TptsSolver::new();
+        let mut cache = DistanceMapCache::default();
+
+        // Agent 0 at (0,0) with goal (9,0) — distance 9
+        // Agent 1 at (8,0) with goal (1,0) — distance 7
+        // After swap: agent 0→(1,0) costs 1, agent 1→(9,0) costs 1
+        // Total pre-swap: 16, post-swap: 2 — a clear improvement
+        let agents = vec![
+            AgentState {
+                index: 0,
+                pos: IVec2::new(0, 0),
+                goal: Some(IVec2::new(9, 0)),
+                has_plan: false,
+                task_leg: TaskLeg::TravelEmpty(IVec2::new(9, 0)),
+            },
+            AgentState {
+                index: 1,
+                pos: IVec2::new(8, 0),
+                goal: Some(IVec2::new(1, 0)),
+                has_plan: false,
+                task_leg: TaskLeg::TravelEmpty(IVec2::new(1, 0)),
+            },
+        ];
+
+        solver.ensure_initialized(&agents);
+        solver.master_ci.reset(grid.width, grid.height, TOKEN_PATH_MAX_TIME);
+
+        // Give each agent a long pre-existing TOKEN path that spans the row.
+        // These paths are deliberately set BEFORE building master_ci so that
+        // without the fix (paths not removed before A* probes) the A* would
+        // see its own path as constraints and be forced to route around them.
+        let path_0: Vec<IVec2> = (0..=9).map(|x| IVec2::new(x, 0)).collect();
+        let path_1: Vec<IVec2> = (1..=8).rev().map(|x| IVec2::new(x, 0)).collect();
+        solver.token.set_path(0, path_0);
+        solver.token.set_path(1, path_1);
+
+        for path in &solver.token.paths {
+            solver.master_ci.add_path(path, TOKEN_PATH_MAX_TIME);
+        }
+
+        // With the fix (paths removed before cost probing), the A* sees a clear
+        // grid for each agent and correctly detects the swap is beneficial.
+        let swaps = solver.attempt_swaps(&agents, 0, &grid, &mut cache);
+        assert!(
+            !swaps.is_empty(),
+            "swap should be found when A* costs are computed without self-interference \
+             (paths removed from constraint index before probing)"
+        );
+        assert!(
+            swaps.contains(&(0, 1)),
+            "expected swap between agent 0 and agent 1, got: {swaps:?}"
+        );
     }
 
     /// Paper property: token constraint index remains consistent after swap.
