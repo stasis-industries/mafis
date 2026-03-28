@@ -280,10 +280,19 @@ impl TptsSolver {
 
                 checks += 1;
 
+                // Manhattan pre-filter: skip A* if Manhattan says swap is
+                // clearly not beneficial. This avoids 4 expensive A* calls
+                // for pairs that can't possibly improve.
+                let m_current = manhattan(agents[i].pos, goal_i)
+                    + manhattan(agents[j].pos, goal_j);
+                let m_swapped = manhattan(agents[i].pos, goal_j)
+                    + manhattan(agents[j].pos, goal_i);
+                if m_swapped >= m_current {
+                    continue; // Manhattan says no benefit — skip A*
+                }
+
                 // Paper criterion (Algorithm 2, line 26): compare arrival times.
-                // "Compare when ai reaches sj on its path in token to when ai'
-                //  reaches sj on its path in token'"
-                // We compare: does agent i reach goal_j faster than agent j?
+                // Manhattan pre-filter passed — now do the expensive A* check.
                 let cost_i_to_goal_j = self.astar_cost(agents[i].pos, goal_j, grid, dist_cache);
                 let cost_j_to_goal_j = self.astar_cost(agents[j].pos, goal_j, grid, dist_cache);
 
