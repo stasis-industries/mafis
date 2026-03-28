@@ -152,7 +152,7 @@ fn paper_scenarios() -> Vec<Option<FaultScenario>> {
 ///
 /// Produces Table 1: Solver × Scenario matrix with FT, NRR, Critical Time.
 ///
-/// 4 solvers x 6 scenarios x 30 seeds = 720 runs
+/// 8 solvers x 6 scenarios x 30 seeds = 1440 runs
 pub fn solver_resilience() -> ExperimentMatrix {
     ExperimentMatrix {
         solvers: vec![
@@ -160,6 +160,9 @@ pub fn solver_resilience() -> ExperimentMatrix {
             "rhcr_pibt".into(),
             "rhcr_priority_astar".into(),
             "token_passing".into(),
+            "rt_lacam".into(),
+            "tpts".into(),
+            "pibt+apf".into(),
         ],
         topologies: vec!["warehouse_medium".into()],
         scenarios: paper_scenarios(),
@@ -293,7 +296,7 @@ pub fn scheduler_effect() -> ExperimentMatrix {
 /// can paradoxically improve throughput for reactive solvers by reducing
 /// corridor competition, while coordinated solvers suffer.
 ///
-/// 5 solvers x 4 densities x 6 scenarios x 50 seeds = 6,000 runs
+/// 8 solvers x 4 densities x 6 scenarios x 50 seeds = 9,600 runs
 pub fn braess_resilience() -> ExperimentMatrix {
     ExperimentMatrix {
         solvers: vec![
@@ -302,6 +305,9 @@ pub fn braess_resilience() -> ExperimentMatrix {
             "rhcr_pbs".into(),
             "rhcr_priority_astar".into(),
             "token_passing".into(),
+            "rt_lacam".into(),
+            "tpts".into(),
+            "pibt+apf".into(),
         ],
         topologies: vec!["warehouse_medium".into()],
         scenarios: paper_scenarios(),
@@ -392,7 +398,7 @@ mod tests {
     #[test]
     fn solver_resilience_count() {
         let m = solver_resilience();
-        assert_eq!(m.total_runs(), 840); // 4 x 7 x 30
+        assert_eq!(m.total_runs(), 1470); // 7 x 7 x 30
     }
 
     #[test]
@@ -418,13 +424,13 @@ mod tests {
     fn all_paper_total() {
         let all = all_paper_experiments();
         let total: usize = all.iter().map(|(_, m)| m.total_runs()).sum();
-        assert_eq!(total, 2940); // 840+840+840+420
+        assert_eq!(total, 3570); // 1470+840+840+420
     }
 
     #[test]
     fn braess_resilience_count() {
         let m = braess_resilience();
-        assert_eq!(m.total_runs(), 7000); // 5 x 4 x 7 x 50
+        assert_eq!(m.total_runs(), 11200); // 8 x 4 x 7 x 50
     }
 
     /// Run the Category 3 (permanent zone outage) slice of the Braess experiment.
@@ -522,6 +528,66 @@ mod tests {
         let mut f = fs::File::create("results/cross_topology_runs.csv").unwrap();
         write_runs_csv(&mut f, &result.runs).unwrap();
         eprintln!("Saved: cross_topology_runs.csv ({} rows)", result.runs.len() * 2);
+    }
+
+    /// Run solver resilience for new solvers only (RT-LaCAM, TPTS, PIBT+APF).
+    /// Same matrix as solver_resilience() but only the 3 new solvers.
+    /// 3 solvers x 7 scenarios x 30 seeds = 630 runs.
+    ///
+    /// Usage: cargo test run_new_solver_resilience -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn run_new_solver_resilience() {
+        use crate::experiment::export::{write_runs_csv, write_summary_csv};
+        use crate::experiment::runner::{run_matrix, ExperimentProgress};
+        use std::fs;
+        use std::sync::{Arc, Mutex};
+
+        let matrix = ExperimentMatrix {
+            solvers: vec![
+                "rt_lacam".into(),
+                "tpts".into(),
+                "pibt+apf".into(),
+            ],
+            topologies: vec!["warehouse_medium".into()],
+            scenarios: paper_scenarios(),
+            schedulers: vec!["random".into()],
+            agent_counts: vec![40],
+            seeds: SEEDS.to_vec(),
+            tick_count: TICK_COUNT,
+        };
+
+        let total = matrix.total_runs();
+        eprintln!("New solver resilience: {} runs...", total);
+        let progress = Arc::new(Mutex::new(ExperimentProgress {
+            current: 0, total, label: String::new(),
+        }));
+        let result = run_matrix(&matrix, Some(&progress));
+        eprintln!("Done in {}ms", result.wall_time_total_ms);
+
+        fs::create_dir_all("results").unwrap();
+
+        let mut f = fs::File::create("results/new_solver_resilience_runs.csv").unwrap();
+        write_runs_csv(&mut f, &result.runs).unwrap();
+
+        let mut f = fs::File::create("results/new_solver_resilience_summary.csv").unwrap();
+        write_summary_csv(&mut f, &result.summaries).unwrap();
+
+        eprintln!(
+            "Saved: new_solver_resilience_runs.csv ({} rows), summary ({} rows)",
+            result.runs.len() * 2,
+            result.summaries.len()
+        );
+
+        // Print summary table
+        eprintln!("\n=== New Solver Resilience Results ===");
+        for s in &result.summaries {
+            eprintln!(
+                "  {:<15} {:<20} FT={:.3} tasks={:.0} tp={:.3}",
+                s.solver_name, s.scenario_label,
+                s.fault_tolerance.mean, s.total_tasks.mean, s.throughput.mean
+            );
+        }
     }
 
     /// Tier 3: Run all 8 solvers and validate performance expectations.
