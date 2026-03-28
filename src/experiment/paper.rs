@@ -530,9 +530,8 @@ mod tests {
         eprintln!("Saved: cross_topology_runs.csv ({} rows)", result.runs.len() * 2);
     }
 
-    /// Run solver resilience for new solvers only (RT-LaCAM, TPTS, PIBT+APF).
-    /// Same matrix as solver_resilience() but only the 3 new solvers.
-    /// 3 solvers x 7 scenarios x 30 seeds = 630 runs.
+    /// Run solver resilience for all 8 solvers — quick version (5 seeds).
+    /// 8 solvers x 3 scenarios x 5 seeds = 120 runs.
     ///
     /// Usage: cargo test run_new_solver_resilience -- --ignored --nocapture
     #[test]
@@ -545,15 +544,18 @@ mod tests {
 
         let matrix = ExperimentMatrix {
             solvers: vec![
+                "pibt".into(),
+                "rhcr_pibt".into(),
+                "token_passing".into(),
                 "rt_lacam".into(),
                 "tpts".into(),
                 "pibt+apf".into(),
             ],
             topologies: vec!["warehouse_medium".into()],
-            scenarios: paper_scenarios(),
+            scenarios: vec![None, Some(burst_20()), Some(burst_50())],
             schedulers: vec!["random".into()],
             agent_counts: vec![40],
-            seeds: SEEDS.to_vec(),
+            seeds: vec![42, 123, 456, 789, 1024],
             tick_count: TICK_COUNT,
         };
 
