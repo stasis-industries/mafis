@@ -282,6 +282,28 @@ impl RtLaCAMSolver {
         self.open.push_front(new_id);
     }
 
+    /// Find the best depth-1 neighbor of current_node (lowest heuristic).
+    /// Used when no goal_node has been found yet — picks the most promising
+    /// immediate next step from explored neighbors.
+    fn best_depth1_neighbor(&self) -> Option<&[IVec2]> {
+        let cur_id = self.current_node?;
+        let mut best_id: Option<NodeId> = None;
+        let mut best_h = u64::MAX;
+
+        for &neighbor_id in &self.arena[cur_id].neighbors {
+            // Only consider children (g = cur.g + 1)
+            if self.arena[neighbor_id].g == self.arena[cur_id].g + 1 {
+                let h = self.arena[neighbor_id].h;
+                if h < best_h {
+                    best_h = h;
+                    best_id = Some(neighbor_id);
+                }
+            }
+        }
+
+        best_id.map(|id| self.arena[id].positions.as_slice())
+    }
+
     /// Extract next configuration to move to by backtracking from goal.
     /// Paper: backtrack from goal_node through parent chain to current_node.
     fn extract_next_config(&self) -> Option<&[IVec2]> {
@@ -350,6 +372,10 @@ impl RtLaCAMSolver {
         let seed = self.zobrist_seed;
 
         let mut expanded = 0;
+        // Track how many depth-1 candidates we've found. After finding enough,
+        // stop exploring — we have good options to choose from.
+        let mut depth1_found = 0;
+        const MAX_DEPTH1_CANDIDATES: usize = 5;
 
         while expanded < self.node_budget && !self.open.is_empty() {
             // Memory cap
@@ -440,10 +466,14 @@ impl RtLaCAMSolver {
                 self.arena[new_id].neighbors.push(node_id);
                 self.open.push_front(new_id);
 
-                // Early exit: if this is a depth-1 child from the current root,
-                // we have a usable next step. Stop searching immediately.
+                // Track depth-1 candidates. After finding MAX_DEPTH1_CANDIDATES,
+                // stop exploring — we have enough options for extract_next_config
+                // to pick the best one (lowest h).
                 if g == 1 {
-                    return;
+                    depth1_found += 1;
+                    if depth1_found >= MAX_DEPTH1_CANDIDATES {
+                        return;
+                    }
                 }
             }
         }
@@ -561,8 +591,12 @@ impl LifelongSolver for RtLaCAMSolver {
         self.expand(ctx.grid, &goals, &dist_maps);
 
         // Try to extract next step from search.
+        // 1. If goal_node found: backtrack through parent chain (optimal).
+        // 2. Otherwise: pick best depth-1 neighbor (lowest heuristic).
         // Clone positions to avoid borrow conflict with self.plan_buffer.
-        let next_step: Option<Vec<IVec2>> = self.extract_next_config().map(|p| p.to_vec());
+        let next_step: Option<Vec<IVec2>> = self.extract_next_config()
+            .or_else(|| self.best_depth1_neighbor())
+            .map(|p| p.to_vec());
 
         if let Some(next_positions) = next_step {
             let all_walkable = next_positions.iter().all(|&p| ctx.grid.is_walkable(p));
