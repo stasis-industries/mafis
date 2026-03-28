@@ -530,11 +530,10 @@ mod tests {
         eprintln!("Saved: cross_topology_runs.csv ({} rows)", result.runs.len() * 2);
     }
 
-    /// Run solver resilience for all solvers — quick version (5 seeds).
-    /// Uses closest scheduler (better for reactive solvers).
-    /// Tests at 20 agents (where reactive solvers produce enough tasks for meaningful FT).
+    /// Run solver resilience — full 30-seed version for publication.
+    /// Uses closest scheduler, 20 agents.
     ///
-    /// 6 solvers x 3 scenarios x 5 seeds = 90 runs.
+    /// 6 solvers x 3 scenarios x 30 seeds = 540 runs.
     ///
     /// Usage: cargo test run_new_solver_resilience -- --ignored --nocapture
     #[test]
@@ -558,7 +557,7 @@ mod tests {
             scenarios: vec![None, Some(burst_20()), Some(burst_50())],
             schedulers: vec!["closest".into()],
             agent_counts: vec![20],
-            seeds: vec![42, 123, 456, 789, 1024],
+            seeds: SEEDS.to_vec(),
             tick_count: TICK_COUNT,
         };
 
