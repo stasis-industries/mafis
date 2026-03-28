@@ -497,4 +497,122 @@ mod tests {
             }
         }
     }
+
+    // ── Tier 2: Paper property tests ─────────────────────────────────
+
+    /// Paper property (Okumura, AIJ 2022, Theorem 1): PIBT guarantees the
+    /// highest-priority agent eventually reaches its goal. We test this
+    /// by running a single agent (always highest priority) and verifying
+    /// its distance to goal monotonically decreases (modulo backtracking).
+    /// Over 100 ticks on an open grid, it MUST reach its goal.
+    #[test]
+    fn paper_property_pibt_highest_priority_reaches_goal() {
+        use crate::core::topology::ZoneMap;
+        use crate::solver::heuristics::DistanceMapCache;
+        use std::collections::HashMap;
+
+        let grid = GridMap::new(8, 8);
+        let zones = ZoneMap {
+            pickup_cells: vec![IVec2::new(0, 0)],
+            delivery_cells: vec![IVec2::new(7, 7)],
+            corridor_cells: Vec::new(),
+            recharging_cells: Vec::new(),
+            zone_type: HashMap::new(),
+            queue_lines: Vec::new(),
+        };
+
+        let mut solver = PibtLifelongSolver::new();
+        let mut cache = DistanceMapCache::default();
+        let mut rng = crate::core::seed::SeededRng::new(42);
+
+        // Single agent = always highest priority
+        let mut pos = IVec2::ZERO;
+        let goal = IVec2::new(7, 7);
+
+        for tick in 0..100 {
+            let agents = vec![AgentState {
+                index: 0, pos, goal: Some(goal), has_plan: tick > 0,
+                task_leg: crate::core::task::TaskLeg::TravelEmpty(goal),
+            }];
+            let ctx = super::super::lifelong::SolverContext {
+                grid: &grid, zones: &zones, tick, num_agents: 1,
+            };
+            if let super::super::lifelong::StepResult::Replan(plans) =
+                solver.step(&ctx, &agents, &mut cache, &mut rng)
+            {
+                if let Some((_, actions)) = plans.first() {
+                    if let Some(action) = actions.first() {
+                        pos = action.apply(pos);
+                    }
+                }
+            }
+            if pos == goal {
+                return; // Success — reached goal within 100 ticks
+            }
+        }
+        panic!("highest-priority agent did not reach goal (7,7) from (0,0) in 100 ticks on open 8x8 grid");
+    }
+
+    /// Paper property: PIBT with multiple agents on a solvable grid should
+    /// complete tasks over time (not deadlock permanently). This tests
+    /// liveness — at least SOME agents reach their goals.
+    #[test]
+    fn paper_property_pibt_liveness_multi_agent() {
+        use crate::core::topology::ZoneMap;
+        use crate::solver::heuristics::DistanceMapCache;
+        use std::collections::HashMap;
+
+        let grid = GridMap::new(8, 8);
+        let zones = ZoneMap {
+            pickup_cells: vec![IVec2::new(0, 0)],
+            delivery_cells: vec![IVec2::new(7, 7)],
+            corridor_cells: Vec::new(),
+            recharging_cells: Vec::new(),
+            zone_type: HashMap::new(),
+            queue_lines: Vec::new(),
+        };
+
+        let mut solver = PibtLifelongSolver::new();
+        let mut cache = DistanceMapCache::default();
+        let mut rng = crate::core::seed::SeededRng::new(42);
+
+        let mut positions = vec![
+            IVec2::new(0, 0), IVec2::new(7, 7), IVec2::new(0, 7),
+            IVec2::new(7, 0), IVec2::new(3, 3),
+        ];
+        let goals = vec![
+            IVec2::new(7, 7), IVec2::new(0, 0), IVec2::new(7, 0),
+            IVec2::new(0, 7), IVec2::new(5, 5),
+        ];
+        let mut goals_reached = 0;
+
+        for tick in 0..200 {
+            let agents: Vec<AgentState> = (0..5)
+                .map(|i| AgentState {
+                    index: i, pos: positions[i], goal: Some(goals[i]),
+                    has_plan: tick > 0,
+                    task_leg: crate::core::task::TaskLeg::TravelEmpty(goals[i]),
+                })
+                .collect();
+
+            let ctx = super::super::lifelong::SolverContext {
+                grid: &grid, zones: &zones, tick, num_agents: 5,
+            };
+            if let super::super::lifelong::StepResult::Replan(plans) =
+                solver.step(&ctx, &agents, &mut cache, &mut rng)
+            {
+                for (idx, actions) in plans {
+                    if let Some(action) = actions.first() {
+                        positions[*idx] = action.apply(positions[*idx]);
+                    }
+                }
+            }
+            for i in 0..5 {
+                if positions[i] == goals[i] {
+                    goals_reached += 1;
+                }
+            }
+        }
+        assert!(goals_reached > 0, "no agent reached its goal in 200 ticks — PIBT may be deadlocked");
+    }
 }

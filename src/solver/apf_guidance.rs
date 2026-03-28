@@ -381,4 +381,107 @@ mod tests {
         }
         assert_eq!(results[0], results[1]);
     }
+
+    // ── Tier 2: Paper property tests ─────────────────────────────────
+
+    /// Paper property: APF with w=0 must produce identical plans to vanilla PIBT.
+    /// This is the ablation test — proves the bias mechanism doesn't alter
+    /// base PIBT behavior when disabled.
+    /// Reference: Pertzovsky et al., arXiv:2505.22753, Section 4 (ablation).
+    #[test]
+    fn paper_property_apf_zero_weight_equals_vanilla_pibt() {
+        let grid = GridMap::new(8, 8);
+        let zones = test_zones();
+
+        let mut apf_solver = PibtApfSolver {
+            apf_w: 0.0,   // zero weight → no APF effect
+            apf_gamma: 3.0,
+            apf_d_max: 2,
+            apf_t_max: 2,
+            ..PibtApfSolver::new()
+        };
+        let mut pibt_solver = PibtLifelongSolver::new();
+        let mut cache_apf = DistanceMapCache::default();
+        let mut cache_pibt = DistanceMapCache::default();
+        let mut rng_apf = SeededRng::new(42);
+        let mut rng_pibt = SeededRng::new(42);
+
+        let mut apf_positions = vec![
+            IVec2::new(0, 0), IVec2::new(7, 7), IVec2::new(0, 7),
+            IVec2::new(7, 0), IVec2::new(3, 3),
+        ];
+        let mut pibt_positions = apf_positions.clone();
+        let goals = vec![
+            IVec2::new(7, 7), IVec2::new(0, 0), IVec2::new(7, 0),
+            IVec2::new(0, 7), IVec2::new(5, 5),
+        ];
+
+        for tick in 0..50 {
+            let agents_apf: Vec<AgentState> = (0..5)
+                .map(|i| AgentState {
+                    index: i, pos: apf_positions[i], goal: Some(goals[i]),
+                    has_plan: tick > 0, task_leg: TaskLeg::TravelEmpty(goals[i]),
+                })
+                .collect();
+            let agents_pibt: Vec<AgentState> = (0..5)
+                .map(|i| AgentState {
+                    index: i, pos: pibt_positions[i], goal: Some(goals[i]),
+                    has_plan: tick > 0, task_leg: TaskLeg::TravelEmpty(goals[i]),
+                })
+                .collect();
+
+            let ctx = SolverContext {
+                grid: &grid, zones: &zones, tick, num_agents: 5,
+            };
+
+            if let StepResult::Replan(plans) = apf_solver.step(&ctx, &agents_apf, &mut cache_apf, &mut rng_apf) {
+                for (idx, actions) in plans {
+                    if let Some(action) = actions.first() {
+                        apf_positions[*idx] = action.apply(apf_positions[*idx]);
+                    }
+                }
+            }
+            if let StepResult::Replan(plans) = pibt_solver.step(&ctx, &agents_pibt, &mut cache_pibt, &mut rng_pibt) {
+                for (idx, actions) in plans {
+                    if let Some(action) = actions.first() {
+                        pibt_positions[*idx] = action.apply(pibt_positions[*idx]);
+                    }
+                }
+            }
+
+            assert_eq!(
+                apf_positions, pibt_positions,
+                "APF(w=0) diverged from vanilla PIBT at tick {tick}"
+            );
+        }
+    }
+
+    /// Paper property: APF with nonzero weight must produce a non-trivial
+    /// repulsive field (field values > 0 near agents).
+    /// Reference: Pertzovsky et al., Eq. 4: APF_i(v,t) = w * gamma^(-dist).
+    #[test]
+    fn paper_property_apf_field_nonzero_near_agents() {
+        let grid = GridMap::new(8, 8);
+        let zones = test_zones();
+        let mut solver = PibtApfSolver::new();
+        let mut cache = DistanceMapCache::default();
+        let mut rng = SeededRng::new(42);
+
+        // Run one tick with 3 agents
+        let agents = vec![
+            AgentState { index: 0, pos: IVec2::new(2, 2), goal: Some(IVec2::new(6, 6)),
+                has_plan: false, task_leg: TaskLeg::TravelEmpty(IVec2::new(6, 6)) },
+            AgentState { index: 1, pos: IVec2::new(4, 4), goal: Some(IVec2::new(0, 0)),
+                has_plan: false, task_leg: TaskLeg::TravelEmpty(IVec2::new(0, 0)) },
+            AgentState { index: 2, pos: IVec2::new(6, 2), goal: Some(IVec2::new(2, 6)),
+                has_plan: false, task_leg: TaskLeg::TravelEmpty(IVec2::new(2, 6)) },
+        ];
+        let ctx = SolverContext { grid: &grid, zones: &zones, tick: 0, num_agents: 3 };
+        let _ = solver.step(&ctx, &agents, &mut cache, &mut rng);
+
+        // After step, the APF field should have nonzero values
+        // (at least one cell near an agent's projected path should be > 0)
+        let has_nonzero = solver.apf_field.iter().any(|&v| v > 0.0);
+        assert!(has_nonzero, "APF field should have nonzero values after a step with 3 agents");
+    }
 }

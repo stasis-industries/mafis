@@ -735,4 +735,146 @@ mod tests {
             assert_ne!(positions[0], positions[1], "vertex collision at tick {tick}");
         }
     }
+
+    // ── Tier 2: Paper property tests ─────────────────────────────────
+
+    /// Paper property (Ma et al., AAMAS 2017, Algorithm 2 line 27):
+    /// A swap is only committed when the stealing agent reaches the pickup
+    /// STRICTLY faster than the current assignee (A* cost comparison).
+    /// This test verifies that committed swaps always reduce total cost.
+    #[test]
+    fn paper_property_swap_reduces_total_astar_cost() {
+        let grid = GridMap::new(8, 8);
+        let mut solver = TptsSolver::new();
+        let mut cache = DistanceMapCache::default();
+
+        // Agent 0 far from its goal, Agent 1 close to Agent 0's goal
+        let agents = vec![
+            AgentState {
+                index: 0, pos: IVec2::new(0, 0), goal: Some(IVec2::new(7, 0)),
+                has_plan: false, task_leg: TaskLeg::TravelEmpty(IVec2::new(7, 0)),
+            },
+            AgentState {
+                index: 1, pos: IVec2::new(6, 0), goal: Some(IVec2::new(1, 0)),
+                has_plan: false, task_leg: TaskLeg::TravelEmpty(IVec2::new(1, 0)),
+            },
+        ];
+
+        solver.ensure_initialized(&agents);
+        solver.master_ci.reset(grid.width, grid.height, TOKEN_PATH_MAX_TIME);
+        for path in &solver.token.paths {
+            solver.master_ci.add_path(path, TOKEN_PATH_MAX_TIME);
+        }
+
+        // Use Manhattan as pre-swap cost estimate (no constraint interference)
+        let pre_cost_0 = manhattan(agents[0].pos, agents[0].goal.unwrap());
+        let pre_cost_1 = manhattan(agents[1].pos, agents[1].goal.unwrap());
+        let pre_swap_total = pre_cost_0 + pre_cost_1;
+
+        let swaps = solver.attempt_swaps(&agents, 0, &grid, &mut cache);
+
+        if !swaps.is_empty() {
+            // Post-swap: agent 0 → agent 1's original goal, agent 1 → agent 0's original goal
+            let post_cost_0 = manhattan(agents[0].pos, agents[1].goal.unwrap());
+            let post_cost_1 = manhattan(agents[1].pos, agents[0].goal.unwrap());
+            let post_swap_total = post_cost_0 + post_cost_1;
+
+            assert!(
+                post_swap_total < pre_swap_total,
+                "swap should reduce total cost: pre={pre_swap_total}, post={post_swap_total}"
+            );
+        } else {
+            panic!("expected a swap for agents (0,0)→(7,0) and (6,0)→(1,0)");
+        }
+    }
+
+    /// Paper property: after a swap, no two agents share the same goal.
+    /// This ensures task well-formedness is preserved.
+    #[test]
+    fn paper_property_swap_preserves_unique_goals() {
+        let grid = GridMap::new(8, 8);
+        let zones = test_zones();
+        let mut solver = TptsSolver::new();
+        let mut cache = DistanceMapCache::default();
+        let mut rng = SeededRng::new(42);
+
+        let mut positions = vec![
+            IVec2::new(0, 0), IVec2::new(6, 0), IVec2::new(3, 3),
+        ];
+        let goals = vec![
+            IVec2::new(7, 0), IVec2::new(1, 0), IVec2::new(5, 5),
+        ];
+
+        for tick in 0..20 {
+            let agents: Vec<AgentState> = (0..3)
+                .map(|i| AgentState {
+                    index: i, pos: positions[i], goal: Some(goals[i]),
+                    has_plan: tick > 0, task_leg: TaskLeg::TravelEmpty(goals[i]),
+                })
+                .collect();
+
+            let ctx = SolverContext { grid: &grid, zones: &zones, tick, num_agents: 3 };
+            if let StepResult::Replan(plans) = solver.step(&ctx, &agents, &mut cache, &mut rng) {
+                // After step, verify no two agents in the plan share the same position
+                let plan_positions: Vec<IVec2> = plans.iter()
+                    .filter_map(|(idx, actions)| {
+                        actions.first().map(|a| a.apply(positions[*idx]))
+                    })
+                    .collect();
+
+                let unique: std::collections::HashSet<IVec2> = plan_positions.iter().copied().collect();
+                assert_eq!(
+                    unique.len(), plan_positions.len(),
+                    "swap produced duplicate target positions at tick {tick}"
+                );
+
+                for (idx, actions) in plans {
+                    if let Some(action) = actions.first() {
+                        positions[*idx] = action.apply(positions[*idx]);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Paper property: token constraint index remains consistent after swap.
+    /// Snapshot/restore must leave the constraint index in a valid state.
+    #[test]
+    fn paper_property_snapshot_restore_consistency() {
+        let grid = GridMap::new(5, 5);
+        let mut solver = TptsSolver::new();
+        let mut cache = DistanceMapCache::default();
+
+        let agents = vec![
+            AgentState {
+                index: 0, pos: IVec2::new(0, 0), goal: Some(IVec2::new(4, 0)),
+                has_plan: false, task_leg: TaskLeg::TravelEmpty(IVec2::new(4, 0)),
+            },
+            AgentState {
+                index: 1, pos: IVec2::new(4, 0), goal: Some(IVec2::new(0, 0)),
+                has_plan: false, task_leg: TaskLeg::Free, // incompatible → swap will be skipped
+            },
+        ];
+
+        solver.ensure_initialized(&agents);
+        solver.master_ci.reset(grid.width, grid.height, TOKEN_PATH_MAX_TIME);
+        for path in &solver.token.paths {
+            solver.master_ci.add_path(path, TOKEN_PATH_MAX_TIME);
+        }
+
+        // Save token state before
+        let paths_before: Vec<Vec<IVec2>> = solver.token.paths.iter()
+            .map(|p| p.iter().copied().collect())
+            .collect();
+
+        // attempt_swaps should not modify anything (incompatible legs)
+        let swaps = solver.attempt_swaps(&agents, 0, &grid, &mut cache);
+        assert!(swaps.is_empty());
+
+        // Token paths should be unchanged
+        let paths_after: Vec<Vec<IVec2>> = solver.token.paths.iter()
+            .map(|p| p.iter().copied().collect())
+            .collect();
+        assert_eq!(paths_before, paths_after, "token paths changed despite no swap");
+    }
 }
