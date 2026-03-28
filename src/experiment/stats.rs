@@ -18,12 +18,12 @@ impl Default for StatSummary {
     fn default() -> Self {
         Self {
             n: 0,
-            mean: 0.0,
-            std: 0.0,
-            ci95_lo: 0.0,
-            ci95_hi: 0.0,
-            min: 0.0,
-            max: 0.0,
+            mean: f64::NAN,
+            std: f64::NAN,
+            ci95_lo: f64::NAN,
+            ci95_hi: f64::NAN,
+            min: f64::NAN,
+            max: f64::NAN,
         }
     }
 }

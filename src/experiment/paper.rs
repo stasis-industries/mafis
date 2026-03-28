@@ -530,8 +530,11 @@ mod tests {
         eprintln!("Saved: cross_topology_runs.csv ({} rows)", result.runs.len() * 2);
     }
 
-    /// Run solver resilience for all 8 solvers — quick version (5 seeds).
-    /// 8 solvers x 3 scenarios x 5 seeds = 120 runs.
+    /// Run solver resilience for all solvers — quick version (5 seeds).
+    /// Uses closest scheduler (better for reactive solvers).
+    /// Tests at 20 agents (where reactive solvers produce enough tasks for meaningful FT).
+    ///
+    /// 6 solvers x 3 scenarios x 5 seeds = 90 runs.
     ///
     /// Usage: cargo test run_new_solver_resilience -- --ignored --nocapture
     #[test]
@@ -553,8 +556,8 @@ mod tests {
             ],
             topologies: vec!["warehouse_medium".into()],
             scenarios: vec![None, Some(burst_20()), Some(burst_50())],
-            schedulers: vec!["random".into()],
-            agent_counts: vec![40],
+            schedulers: vec!["closest".into()],
+            agent_counts: vec![20],
             seeds: vec![42, 123, 456, 789, 1024],
             tick_count: TICK_COUNT,
         };
@@ -582,12 +585,20 @@ mod tests {
         );
 
         // Print summary table
-        eprintln!("\n=== New Solver Resilience Results ===");
+        eprintln!("\n=== Solver Resilience Results ===");
+        eprintln!("{:<15} {:<14} {:>6} {:>7} {:>7} {:>4}", "Solver", "Scenario", "FT", "TP", "Tasks", "n");
+        eprintln!("{}", "-".repeat(58));
         for s in &result.summaries {
+            let ft_str = if s.fault_tolerance.mean.is_nan() {
+                "  NaN".to_string()
+            } else {
+                format!("{:.3}", s.fault_tolerance.mean)
+            };
             eprintln!(
-                "  {:<15} {:<20} FT={:.3} tasks={:.0} tp={:.3}",
+                "  {:<15} {:<14} {:>5} {:>7.3} {:>5.0}   {:>2}",
                 s.solver_name, s.scenario_label,
-                s.fault_tolerance.mean, s.total_tasks.mean, s.throughput.mean
+                ft_str, s.throughput.mean, s.total_tasks.mean,
+                s.fault_tolerance.n
             );
         }
     }
