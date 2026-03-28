@@ -14,7 +14,7 @@ Multi-Agent Fault Injection Simulator — Bevy 0.18 → WASM. A **fault resilien
 # Step 1 — type & borrow check (~5s). Catches 80% of errors instantly.
 cargo check
 
-# Step 2 — logic correctness (~10s). 396 tests across core, solver, analysis, experiments.
+# Step 2 — logic correctness (~3 min). 473 tests across core, solver, analysis, experiments.
 cargo test
 
 # Step 3 — only if Steps 1-2 pass AND the change touches rendering, bridge, or ECS systems.

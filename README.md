@@ -22,15 +22,18 @@ The simulation is deterministic. Same seed, same config, same results. Every num
 
 ### Solvers
 
-Five lifelong solvers, implemented from the literature. No external solver crates.
+Eight lifelong solvers spanning five paradigms, implemented from the literature. No external solver crates.
 
-| Solver | Reference | Characteristic |
-|--------|-----------|----------------|
-| PIBT | Okumura 2022 | One-step reactive, priority inheritance |
-| RHCR (PBS) | Li et al. 2021 | Windowed Priority-Based Search |
-| RHCR (PIBT-Window) | Li et al. 2021 | Unrolled PIBT for H steps |
-| RHCR (Priority A*) | Li et al. 2021 | Sequential spacetime A* |
-| Token Passing | Ma et al. 2017 | Decentralized sequential via shared token |
+| Solver | Reference | Paradigm |
+|--------|-----------|----------|
+| PIBT | Okumura 2022 | Reactive |
+| RHCR (PBS) | Li et al. 2021 | Windowed |
+| RHCR (PIBT-Window) | Li et al. 2021 | Windowed |
+| RHCR (Priority A*) | Li et al. 2021 | Windowed |
+| Token Passing | Ma et al. 2017 | Decentralized |
+| RT-LaCAM | Liang et al. 2025 | Config-space |
+| TPTS | Ma et al. 2017 | Decentralized |
+| PIBT+APF | Pertzovsky et al. 2025 | Meta + Reactive |
 
 ### Fault taxonomy
 
@@ -138,7 +141,7 @@ basic-http-server web   # localhost:4000
 
 ```bash
 cargo check   # types + borrows  (~5s)
-cargo test    # 408 tests        (~20s)
+cargo test    # 473 tests        (~3 min)
 ```
 
 ---
@@ -148,7 +151,7 @@ cargo test    # 408 tests        (~20s)
 ```
 src/
   core/        Tick loop, agents, grid, task scheduling, topology, delivery queues
-  solver/      PIBT + 3 RHCR variants + Token Passing, shared A* and heuristics
+  solver/      8 solvers: PIBT, 3 RHCR, Token Passing, RT-LaCAM, TPTS, PIBT+APF
   fault/       Weibull wear model, 3-category fault system, fault schedule
   analysis/    ADG, cascade BFS, fault metrics, heatmap, resilience scorecard
   render/      3D environment, robot visuals (MaterialPalette), orbit camera
