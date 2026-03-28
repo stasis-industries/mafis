@@ -1215,6 +1215,8 @@ function updateUI(s) {
 
         // Show baseline comparison when faults are active (either enabled or manually injected)
         const faultEnabled = s.fault_config && s.fault_config.enabled;
+        // Wear/heat specific: only true when wear-based fault (Weibull) is active
+        const wearEnabled = s.fault_config && s.fault_config.weibull_enabled;
         const hasFaults = m.fault_count > 0;
         const faultActive = faultEnabled || hasFaults;
         const showBaseline = hasBaseline && faultActive;
@@ -1269,9 +1271,9 @@ function updateUI(s) {
             faultSection.classList.toggle('hidden', !faultActive);
         }
 
-        // System heat chart — only show when fault config is enabled (heat system active)
+        // System heat chart — only show when wear-based (Weibull) fault is active
         const heatEl = document.getElementById('chart-heat');
-        if (heatEl) heatEl.style.display = faultEnabled ? '' : 'none';
+        if (heatEl) heatEl.style.display = wearEnabled ? '' : 'none';
 
         // Fault Response metric cards
         animateMetric('metric-faults', m.fault_count);
@@ -1343,6 +1345,7 @@ function updateUI(s) {
 
     // Fault params — disabled section styling
     const faultEnabled = s.fault_config && s.fault_config.enabled;
+    const wearEnabled = s.fault_config && s.fault_config.weibull_enabled;
     const faultParamsEl = document.getElementById('fault-params');
     if (faultParamsEl) {
         faultParamsEl.classList.toggle('section-disabled', !faultEnabled);
@@ -1485,14 +1488,14 @@ function updateUI(s) {
 
     // Agent list — aggregate summary when above threshold, per-agent otherwise
     if (s.agent_summary) {
-        updateAgentSummary(s.agent_summary, faultEnabled);
+        updateAgentSummary(s.agent_summary, wearEnabled);
         // Close popover in aggregate mode
         if (selectedAgentId !== null) {
             selectedAgentId = null;
             document.getElementById('agent-popover').classList.add('hidden');
         }
     } else {
-        updateAgentList(s.agents || [], faultEnabled);
+        updateAgentList(s.agents || [], wearEnabled);
         // Update agent popover if one is selected
         if (selectedAgentId !== null && s.agents) {
             const agent = s.agents.find(a => a.id === selectedAgentId);
@@ -2133,7 +2136,7 @@ function populateResultsDashboard() {
         const s = JSON.parse(raw);
         populateResultsFromState(s);
         // Short delay to let the DOM layout settle before creating charts
-        const heatEnabled = s.fault_config && s.fault_config.enabled;
+        const heatEnabled = s.fault_config && s.fault_config.weibull_enabled;
         setTimeout(() => renderResultsCharts(heatEnabled), 100);
     } catch (_e) {
         // State not available yet

@@ -3555,6 +3555,7 @@ body[data-phase="analyze"] .view-results-wrapper {
 
 #app-grid[data-phase="results"] #panel-right {
     overflow-y: auto;
+    overflow-x: hidden;
     max-width: none;
     width: 100%;
 }
@@ -3716,6 +3717,7 @@ body[data-phase="results"] #panel-right > .view-results-wrapper {
 .results-chart-cell {
     padding: 20px 16px;
     min-height: 0;
+    min-width: 0;
     display: flex;
     flex-direction: column;
     border-bottom: 1px solid var(--border);
