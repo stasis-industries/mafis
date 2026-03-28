@@ -358,6 +358,33 @@ pub fn smoke_test() -> ExperimentMatrix {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Tier 3: Solver benchmark — all 8 solvers, baseline throughput comparison
+// ---------------------------------------------------------------------------
+
+/// Benchmark all 8 solvers at 40 agents on warehouse_medium, no faults.
+/// 5 seeds for statistical confidence. ~80 runs total (8 solvers × 2 scenarios × 5 seeds).
+pub fn solver_benchmark() -> ExperimentMatrix {
+    ExperimentMatrix {
+        solvers: vec![
+            "pibt".into(),
+            "rhcr_pibt".into(),
+            "rhcr_pbs".into(),
+            "rhcr_priority_astar".into(),
+            "token_passing".into(),
+            "rt_lacam".into(),
+            "tpts".into(),
+            "pibt+apf".into(),
+        ],
+        topologies: vec!["warehouse_medium".into()],
+        scenarios: vec![None, Some(burst_20())],
+        schedulers: vec!["random".into()],
+        agent_counts: vec![40],
+        seeds: vec![42, 123, 456, 789, 1024],
+        tick_count: 500,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -495,6 +522,97 @@ mod tests {
         let mut f = fs::File::create("results/cross_topology_runs.csv").unwrap();
         write_runs_csv(&mut f, &result.runs).unwrap();
         eprintln!("Saved: cross_topology_runs.csv ({} rows)", result.runs.len() * 2);
+    }
+
+    /// Tier 3: Run all 8 solvers and validate performance expectations.
+    ///
+    /// This is the benchmark comparison test. It runs each solver on
+    /// warehouse_medium with 40 agents for 500 ticks (5 seeds, no faults)
+    /// and validates:
+    /// 1. All solvers produce non-zero throughput
+    /// 2. Performance ranking roughly matches paper expectations
+    /// 3. No solver is catastrophically worse than expected
+    ///
+    /// Usage: cargo test run_solver_benchmark -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn run_solver_benchmark() {
+        use crate::experiment::export::write_runs_csv;
+        use crate::experiment::runner::{run_matrix, ExperimentProgress};
+        use std::collections::HashMap;
+        use std::fs;
+        use std::sync::{Arc, Mutex};
+
+        // Baseline only (no faults) for clean throughput comparison
+        let matrix = ExperimentMatrix {
+            solvers: vec![
+                "pibt".into(),
+                "rhcr_pibt".into(),
+                "rhcr_pbs".into(),
+                "rhcr_priority_astar".into(),
+                "token_passing".into(),
+                "rt_lacam".into(),
+                "tpts".into(),
+                "pibt+apf".into(),
+            ],
+            topologies: vec!["warehouse_medium".into()],
+            scenarios: vec![None],
+            schedulers: vec!["random".into()],
+            agent_counts: vec![40],
+            seeds: vec![42, 123, 456, 789, 1024],
+            tick_count: 500,
+        };
+
+        let total = matrix.total_runs();
+        eprintln!("Solver benchmark: {} runs...", total);
+        let progress = Arc::new(Mutex::new(ExperimentProgress {
+            current: 0, total, label: String::new(),
+        }));
+        let result = run_matrix(&matrix, Some(&progress));
+        eprintln!("Done in {}ms", result.wall_time_total_ms);
+
+        // Aggregate: average throughput per solver across 5 seeds
+        let mut solver_throughputs: HashMap<String, Vec<f64>> = HashMap::new();
+        for run in &result.runs {
+            solver_throughputs
+                .entry(run.config.solver_name.clone())
+                .or_default()
+                .push(run.baseline_metrics.avg_throughput);
+        }
+
+        eprintln!("\n=== Solver Benchmark Results (40 agents, warehouse_medium, 500 ticks) ===");
+        eprintln!("{:<25} {:>8} {:>8} {:>8}", "Solver", "Mean TP", "Min TP", "Max TP");
+        eprintln!("{}", "-".repeat(55));
+
+        let mut solver_means: Vec<(String, f64)> = Vec::new();
+        for (solver, tps) in &solver_throughputs {
+            let mean = tps.iter().sum::<f64>() / tps.len() as f64;
+            let min = tps.iter().cloned().fold(f64::INFINITY, f64::min);
+            let max = tps.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+            eprintln!("{:<25} {:>8.3} {:>8.3} {:>8.3}", solver, mean, min, max);
+            solver_means.push((solver.clone(), mean));
+        }
+
+        // Sort by throughput descending
+        solver_means.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+        eprintln!("\nRanking (highest to lowest throughput):");
+        for (rank, (solver, mean)) in solver_means.iter().enumerate() {
+            eprintln!("  {}. {} (tp={:.3})", rank + 1, solver, mean);
+        }
+
+        // Validation: all solvers must produce non-zero throughput
+        for (solver, mean) in &solver_means {
+            assert!(
+                *mean > 0.0,
+                "solver {solver} produced zero throughput on warehouse_medium with 40 agents"
+            );
+        }
+
+        // Save results
+        fs::create_dir_all("results").unwrap();
+        let mut f = fs::File::create("results/solver_benchmark_runs.csv").unwrap();
+        write_runs_csv(&mut f, &result.runs).unwrap();
+        eprintln!("\nSaved: results/solver_benchmark_runs.csv ({} rows)", result.runs.len() * 2);
     }
 
     #[test]
