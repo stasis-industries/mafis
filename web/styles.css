@@ -5430,6 +5430,9 @@ body[data-phase="experiment"] #toolbar {
 .exp-drilldown-footer {
     padding-top: 12px;
     border-top: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 8px;
 }
 
 .exp-sim3d-btn {
@@ -5437,6 +5440,25 @@ body[data-phase="experiment"] #toolbar {
     padding: 8px 20px;
     font-size: 11px;
     letter-spacing: 0.8px;
+}
+
+.exp-seed-label {
+    font-family: 'DM Mono', monospace;
+    font-size: 10px;
+    color: var(--text-muted);
+    letter-spacing: 0.3px;
+}
+
+.exp-seed-select {
+    font-family: 'DM Mono', monospace;
+    font-size: 10px;
+    padding: 3px 6px;
+    background: var(--bg-input);
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+    cursor: pointer;
+    -webkit-appearance: none;
+    appearance: none;
 }
 
 /* ==========================================================================

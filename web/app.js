@@ -5888,13 +5888,19 @@ function simulateIn3D(idx) {
     // Parse fault scenario label and configure observatory fault settings
     configureFaultFromScenarioLabel(s.scenario);
 
-    // Get seed + tick_count from the first matching run (summaries aggregate seeds)
+    // Get seed from dropdown (if present) or fall back to first matching run
+    const seedSelectEl = document.getElementById('exp-drilldown-seed-select');
+    const selectedSeed = seedSelectEl && seedSelectEl.style.display !== 'none'
+        ? parseInt(seedSelectEl.value, 10)
+        : null;
+
     const matchingRun = experimentData.runs?.find(r =>
         r.config?.solver === s.solver &&
         r.config?.topology === s.topology &&
         r.config?.scenario === s.scenario &&
         r.config?.scheduler === s.scheduler &&
-        r.config?.num_agents === s.num_agents
+        r.config?.num_agents === s.num_agents &&
+        (selectedSeed == null || r.config?.seed === selectedSeed)
     );
 
     if (s.num_agents) {
