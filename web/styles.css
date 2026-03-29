@@ -5456,6 +5456,7 @@ body[data-phase="experiment"] #toolbar {
     background: var(--bg-input);
     color: var(--text-primary);
     border: 1px solid var(--border);
+    border-radius: 0;
     cursor: pointer;
     -webkit-appearance: none;
     appearance: none;
