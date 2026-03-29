@@ -5341,9 +5341,12 @@ body[data-phase="experiment"] #toolbar {
     padding: 16px 16px 16px 8px;
     overflow-y: auto;
     background: var(--bg-card);
+    display: flex;
+    flex-direction: column;
 }
 
 .exp-chart-container {
+    flex: 1;
     min-height: 80px;
 }
 
