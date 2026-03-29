@@ -5427,6 +5427,44 @@ body[data-phase="experiment"] #toolbar {
     border-bottom: 1px solid var(--border);
 }
 
+.drilldown-tabs {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 12px;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 8px;
+}
+
+.drilldown-tab {
+    font-family: 'DM Mono', monospace;
+    font-size: 9px;
+    font-weight: 500;
+    letter-spacing: 0.5px;
+    padding: 3px 8px;
+    background: transparent;
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+    border-radius: 0;
+    cursor: pointer;
+    transition: all 100ms ease;
+    text-transform: uppercase;
+}
+
+.drilldown-tab:hover {
+    color: var(--text-primary);
+    border-color: var(--border-strong);
+}
+
+.drilldown-tab.active {
+    background: var(--text-primary);
+    color: var(--bg-panel);
+    border-color: var(--text-primary);
+}
+
+[data-theme="dark"] .drilldown-tab.active {
+    color: var(--bg-dark);
+}
+
 .exp-drilldown-footer {
     padding-top: 12px;
     border-top: 1px solid var(--border);

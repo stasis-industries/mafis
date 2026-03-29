@@ -5773,6 +5773,13 @@ function renderExpChart() {
     container.innerHTML = svg;
 }
 
+/** Map a summary metric key back to its run-level faulted key via METRIC_MAP.
+ *  Returns null if no mapping found — callers must treat null as N/A. */
+function runKeyForMetric(summaryKey) {
+    const entry = METRIC_MAP.find(([, sk]) => sk === summaryKey);
+    return entry ? entry[0] : null;
+}
+
 // ---------------------------------------------------------------------------
 // Drill-down
 // ---------------------------------------------------------------------------
@@ -5795,49 +5802,102 @@ function showExpDrilldown(idx) {
 
     titleEl.textContent = `${s.solver} / ${s.topology} / ${s.scenario || 'none'} / ${s.scheduler} / ${s.num_agents}a`;
 
-    // Per-seed details table if runs data available
-    let html = '<table><thead><tr><th>Metric</th><th>Mean</th><th>Std</th><th>CI 95%</th><th>Min</th><th>Max</th></tr></thead><tbody>';
+    // Find matching runs for per-seed tab
+    const seedRuns = experimentData.runs ? experimentData.runs.filter(r =>
+        r.config.solver === s.solver &&
+        r.config.topology === s.topology &&
+        r.config.scenario === s.scenario &&
+        r.config.scheduler === s.scheduler &&
+        r.config.num_agents === s.num_agents
+    ) : [];
+
+    // Build tab bar: MEAN + one tab per seed
+    let tabsHtml = '<div class="drilldown-tabs">';
+    tabsHtml += '<button class="drilldown-tab active" data-tab="mean">MEAN</button>';
+    for (const r of seedRuns) {
+        tabsHtml += `<button class="drilldown-tab" data-tab="seed-${r.config.seed}">${r.config.seed}</button>`;
+    }
+    tabsHtml += '</div>';
+
+    // Build MEAN table
+    let meanHtml = '<div class="drilldown-tab-panel" data-panel="mean">';
+    meanHtml += '<table><thead><tr><th>Metric</th><th>Mean</th><th>Std</th><th>CI 95%</th><th>Min</th><th>Max</th></tr></thead><tbody>';
     for (const m of EXPERIMENT_METRICS) {
         const stat = getStat(s, m.key);
-        const cls = metricZoneClass(m.key, stat.mean);
-        html += `<tr>`;
-        html += `<td>${m.label}</td>`;
-        html += `<td class="${cls}">${stat.mean.toFixed(m.decimals)}</td>`;
-        html += `<td>${stat.std.toFixed(m.decimals)}</td>`;
-        html += `<td>[${stat.ci95_lo.toFixed(m.decimals)}, ${stat.ci95_hi.toFixed(m.decimals)}]</td>`;
-        html += `<td>${stat.min.toFixed(m.decimals)}</td>`;
-        html += `<td>${stat.max.toFixed(m.decimals)}</td>`;
-        html += '</tr>';
+        if (m.key === 'nrr' && stat.n === 0) {
+            meanHtml += `<tr>`;
+            meanHtml += `<td>${m.label}</td>`;
+            meanHtml += `<td colspan="5" style="color:var(--text-muted);font-style:italic;">N/A — requires ≥2 fault events</td>`;
+            meanHtml += '</tr>';
+        } else {
+            const cls = metricZoneClass(m.key, stat.mean);
+            meanHtml += `<tr>`;
+            meanHtml += `<td>${m.label}</td>`;
+            meanHtml += `<td class="${cls}">${stat.mean.toFixed(m.decimals)}</td>`;
+            meanHtml += `<td>${stat.std.toFixed(m.decimals)}</td>`;
+            meanHtml += `<td>[${stat.ci95_lo.toFixed(m.decimals)}, ${stat.ci95_hi.toFixed(m.decimals)}]</td>`;
+            meanHtml += `<td>${stat.min.toFixed(m.decimals)}</td>`;
+            meanHtml += `<td>${stat.max.toFixed(m.decimals)}</td>`;
+            meanHtml += '</tr>';
+        }
     }
-    html += '</tbody></table>';
+    meanHtml += '</tbody></table>';
+    meanHtml += '</div>';
 
-    // Per-seed data if available in runs
-    if (experimentData.runs) {
-        const runs = experimentData.runs.filter(r =>
-            r.solver === s.solver && r.topology === s.topology &&
-            r.scenario === s.scenario && r.scheduler === s.scheduler &&
-            r.num_agents === s.num_agents
-        );
-        if (runs.length > 0) {
-            html += '<div style="margin-top:12px;"><strong>Per-seed runs:</strong></div>';
-            html += '<table><thead><tr><th>Seed</th>';
-            const displayMetrics = EXPERIMENT_METRICS.slice(0, 6);
-            for (const m of displayMetrics) html += `<th>${m.label}</th>`;
-            html += '</tr></thead><tbody>';
-            for (const r of runs) {
-                html += `<tr><td>${r.seed}</td>`;
-                for (const m of displayMetrics) {
-                    const val = r[m.key] != null ? r[m.key] : 0;
-                    const cls = metricZoneClass(m.key, val);
-                    html += `<td class="${cls}">${typeof val === 'number' ? val.toFixed(m.decimals) : val}</td>`;
-                }
-                html += '</tr>';
+    // Build per-seed panels
+    let seedPanelsHtml = '';
+    for (const r of seedRuns) {
+        seedPanelsHtml += `<div class="drilldown-tab-panel" data-panel="seed-${r.config.seed}" style="display:none">`;
+        seedPanelsHtml += '<table><thead><tr><th>Metric</th><th>Value</th></tr></thead><tbody>';
+        for (const m of EXPERIMENT_METRICS) {
+            const runKey = runKeyForMetric(m.key);
+            // runKey is null when no METRIC_MAP entry exists — treat as N/A
+            const rawVal = runKey != null ? r.faulted[runKey] : null;
+            let display;
+            if (rawVal == null) {
+                display = '<span style="color:var(--text-muted);font-style:italic;">N/A</span>';
+            } else {
+                const cls = metricZoneClass(m.key, rawVal);
+                display = `<span class="${cls}">${typeof rawVal === 'number' ? rawVal.toFixed(m.decimals) : rawVal}</span>`;
             }
-            html += '</tbody></table>';
+            seedPanelsHtml += `<tr><td>${m.label}</td><td>${display}</td></tr>`;
+        }
+        seedPanelsHtml += '</tbody></table>';
+        seedPanelsHtml += '</div>';
+    }
+
+    bodyEl.innerHTML = tabsHtml + meanHtml + seedPanelsHtml;
+
+    // Wire tab clicks
+    bodyEl.querySelectorAll('.drilldown-tab').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const tab = btn.dataset.tab;
+            bodyEl.querySelectorAll('.drilldown-tab').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            bodyEl.querySelectorAll('.drilldown-tab-panel').forEach(p => {
+                p.style.display = p.dataset.panel === tab ? '' : 'none';
+            });
+        });
+    });
+
+    // Populate seed dropdown (reuse seedRuns computed above)
+    const seedSelect = document.getElementById('exp-drilldown-seed-select');
+    const seedLabel = document.getElementById('exp-drilldown-seed-label');
+    if (seedSelect && seedLabel) {
+        if (seedRuns.length <= 1) {
+            seedSelect.style.display = 'none';
+            seedLabel.textContent = seedRuns.length === 1
+                ? `seed: ${seedRuns[0].config.seed}`
+                : '';
+        } else {
+            seedLabel.textContent = '';
+            seedSelect.style.display = '';
+            seedSelect.innerHTML = seedRuns
+                .map(r => `<option value="${r.config.seed}">seed ${r.config.seed}</option>`)
+                .join('');
         }
     }
 
-    bodyEl.innerHTML = html;
     card.style.display = '';
 }
 
