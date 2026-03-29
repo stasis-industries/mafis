@@ -4726,6 +4726,7 @@ const METRIC_MAP = [
     ['survival_rate', 'survival_rate'],
     ['impacted_area', 'impacted_area'],
     ['deficit_integral', 'deficit_integral'],
+    ['fault_mttr', 'mttr'],
     ['solver_step_avg_us', 'solver_step_us'],
     ['wall_time_ms', 'wall_time_ms'],
 ];
@@ -5691,12 +5692,16 @@ function renderExpTable() {
 
         for (const m of EXPERIMENT_METRICS) {
             const stat = getStat(s, m.key);
-            const cls = metricZoneClass(m.key, stat.mean);
-            const val = stat.mean.toFixed(m.decimals);
-            const tip = `${m.label}: ${stat.mean.toFixed(m.decimals)} \u00b1 ${stat.std.toFixed(m.decimals)}\n` +
-                `95% CI: [${stat.ci95_lo.toFixed(m.decimals)}, ${stat.ci95_hi.toFixed(m.decimals)}]\n` +
-                `Range: [${stat.min.toFixed(m.decimals)}, ${stat.max.toFixed(m.decimals)}]\nn = ${stat.n}`;
-            bodyHtml += `<td class="${cls}" title="${tip}">${val}</td>`;
+            if (m.key === 'nrr' && stat.n === 0) {
+                bodyHtml += `<td class="zone-neutral" title="NRR: N/A — requires ≥2 fault events per seed">—</td>`;
+            } else {
+                const cls = metricZoneClass(m.key, stat.mean);
+                const val = stat.mean.toFixed(m.decimals);
+                const tip = `${m.label}: ${stat.mean.toFixed(m.decimals)} \u00b1 ${stat.std.toFixed(m.decimals)}\n` +
+                    `95% CI: [${stat.ci95_lo.toFixed(m.decimals)}, ${stat.ci95_hi.toFixed(m.decimals)}]\n` +
+                    `Range: [${stat.min.toFixed(m.decimals)}, ${stat.max.toFixed(m.decimals)}]\nn = ${stat.n}`;
+                bodyHtml += `<td class="${cls}" title="${tip}">${val}</td>`;
+            }
         }
         bodyHtml += '</tr>';
     }
@@ -5736,6 +5741,9 @@ function renderExpChart() {
     }
     if (maxVal < 1e-9) maxVal = 1;
 
+    // NRR N/A note: if metric is NRR and all summaries have n===0, show explanation text
+    const allNrrNA = metricKey === 'nrr' && summaries.every(s => getStat(s, 'nrr').n === 0);
+
     let svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${totalW} ${totalH}" ` +
         `font-family="'DM Mono', monospace" font-size="8">`;
 
@@ -5770,7 +5778,14 @@ function renderExpChart() {
     }
 
     svg += '</svg>';
-    container.innerHTML = svg;
+    if (allNrrNA) {
+        // Note: using a <p> below the SVG (not SVG <text>) for easier CSS styling.
+        // This is a deliberate deviation from the spec which said "SVG text note."
+        container.innerHTML = svg +
+            '<p class="exp-chart-na-note">NRR not applicable — requires ≥2 fault events per run.</p>';
+    } else {
+        container.innerHTML = svg;
+    }
 }
 
 /** Map a summary metric key back to its run-level faulted key via METRIC_MAP.

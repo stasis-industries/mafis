@@ -5353,6 +5353,15 @@ body[data-phase="experiment"] #toolbar {
     display: block;
 }
 
+.exp-chart-na-note {
+    font-family: 'DM Mono', monospace;
+    font-size: 10px;
+    color: var(--text-muted);
+    font-style: italic;
+    margin: 8px 0 0;
+    padding: 0;
+}
+
 .exp-chart-bar {
     transition: opacity 120ms ease;
 }
