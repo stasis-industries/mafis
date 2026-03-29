@@ -6303,48 +6303,6 @@ function initShareButton() {
     });
 }
 
-// Generate share URL from an experiment summary row
-async function generateShareUrlFromSummary(summary) {
-    if (!summary) return null;
-    const shared = { v: 1 };
-    if (summary.topology) shared.t = summary.topology;
-    if (summary.solver) shared.s = summary.solver;
-    if (summary.scheduler) shared.sc = summary.scheduler;
-    if (summary.num_agents) shared.n = summary.num_agents;
-
-    // Get seed from first matching run
-    const run = experimentData?.runs?.find(r =>
-        r.config?.solver === summary.solver &&
-        r.config?.topology === summary.topology &&
-        r.config?.scenario === summary.scenario &&
-        r.config?.scheduler === summary.scheduler &&
-        r.config?.num_agents === summary.num_agents
-    );
-    if (run?.config?.seed != null) shared.sd = run.config.seed;
-    if (run?.config?.tick_count) shared.d = run.config.tick_count;
-
-    // Map experiment scenario label to fault config
-    if (summary.scenario && summary.scenario !== 'none') {
-        if (summary.scenario.startsWith('burst_')) {
-            const m = summary.scenario.match(/^burst_(\d+)pct$/);
-            shared.f = { type: 'burst_failure', kill: m ? parseInt(m[1]) : 20, at: 100 };
-        } else if (summary.scenario.startsWith('wear_')) {
-            const rate = summary.scenario.replace('wear_', '');
-            shared.f = { type: 'wear_based', rate, thresh: rate === 'high' ? 60 : rate === 'low' ? 100 : 80 };
-        } else if (summary.scenario.startsWith('zone_')) {
-            const m = summary.scenario.match(/^zone_(\d+)t$/);
-            shared.f = { type: 'zone_outage', at: 100, dur: m ? parseInt(m[1]) : 50 };
-        }
-    }
-
-    const json = JSON.stringify(shared);
-    const encoded = await compressToBase64Url(json);
-    const url = new URL(window.location.href);
-    url.hash = '';
-    url.search = '';
-    return url.origin + url.pathname + '#s=' + encoded;
-}
-
 // Check for shared state on load (called from initApp after topologies are loaded)
 async function checkSharedUrl() {
     if (!window.location.hash || !window.location.hash.startsWith('#s=')) return;
