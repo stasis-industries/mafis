@@ -5649,7 +5649,7 @@ function renderExpTable() {
         { key: 'num_agents', label: 'N' },
     ];
 
-    let headerHtml = '<tr><th></th>';
+    let headerHtml = '<tr>';
     for (const c of configCols) {
         const arrow = experimentSortCol === c.key
             ? (experimentSortAsc ? ' \u25B2' : ' \u25BC') : '';
@@ -5683,7 +5683,6 @@ function renderExpTable() {
     for (const idx of sortedIndices) {
         const s = summaries[idx];
         bodyHtml += `<tr data-exp-idx="${idx}">`;
-        bodyHtml += `<td><button class="btn-sim3d" data-sim-idx="${idx}" title="Simulate in observatory">OBS</button><button class="btn-exp-share" data-share-idx="${idx}" title="Copy shareable URL">SHARE</button></td>`;
         bodyHtml += `<td>${s.solver || ''}</td>`;
         bodyHtml += `<td>${s.topology || ''}</td>`;
         bodyHtml += `<td>${s.scenario || ''}</td>`;
@@ -5706,39 +5705,8 @@ function renderExpTable() {
     // Bind row click → drill-down
     tbody.querySelectorAll('tr').forEach(tr => {
         tr.addEventListener('click', (e) => {
-            // Don't trigger drill-down if clicking action buttons
-            if (e.target.closest('.btn-sim3d') || e.target.closest('.btn-exp-share')) return;
             const idx = parseInt(tr.dataset.expIdx, 10);
             if (!isNaN(idx)) showExpDrilldown(idx);
-        });
-    });
-
-    // Bind 3D buttons
-    tbody.querySelectorAll('.btn-sim3d').forEach(btn => {
-        btn.addEventListener('click', () => {
-            const idx = parseInt(btn.dataset.simIdx, 10);
-            if (!isNaN(idx)) simulateIn3D(idx);
-        });
-    });
-
-    // Bind share buttons
-    tbody.querySelectorAll('.btn-exp-share').forEach(btn => {
-        btn.addEventListener('click', async (e) => {
-            e.stopPropagation();
-            const idx = parseInt(btn.dataset.shareIdx, 10);
-            if (isNaN(idx) || !experimentData?.summaries?.[idx]) return;
-            const url = await generateShareUrlFromSummary(experimentData.summaries[idx]);
-            if (!url) return;
-            try { await navigator.clipboard.writeText(url); } catch {
-                const ta = document.createElement('textarea');
-                ta.value = url; ta.style.position = 'fixed'; ta.style.opacity = '0';
-                document.body.appendChild(ta); ta.select(); document.execCommand('copy');
-                document.body.removeChild(ta);
-            }
-            const prev = btn.textContent;
-            btn.textContent = 'OK';
-            btn.classList.add('copied');
-            setTimeout(() => { btn.textContent = prev; btn.classList.remove('copied'); }, 1200);
         });
     });
 }

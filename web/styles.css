@@ -5326,46 +5326,6 @@ body[data-phase="experiment"] #toolbar {
     background: rgba(255, 255, 255, 0.06);
 }
 
-.exp-table .btn-sim3d {
-    font-family: 'DM Mono', monospace;
-    font-size: 9px;
-    padding: 1px 5px;
-    background: transparent;
-    color: var(--text-muted);
-    border: 1px solid var(--border);
-    cursor: pointer;
-    letter-spacing: 0.3px;
-    transition: all 100ms ease;
-}
-
-.exp-table .btn-sim3d:hover {
-    background: var(--text-primary);
-    color: var(--bg-panel);
-    border-color: var(--text-primary);
-}
-
-.exp-table .btn-exp-share {
-    font-family: 'DM Mono', monospace;
-    font-size: 9px;
-    padding: 1px 5px;
-    background: transparent;
-    color: var(--text-muted);
-    border: 1px solid var(--border);
-    cursor: pointer;
-    letter-spacing: 0.3px;
-    transition: all 100ms ease;
-    margin-left: 3px;
-}
-.exp-table .btn-exp-share:hover {
-    background: var(--text-primary);
-    color: var(--bg-panel);
-    border-color: var(--text-primary);
-}
-.exp-table .btn-exp-share.copied {
-    color: var(--green, #047857);
-    border-color: var(--green, #047857);
-}
-
 /* Zone coloring */
 .zone-good { color: rgb(60, 130, 60); }
 .zone-fair { color: rgb(170, 130, 40); }
