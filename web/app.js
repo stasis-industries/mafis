@@ -5840,6 +5840,8 @@ function showExpDrilldown(idx) {
     for (const m of EXPERIMENT_METRICS) {
         const stat = getStat(s, m.key);
         if (m.key === 'nrr' && stat.n === 0) {
+            // Intentional: spec allows "a small inline note" — colspan merges data columns
+            // with the N/A explanation, avoiding separate sub-row visual noise.
             meanHtml += `<tr>`;
             meanHtml += `<td>${m.label}</td>`;
             meanHtml += `<td colspan="5" style="color:var(--text-muted);font-style:italic;">N/A — requires ≥2 fault events</td>`;
