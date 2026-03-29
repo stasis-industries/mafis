@@ -5889,10 +5889,13 @@ function simulateIn3D(idx) {
     configureFaultFromScenarioLabel(s.scenario);
 
     // Get seed from dropdown (if present) or fall back to first matching run
+    // Note: visibility is toggled via inline style.display by showExpDrilldown (Task 3)
     const seedSelectEl = document.getElementById('exp-drilldown-seed-select');
-    const selectedSeed = seedSelectEl && seedSelectEl.style.display !== 'none'
-        ? parseInt(seedSelectEl.value, 10)
-        : null;
+    let selectedSeed = null;
+    if (seedSelectEl && seedSelectEl.style.display !== 'none') {
+        const v = parseInt(seedSelectEl.value, 10);
+        if (!isNaN(v)) selectedSeed = v;
+    }
 
     const matchingRun = experimentData.runs?.find(r =>
         r.config?.solver === s.solver &&
