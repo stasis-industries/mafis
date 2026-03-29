@@ -1,6 +1,9 @@
 /target
 **/.DS_Store
 *.wasm
+web/mafis.js
+web/mafis.d.ts
+web/mafis_bg.wasm.d.ts
 web/topologies/
 results/
 settings.local.json
