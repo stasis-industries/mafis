@@ -4726,7 +4726,9 @@ const METRIC_MAP = [
     ['survival_rate', 'survival_rate'],
     ['impacted_area', 'impacted_area'],
     ['deficit_integral', 'deficit_integral'],
-    ['fault_mttr', 'mttr'],
+    // Note: 'mttr' (EXPERIMENT_METRICS key) has no run-level JSON field —
+    // the experiment export schema (write_metrics_json) does not include MTTR.
+    // Per-seed tab correctly shows N/A for MTTR (null from runKeyForMetric).
     ['solver_step_avg_us', 'solver_step_us'],
     ['wall_time_ms', 'wall_time_ms'],
 ];
@@ -5742,7 +5744,7 @@ function renderExpChart() {
     if (maxVal < 1e-9) maxVal = 1;
 
     // NRR N/A note: if metric is NRR and all summaries have n===0, show explanation text
-    const allNrrNA = metricKey === 'nrr' && summaries.every(s => getStat(s, 'nrr').n === 0);
+    const allNrrNA = metricKey === 'nrr' && sortedIndices.every(idx => getStat(summaries[idx], 'nrr').n === 0);
 
     let svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${totalW} ${totalH}" ` +
         `font-family="'DM Mono', monospace" font-size="8">`;
