@@ -126,7 +126,6 @@ export function initApp() {
     initResultsPhase();
     initExperimentMode();
     initShareButton();
-    initKivaDemoButton();
 
     // Auto-play demo: show on first visit (persisted in localStorage)
     if (!localStorage.getItem('mafis-demo-seen')) {
@@ -6411,76 +6410,6 @@ function initShareButton() {
             btn.classList.remove('copied');
         }, 1500);
     });
-}
-
-// ---------------------------------------------------------------------------
-// Kiva Demo Preset — curated fault cascade on kiva-warehouse
-// ---------------------------------------------------------------------------
-
-function initKivaDemoButton() {
-    const btn = document.getElementById('btn-kiva-demo');
-    if (!btn) return;
-
-    btn.addEventListener('click', () => {
-        // Only works in idle state
-        const status = document.getElementById('header-status');
-        if (status && status.textContent !== 'IDLE') {
-            // If running, stop first
-            sendCommand({ type: 'set_state', value: 'stop' });
-        }
-
-        // Configure topology
-        sendCommand({ type: 'set_topology', value: 'kiva_warehouse' });
-
-        // Configure solver + scheduler
-        sendCommand({ type: 'set_solver', value: 'pibt' });
-        sendCommand({ type: 'set_scheduler', value: 'closest' });
-
-        // Configure agents + duration + seed
-        sendCommand({ type: 'set_num_agents', value: 40 });
-        sendCommand({ type: 'set_duration', value: 500 });
-        sendCommand({ type: 'set_seed', value: 42 });
-        sendCommand({ type: 'set_tick_hz', value: 12 });
-
-        // Configure fault scenario: burst 20% at tick 80 + wear-based from start
-        sendCommand({ type: 'set_fault_list', value: 'burst,wear_based' });
-        sendCommand({ type: 'set_fault_param', key: 'burst_kill_percent', value: 20 });
-        sendCommand({ type: 'set_fault_param', key: 'burst_at_tick', value: 80 });
-        sendCommand({ type: 'set_fault_param', key: 'weibull_beta', value: 2.5 });
-        sendCommand({ type: 'set_fault_param', key: 'weibull_eta', value: 500 });
-
-        // Sync UI inputs to reflect the demo config
-        setInputValue('input-agents', 40);
-        setInputValue('input-seed', 42);
-        setInputValue('input-tick-hz', 12);
-
-        // Update topology preset buttons
-        const presetBtns = document.querySelectorAll('#topology-presets .topo-preset-btn');
-        presetBtns.forEach(b => {
-            b.classList.toggle('active', b.dataset.id === 'kiva_warehouse');
-        });
-
-        // Update solver dropdown
-        const solverSel = document.getElementById('input-solver');
-        if (solverSel) solverSel.value = 'pibt';
-        const schedSel = document.getElementById('input-scheduler');
-        if (schedSel) schedSel.value = 'closest';
-
-        // Visual feedback
-        const prev = btn.textContent;
-        btn.textContent = 'LOADED';
-        setTimeout(() => { btn.textContent = prev; }, 1200);
-    });
-}
-
-function setInputValue(id, value) {
-    const el = document.getElementById(id);
-    if (el) {
-        el.value = value;
-        // Trigger display update for sliders
-        const valEl = document.getElementById(id.replace('input-', 'val-'));
-        if (valEl) valEl.textContent = value;
-    }
 }
 
 // Check for shared state on load (called from initApp after topologies are loaded)
