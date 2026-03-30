@@ -159,10 +159,11 @@
         <span class="header-status" id="header-status" style="display:none">IDLE</span>
         <button class="btn-header btn-exp-mode" id="btn-exp-mode" title="Toggle between Observatory and Experiments">EXPERIMENTS</button>
         <button class="btn-header btn-share" id="btn-share" title="Copy shareable URL to clipboard">SHARE</button>
+        <button class="btn-header" id="btn-kiva-demo" title="Load a curated Kiva warehouse demo with fault cascade (40 agents, PIBT, burst + wear faults)">DEMO</button>
         <div class="header-spacer"></div>
         <span class="header-fps" id="header-fps">60</span>
-        <button class="btn-header" id="btn-settings" title="Graphics settings">&#9881;</button>
-        <button class="btn-theme" id="btn-theme" title="Toggle dark mode">&#9789;</button>
+        <button class="btn-header" id="btn-settings" title="Graphics settings" aria-label="Graphics settings">&#9881;</button>
+        <button class="btn-theme" id="btn-theme" title="Toggle dark mode" aria-label="Toggle dark mode">&#9789;</button>
     </header>
 
     <!-- Main grid -->
@@ -171,7 +172,7 @@
         <aside id="panel-left" class="panel">
             <!-- Simulation -->
             <section>
-                <h3 class="panel-section-title section-toggle" data-target="sim-content">&#x25B8; Simulation</h3>
+                <h3 class="panel-section-title section-toggle" role="button" tabindex="0" aria-expanded="false" data-target="sim-content">&#x25B8; Simulation</h3>
                 <div class="section-content" id="sim-content">
                     <div class="panel-divider"></div>
 
@@ -189,7 +190,7 @@
                         <div class="input-group" title="Number of agents in the simulation (1-1000)">
                             <label class="input-label" for="input-agents">Agents <span class="capacity-hint" id="map-capacity"></span></label>
                             <div class="slider-row">
-                                <input type="range" id="input-agents" min="1" max="1000" value="15" step="1">
+                                <input type="range" id="input-agents" min="1" max="1000" value="15" step="1" aria-label="Number of agents">
                                 <span class="slider-value" id="val-agents">15</span>
                             </div>
                         </div>
@@ -197,7 +198,7 @@
                         <div class="input-group" title="Grid width in cells (8-512).">
                             <label class="input-label" for="input-grid-width">Grid width</label>
                             <div class="slider-row">
-                                <input type="range" id="input-grid-width" min="8" max="512" value="25" step="1">
+                                <input type="range" id="input-grid-width" min="8" max="512" value="25" step="1" aria-label="Grid width">
                                 <span class="slider-value" id="val-grid-width">25</span>
                             </div>
                         </div>
@@ -205,7 +206,7 @@
                         <div class="input-group" title="Grid height in cells (8-512).">
                             <label class="input-label" for="input-grid-height">Grid height</label>
                             <div class="slider-row">
-                                <input type="range" id="input-grid-height" min="8" max="512" value="15" step="1">
+                                <input type="range" id="input-grid-height" min="8" max="512" value="15" step="1" aria-label="Grid height">
                                 <span class="slider-value" id="val-grid-height">15</span>
                             </div>
                             <span class="slider-detail" id="val-storage-rows" style="display:none"></span>
@@ -214,7 +215,7 @@
                         <div class="input-group" id="density-group" title="Percentage of grid cells blocked by obstacles (0%-30%)">
                             <label class="input-label" for="input-density">Obstacle density</label>
                             <div class="slider-row">
-                                <input type="range" id="input-density" min="0" max="0.3" value="0.15" step="0.01">
+                                <input type="range" id="input-density" min="0" max="0.3" value="0.15" step="0.01" aria-label="Obstacle density">
                                 <span class="slider-value" id="val-density">0.15</span>
                             </div>
                         </div>
@@ -223,7 +224,7 @@
                     <!-- Seed — always visible -->
                     <div class="input-group" id="seed-group" style="margin-top: 12px;" title="Random seed for reproducible results (0-9999)">
                         <label class="input-label" for="input-seed">Seed</label>
-                        <input type="number" class="input-field" id="input-seed" min="0" max="9999" value="42">
+                        <input type="number" class="input-field" id="input-seed" min="0" max="9999" value="42" aria-label="Random seed">
                     </div>
 
                     <!-- Scenario info (shown when scenario imported) -->
@@ -255,14 +256,14 @@
 
             <!-- Solver & Scheduling -->
             <section>
-                <h3 class="panel-section-title section-toggle" data-target="solver-sched-content">&#x25B8; Solver &amp; Scheduling</h3>
+                <h3 class="panel-section-title section-toggle" role="button" tabindex="0" aria-expanded="false" data-target="solver-sched-content">&#x25B8; Solver &amp; Scheduling</h3>
                 <div class="section-content" id="solver-sched-content">
                     <div class="panel-divider"></div>
 
                     <div class="input-group"
                         title="MAPF algorithm used for path planning.">
                         <label class="input-label" for="input-solver">Algorithm</label>
-                        <select class="input-select" id="input-solver">
+                        <select class="input-select" id="input-solver" aria-label="Solver algorithm">
                             <optgroup label="Reactive (suboptimal, fast)">
                                 <option value="pibt">PIBT — Priority Inheritance</option>
                                 <option value="pibt+apf">PIBT+APF — Potential Fields</option>
@@ -319,7 +320,7 @@
                     <div class="input-group" style="margin-top: 12px;"
                         title="Task scheduler algorithm. Determines how new goals are assigned when agents complete tasks.">
                         <label class="input-label" for="input-scheduler">Scheduler</label>
-                        <select class="input-select" id="input-scheduler">
+                        <select class="input-select" id="input-scheduler" aria-label="Task scheduler">
                             <option value="random">Random</option>
                             <option value="closest">Closest First</option>
                         </select>
@@ -342,7 +343,7 @@
 
             <!-- Fault Injection -->
             <section>
-                <h3 class="panel-section-title section-toggle" data-target="fault-content">&#x25B8; Fault Injection</h3>
+                <h3 class="panel-section-title section-toggle" role="button" tabindex="0" aria-expanded="false" data-target="fault-content">&#x25B8; Fault Injection</h3>
                 <div class="section-content" id="fault-content">
                     <div class="panel-divider"></div>
 
@@ -350,7 +351,7 @@
                         <!-- Add fault form (header) -->
                         <div class="fault-add-form">
                             <div class="input-group">
-                                <select class="input-select" id="input-fault-type" title="Choose fault type">
+                                <select class="input-select" id="input-fault-type" title="Choose fault type" aria-label="Fault type">
                                     <option value="burst_failure" selected>Burst Failure</option>
                                     <option value="wear_based">Wear-Based</option>
                                     <option value="zone_outage">Zone Outage</option>
@@ -470,7 +471,7 @@
 
             <!-- Visualization -->
             <section>
-                <h3 class="panel-section-title section-toggle" data-target="vis-content">&#x25B8; Visualization</h3>
+                <h3 class="panel-section-title section-toggle" role="button" tabindex="0" aria-expanded="false" data-target="vis-content">&#x25B8; Visualization</h3>
                 <div class="section-content" id="vis-content">
                     <div class="panel-divider"></div>
 
@@ -511,7 +512,7 @@
 
             <!-- Data Export -->
             <section>
-                <h3 class="panel-section-title section-toggle" data-target="export-content">&#x25B8; Data Export</h3>
+                <h3 class="panel-section-title section-toggle" role="button" tabindex="0" aria-expanded="false" data-target="export-content">&#x25B8; Data Export</h3>
                 <div class="section-content" id="export-content">
                     <div class="panel-divider"></div>
 
@@ -675,7 +676,7 @@
         <aside id="panel-right" class="panel">
             <!-- Status -->
             <section>
-                <h3 class="panel-section-title section-toggle" data-target="status-content">&#x25B8; Status</h3>
+                <h3 class="panel-section-title section-toggle" role="button" tabindex="0" aria-expanded="false" data-target="status-content">&#x25B8; Status</h3>
                 <div class="section-content" id="status-content">
                     <div class="panel-divider"></div>
 
@@ -716,7 +717,7 @@
 
             <!-- Agents -->
             <section>
-                <h3 class="panel-section-title section-toggle" data-target="agents-content">&#x25B8; Agents</h3>
+                <h3 class="panel-section-title section-toggle" role="button" tabindex="0" aria-expanded="false" data-target="agents-content">&#x25B8; Agents</h3>
                 <div class="section-content" id="agents-content">
                     <div class="panel-divider"></div>
                     <div id="agent-list"></div>
@@ -765,7 +766,7 @@
 
             <!-- Resilience Scorecard (with color zones) -->
             <section id="scorecard-section" style="display:none;">
-                <h3 class="panel-section-title section-toggle" data-target="scorecard-content">&#x25B8; Resilience Scorecard</h3>
+                <h3 class="panel-section-title section-toggle" role="button" tabindex="0" aria-expanded="false" data-target="scorecard-content">&#x25B8; Resilience Scorecard</h3>
                 <div class="section-content" id="scorecard-content">
                     <div class="panel-divider"></div>
                     <div class="sc-card" title="FT = P_fault / P_nominal — fraction of baseline throughput retained (Milner 2023). Higher = more resilient.">
@@ -793,7 +794,7 @@
 
             <!-- ═══ System Performance (always visible) ═══ -->
             <section id="system-perf-section">
-                <h3 class="panel-section-title section-toggle" data-target="system-perf-content">&#x25B8; System Performance</h3>
+                <h3 class="panel-section-title section-toggle" role="button" tabindex="0" aria-expanded="false" data-target="system-perf-content">&#x25B8; System Performance</h3>
                 <div class="section-content" id="system-perf-content">
                     <div class="panel-divider"></div>
 
@@ -807,7 +808,7 @@
                     <!-- Idle ratio chart removed from live view (kept in Results) -->
 
                     <!-- Metric cards -->
-                    <div class="ctx-metric" data-metric="throughput" title="Instantaneous goal completions at this tick vs baseline">
+                    <div class="ctx-metric" data-metric="throughput" title="Goals completed per tick (moving average). Compares live run against the fault-free baseline. Drop = fault impact, recovery = system resilience.">
                         <div class="ctx-metric-header">
                             <span class="ctx-metric-label">Throughput (Moving Avg)</span>
                             <span class="ctx-metric-delta" id="delta-throughput"></span>
@@ -817,7 +818,7 @@
                         <div class="ctx-metric-baseline" id="baseline-throughput"></div>
                     </div>
 
-                    <div class="ctx-metric" data-metric="tasks_completed" title="Cumulative tasks completed — live vs baseline">
+                    <div class="ctx-metric" data-metric="tasks_completed" title="Total pickup-to-delivery tasks completed. Gap between live and baseline = cumulative impact of faults on productivity.">
                         <div class="ctx-metric-header">
                             <span class="ctx-metric-label">Tasks Completed</span>
                             <span class="ctx-metric-delta" id="delta-tasks_completed"></span>
@@ -827,7 +828,7 @@
                         <div class="ctx-metric-baseline" id="baseline-tasks_completed"></div>
                     </div>
 
-                    <div class="ctx-metric" data-metric="idle_ratio" title="Cumulative wait-action ratio — fraction of time agents spend waiting">
+                    <div class="ctx-metric" data-metric="idle_ratio" title="Fraction of time agents spend waiting instead of moving. High = congestion or insufficient tasks. Spikes after faults indicate cascading delays.">
                         <div class="ctx-metric-header">
                             <span class="ctx-metric-label">Idle Ratio</span>
                             <span class="ctx-metric-delta" id="delta-idle_ratio"></span>
@@ -842,7 +843,7 @@
 
             <!-- ═══ Fault Response (hidden until faults active) ═══ -->
             <section id="fault-response-section" class="hidden">
-                <h3 class="panel-section-title section-toggle" data-target="fault-response-content">&#x25B8; Fault Response</h3>
+                <h3 class="panel-section-title section-toggle" role="button" tabindex="0" aria-expanded="false" data-target="fault-response-content">&#x25B8; Fault Response</h3>
                 <div class="section-content" id="fault-response-content">
                     <!-- Live verdict + scorecard (compact) -->
                     <div class="live-verdict-row">
@@ -867,14 +868,14 @@
                         <div class="ctx-metric-value" id="metric-faults">0</div>
                     </div>
 
-                    <div class="ctx-metric" data-metric="mttr_mtbf" title="Mean Time To Recovery / Mean Time Between Faults">
+                    <div class="ctx-metric" data-metric="mttr_mtbf" title="MTTR: average ticks to recover throughput after a fault. MTBF: average ticks between fault events. Low MTTR/MTBF ratio = system recovers faster than faults arrive.">
                         <div class="ctx-metric-header">
                             <span class="ctx-metric-label">MTTR / MTBF</span>
                         </div>
                         <div class="ctx-metric-value"><span id="metric-mttr">0.0</span> / <span id="metric-mtbf">&mdash;</span></div>
                     </div>
 
-                    <div class="ctx-metric" data-metric="survival_rate" title="Percentage of agents still alive">
+                    <div class="ctx-metric" data-metric="survival_rate" title="Percentage of agents still operational. Drops during burst kills or wear-based breakdowns. Dead agents become permanent obstacles.">
                         <div class="ctx-metric-header">
                             <span class="ctx-metric-label">Survival Rate</span>
                         </div>
@@ -888,7 +889,7 @@
 
             <!-- Fault Timeline -->
             <section id="fault-events-section" style="display:none;">
-                <h3 class="panel-section-title section-toggle" data-target="fault-events-content">&#x25B8; Fault Timeline</h3>
+                <h3 class="panel-section-title section-toggle" role="button" tabindex="0" aria-expanded="false" data-target="fault-events-content">&#x25B8; Fault Timeline</h3>
                 <div class="section-content" id="fault-events-content">
                     <div class="panel-divider"></div>
                     <div class="ft-summary" id="ft-summary"></div>
@@ -908,7 +909,7 @@
                 <div class="results-header">
                     <span class="results-title">Simulation Report</span>
                     <div class="results-export-btns">
-                        <button id="btn-export-pdf">PDF</button>
+                        <button id="btn-export-pdf">PNG</button>
                         <button id="btn-export-json-results">JSON</button>
                         <button id="btn-export-csv-results">CSV</button>
                     </div>

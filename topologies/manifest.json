@@ -1,6 +1,9 @@
 [
   "compact-grid.json",
+  "fulfillment-center.json",
   "kiva-large.json",
+  "kiva-warehouse.json",
+  "rack-warehouse.json",
   "sorting-center.json",
   "warehouse-medium.json"
 ]

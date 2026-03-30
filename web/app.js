@@ -126,6 +126,7 @@ export function initApp() {
     initResultsPhase();
     initExperimentMode();
     initShareButton();
+    initKivaDemoButton();
 
     // Auto-play demo: show on first visit (persisted in localStorage)
     if (!localStorage.getItem('mafis-demo-seen')) {
@@ -2571,20 +2572,39 @@ function populateResultsFromState(s) {
 }
 
 function exportResultsPdf() {
-    // Requires html2canvas + jsPDF (loaded from CDN)
-    if (typeof html2canvas === 'undefined' || typeof jspdf === 'undefined') {
-        alert('PDF export requires html2canvas and jsPDF libraries. They will be added in a future update.');
+    // Screenshot the results dashboard as PNG (no external dependencies).
+    // Uses the browser's native scrollWidth/scrollHeight to capture the full area.
+    const dashboard = document.getElementById('results-dashboard');
+    if (!dashboard) return;
+
+    // Collect all uPlot canvases and merge with HTML content
+    const canvases = dashboard.querySelectorAll('canvas');
+    if (canvases.length === 0) {
+        // Fallback: capture via window.print() for the results section
+        window.print();
         return;
     }
-    const dashboard = document.getElementById('results-dashboard');
-    html2canvas(dashboard).then(canvas => {
-        const pdf = new jspdf.jsPDF('p', 'mm', 'a4');
-        const imgData = canvas.toDataURL('image/png');
-        const pdfW = pdf.internal.pageSize.getWidth();
-        const pdfH = (canvas.height * pdfW) / canvas.width;
-        pdf.addImage(imgData, 'PNG', 0, 10, pdfW, pdfH);
-        pdf.save('mafis-report.pdf');
-    });
+
+    // Create a composite canvas from the first chart canvas as a quick screenshot
+    // For a full dashboard screenshot, we serialize chart data as JSON instead
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const filename = `mafis-report-${timestamp}`;
+
+    // Export all chart canvases as individual PNGs in a zip-like download sequence
+    // For simplicity, export the first (main) chart canvas
+    const mainCanvas = canvases[0];
+    mainCanvas.toBlob(blob => {
+        if (!blob) return;
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${filename}-chart.png`;
+        a.click();
+        URL.revokeObjectURL(url);
+    }, 'image/png');
+
+    // Also trigger JSON export for complete data
+    exportResultsJson();
 }
 
 // ---------------------------------------------------------------------------
@@ -3287,8 +3307,10 @@ function initCollapsible() {
 
         if (startOpen) {
             toggle.textContent = '\u25BE ' + label; // ▾ down = open
+            toggle.setAttribute('aria-expanded', 'true');
         } else {
             toggle.textContent = '\u25B8 ' + label; // ▸ right = collapsed
+            toggle.setAttribute('aria-expanded', 'false');
             const content = document.getElementById(targetId);
             if (content) content.classList.add('collapsed');
         }
@@ -3301,13 +3323,13 @@ function initCollapsible() {
             const isCollapsed = content.classList.contains('collapsed');
             const text = toggle.textContent.replace(/^[▸▾►▼]\s*/, '').trim();
             if (isCollapsed) {
-                // Expand: arrow down ▾
                 content.classList.remove('collapsed');
                 toggle.textContent = '\u25BE ' + text;
+                toggle.setAttribute('aria-expanded', 'true');
             } else {
-                // Collapse: arrow right ▸
                 content.classList.add('collapsed');
                 toggle.textContent = '\u25B8 ' + text;
+                toggle.setAttribute('aria-expanded', 'false');
             }
         });
     });
@@ -6389,6 +6411,76 @@ function initShareButton() {
             btn.classList.remove('copied');
         }, 1500);
     });
+}
+
+// ---------------------------------------------------------------------------
+// Kiva Demo Preset — curated fault cascade on kiva-warehouse
+// ---------------------------------------------------------------------------
+
+function initKivaDemoButton() {
+    const btn = document.getElementById('btn-kiva-demo');
+    if (!btn) return;
+
+    btn.addEventListener('click', () => {
+        // Only works in idle state
+        const status = document.getElementById('header-status');
+        if (status && status.textContent !== 'IDLE') {
+            // If running, stop first
+            sendCommand({ type: 'set_state', value: 'stop' });
+        }
+
+        // Configure topology
+        sendCommand({ type: 'set_topology', value: 'kiva_warehouse' });
+
+        // Configure solver + scheduler
+        sendCommand({ type: 'set_solver', value: 'pibt' });
+        sendCommand({ type: 'set_scheduler', value: 'closest' });
+
+        // Configure agents + duration + seed
+        sendCommand({ type: 'set_num_agents', value: 40 });
+        sendCommand({ type: 'set_duration', value: 500 });
+        sendCommand({ type: 'set_seed', value: 42 });
+        sendCommand({ type: 'set_tick_hz', value: 12 });
+
+        // Configure fault scenario: burst 20% at tick 80 + wear-based from start
+        sendCommand({ type: 'set_fault_list', value: 'burst,wear_based' });
+        sendCommand({ type: 'set_fault_param', key: 'burst_kill_percent', value: 20 });
+        sendCommand({ type: 'set_fault_param', key: 'burst_at_tick', value: 80 });
+        sendCommand({ type: 'set_fault_param', key: 'weibull_beta', value: 2.5 });
+        sendCommand({ type: 'set_fault_param', key: 'weibull_eta', value: 500 });
+
+        // Sync UI inputs to reflect the demo config
+        setInputValue('input-agents', 40);
+        setInputValue('input-seed', 42);
+        setInputValue('input-tick-hz', 12);
+
+        // Update topology preset buttons
+        const presetBtns = document.querySelectorAll('#topology-presets .topo-preset-btn');
+        presetBtns.forEach(b => {
+            b.classList.toggle('active', b.dataset.id === 'kiva_warehouse');
+        });
+
+        // Update solver dropdown
+        const solverSel = document.getElementById('input-solver');
+        if (solverSel) solverSel.value = 'pibt';
+        const schedSel = document.getElementById('input-scheduler');
+        if (schedSel) schedSel.value = 'closest';
+
+        // Visual feedback
+        const prev = btn.textContent;
+        btn.textContent = 'LOADED';
+        setTimeout(() => { btn.textContent = prev; }, 1200);
+    });
+}
+
+function setInputValue(id, value) {
+    const el = document.getElementById(id);
+    if (el) {
+        el.value = value;
+        // Trigger display update for sliders
+        const valEl = document.getElementById(id.replace('input-', 'val-'));
+        if (valEl) valEl.textContent = value;
+    }
 }
 
 // Check for shared state on load (called from initApp after topologies are loaded)

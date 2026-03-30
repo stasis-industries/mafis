@@ -29,7 +29,7 @@ basic-http-server web
 | Step | Time | Covers |
 |------|------|--------|
 | `cargo check` | ~5s | Types, borrow checker, imports |
-| `cargo test` | ~10s | Grid, actions, heuristics, PIBT, task scheduling, cascade, ADG, fault metrics, heatmap, Weibull, determinism, collision, CI95, metrics formulas |
+| `cargo test` | ~10s | Grid, actions, heuristics, PIBT, task scheduling, cascade, ADG, fault metrics, heatmap, Weibull, determinism, collision, CI95, metrics formulas, topology connectivity, scale (300 agents), rewind determinism, Cliff's delta, bootstrap CI |
 | WASM build | ~2-3 min | Rendering, Bevy ECS systems, JS bridge, visual correctness |
 
 **When WASM build is NOT needed:** pure logic changes (solver tweaks, analysis math, constants). `cargo test` is sufficient.
@@ -232,11 +232,13 @@ Topologies are defined exclusively as JSON files in `topologies/`. No Rust-gener
 - `TopologyRegistry`: loads JSON files from `topologies/` via `manifest.json`
 - `ActiveTopology::from_name(id)`: looks up topology from registry, falls back to first available
 - `ActiveTopology::from_entry(entry)`: builds topology from a `TopologyEntry`
-- `TopologyRegistry::parse_json_value()`: parses JSON → (GridMap, ZoneMap) including `queue_direction`
+- `TopologyRegistry::parse_json_value()`: parses JSON → (GridMap, ZoneMap) including `queue_direction` + BFS connectivity validation
+- `validate_connectivity(grid, zones)`: BFS reachability check — all pickup/delivery cells must be in the same connected component
 - `Topology` trait: `fn name()` + `fn generate(seed) -> TopologyOutput`
 - `TopologyOutput`: grid + ZoneMap + suggested_agents
 - `ZoneMap` resource: pickup_cells, delivery_cells, corridor_cells, queue_lines, zone_type HashMap
-- Bridge command: `set_topology "warehouse_medium"|"warehouse_medium"` (any id from registry)
+- Bridge command: `set_topology "warehouse_medium"|"kiva_warehouse"` (any id from registry)
+- 7 topologies: warehouse_medium, kiva_large, sorting_center, compact_grid, kiva_warehouse, rack_warehouse, fulfillment_center
 - To add a new topology: create JSON in `topologies/`, run `sh topologies/build-manifest.sh`
 - `parse_movingai_map(text)`: parses MovingAI `.map` files → (GridMap, ZoneMap) for benchmark testing
 - `assign_random_zones(zones, n_pickup, n_delivery)`: designates corridor cells as pickup/delivery zones
