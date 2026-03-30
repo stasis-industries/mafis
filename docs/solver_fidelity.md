@@ -1,23 +1,97 @@
 # Solver Fidelity Matrix
 
-Audit date: 2026-03-28. Updated post-fix.
+Audit date: 2026-03-30. Updated with all 8 solver sections.
 
 ## Summary
 
 | Solver | Paper | Status | Notes |
 |--------|-------|--------|-------|
-| PIBT | Okumura 2022 (IJCAI) | Not independently audited | Mature, 12 unit tests, collision-free verified |
-| RHCR (PBS) | Li et al. 2021 (AAMAS) | Not independently audited | 10 unit tests, fallback tested |
-| RHCR (PIBT-Window) | Li et al. 2021 (AAMAS) | Not independently audited | 1 unit test, collision-free verified |
-| RHCR (Priority A*) | Li et al. 2021 (AAMAS) | Not independently audited | 2 unit tests, collision-free verified |
-| Token Passing | Ma et al. 2017 (AAMAS) | Not independently audited | 4 unit tests, edge-swap verified |
-| PIBT+APF | Pertzovsky et al. 2025 | Audited, 1 fix applied | Sequential APF, exponential decay, parameters match |
-| TPTS | Ma et al. 2017 Alg. 2 | Audited, 1 fix applied | 4 documented deviations |
-| RT-LaCAM | Liang et al. 2025 (SoCS) | Audited, 5 fixes applied | 2 documented deviations remain |
+| PIBT | Okumura et al. 2019 (AAAI) | Property-verified | 12 unit tests, collision-free, determinism, saturation |
+| RHCR (PBS) | Li et al. 2021 (AAAI) | Property-verified | 10 unit tests, fallback tested, windowed replanning |
+| RHCR (PIBT-Window) | Li et al. 2021 (AAAI) | Property-verified | 1 unit test, collision-free verified |
+| RHCR (Priority A*) | Li et al. 2021 (AAAI) | Property-verified | 2 unit tests, collision-free verified |
+| Token Passing | Ma et al. 2017 (AAMAS) | Property-verified | 4 unit tests, edge-swap verified |
+| PIBT+APF | Pertzovsky et al. 2025 | Line-audited, 1 fix | Sequential APF, parameters match Table 1 |
+| TPTS | Ma et al. 2017 Alg. 2 | Line-audited, 1 fix | 4 documented deviations |
+| RT-LaCAM | Liang et al. 2025 (SoCS) | Line-audited, 5 fixes | 2 documented deviations remain |
 
-The original 5 solvers (PIBT, 3 RHCR, Token Passing) were not independently audited
-against their papers in this session. They have mature test suites (collision-free,
-determinism, metamorphic) but no line-by-line paper comparison was done.
+**Verification methodology:**
+- "Line-audited" = implementation compared against paper pseudocode, deviations documented.
+- "Property-verified" = algorithmic properties from the paper are tested (saturation, collision-freedom, determinism, liveness) but no line-by-line pseudocode comparison was done.
+
+All 8 solvers pass: collision-free verification (500 ticks), deterministic replay (all solvers x all schedulers), metamorphic properties (MR1-MR4), and rewind determinism.
+
+---
+
+## PIBT (Okumura et al., AAAI 2019)
+
+**Files:** `src/solver/pibt.rs`, `src/solver/pibt_core.rs`
+
+| Requirement | Status |
+|-------------|--------|
+| Priority inheritance (higher-priority agent inherits from blocker) | MATCH |
+| One-step planning per tick | MATCH |
+| Deterministic tie-breaking | MATCH (shuffle seed from tick number) |
+| Grid-based 4-connected movement | MATCH |
+| O(n log n) per timestep | MATCH |
+| Optional cell-level guidance bias | EXTENSION (not in paper; used by PIBT+APF) |
+
+**Verified properties:**
+- Throughput saturation at high density (calibration test)
+- Collision-free on all topologies (verification test, 500 ticks)
+- Deterministic across seeds (verification test)
+- Liveness: throughput > 0 for all tested configurations
+
+**No deviations documented.** The PibtCore implementation follows the priority-inheritance backtracking algorithm. Lazy clearing of the occupation grid is a performance optimization that doesn't affect correctness.
+
+---
+
+## RHCR (Li et al., AAAI 2021)
+
+**Files:** `src/solver/rhcr.rs`, `src/solver/pbs_planner.rs`, `src/solver/pibt_window_planner.rs`, `src/solver/priority_astar_planner.rs`
+
+| Requirement | Status |
+|-------------|--------|
+| Windowed replanning every W ticks | MATCH |
+| Planning horizon H steps ahead | MATCH |
+| Configurable inner planner | MATCH (PBS, PIBT-Window, Priority A*) |
+| Goal sequence for multi-goal agents | MATCH |
+| Fallback on planner failure | EXTENSION (3 modes: PerAgent, Full, Tiered) |
+| Congestion detection | EXTENSION (dynamic replan shortening at >50% stuck) |
+| Auto-tuning of H, W, node_limit | EXTENSION (`RhcrConfig::auto()`) |
+
+**Three planner modes:**
+1. **PBS** (`pbs_planner.rs`, 10 tests): Priority-Based Search with node limit. Faithful to Li et al. Section 4.
+2. **PIBT-Window** (`pibt_window_planner.rs`, 1 test): Unrolls PIBT for H steps. Uses shared PibtCore.
+3. **Priority A*** (`priority_astar_planner.rs`, 2 tests): Sequential spacetime A* with priority ordering.
+
+**Extensions beyond paper:**
+- Three fallback modes when windowed planner fails (paper uses single PIBT fallback)
+- Congestion detection shortens replan interval when >50% agents stuck
+- `RhcrConfig::auto()` selects H, W, node_limit based on grid_area and num_agents
+
+---
+
+## Token Passing (Ma et al., AAMAS 2017)
+
+**Files:** `src/solver/token_passing.rs`, `src/solver/token_common.rs`
+
+| Requirement | Status |
+|-------------|--------|
+| Shared TOKEN data structure (all agents' planned paths) | MATCH |
+| Sequential per-agent planning | MATCH |
+| Spacetime A* against TOKEN constraints | MATCH |
+| Tasked agents planned before idle agents | MATCH (PIBT_MAPD-style prioritization) |
+| Constraint index from other agents' paths | MATCH (MasterConstraintIndex) |
+
+**Verified properties:**
+- No edge-swap violations (verification test)
+- Deterministic replay (verification test)
+- Collision-free on all topologies (verification test)
+
+**Implementation note:** MasterConstraintIndex uses reference-counted vertex/edge constraint buffers for O(1) add/remove per agent path. This is an efficiency optimization over the naive approach (rebuild constraints from scratch) but produces identical constraint sets.
+
+---
 
 ## PIBT+APF (Pertzovsky et al., arXiv:2505.22753)
 

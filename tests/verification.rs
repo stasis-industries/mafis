@@ -965,7 +965,7 @@ fn all_schedulers_nonzero_throughput() {
 #[test]
 fn ft_pipeline_end_to_end() {
     // No faults -> FT should be 1.0
-    let r_clean = run("pibt", "warehouse_medium", "random", 20, None, 42);
+    let r_clean = run("pibt", "warehouse_medium", "random", 30, None, 42);
     assert!((r_clean.faulted_metrics.fault_tolerance - 1.0).abs() < 1e-10,
         "FT should be 1.0 with no faults, got {}", r_clean.faulted_metrics.fault_tolerance);
 
@@ -981,9 +981,12 @@ fn ft_pipeline_end_to_end() {
         burst_at_tick: 50,
         ..Default::default()
     };
-    let r_fault = run("pibt", "warehouse_medium", "random", 20, Some(scenario), 42);
+    let r_fault = run("pibt", "warehouse_medium", "random", 30, Some(scenario), 42);
     assert!(r_fault.faulted_metrics.fault_tolerance > 0.0,
-        "FT should be > 0 (agents still complete tasks)");
+        "FT should be > 0 (agents still complete tasks), got ft={}, faulted_tasks={}, baseline_tasks={}",
+        r_fault.faulted_metrics.fault_tolerance,
+        r_fault.faulted_metrics.total_tasks,
+        r_fault.baseline_metrics.total_tasks);
     assert!(r_fault.faulted_metrics.survival_rate < 1.0,
         "burst should kill agents: survival={}", r_fault.faulted_metrics.survival_rate);
 
@@ -1760,4 +1763,112 @@ fn solver_throughput_ordering_sanity() {
         best_tp,
         best_tp * 0.01
     );
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// D1. Rewind determinism: reset() clears all solver state, re-run matches
+// ═══════════════════════════════════════════════════════════════════════
+
+/// Verifies that resetting a runner and re-running produces identical results
+/// to a fresh runner. This catches stale solver state (congestion_streak,
+/// visited sets, token paths) that would poison the re-run.
+#[test]
+fn rewind_determinism_reset_matches_fresh() {
+    let solvers_with_state = [
+        "pibt",
+        "rhcr_pibt",
+        "rhcr_pbs",
+        "token_passing",
+        "rt_lacam",
+        "tpts",
+        "pibt+apf",
+    ];
+
+    let topo = ActiveTopology::from_name("warehouse_medium");
+    let output = topo.topology().generate(42);
+    let grid_area = (output.grid.width * output.grid.height) as usize;
+
+    let scheduler = ActiveScheduler::from_name("random");
+    let queue_policy = ActiveQueuePolicy::from_name("closest");
+
+    for &solver_name in &solvers_with_state {
+        // Fresh run
+        let mut rng_fresh = SeededRng::new(42);
+        let agents_fresh = place_agents(15, &output.grid, &output.zones, &mut rng_fresh);
+        let rng_after_fresh = rng_fresh.clone();
+        let solver_fresh =
+            mafis::solver::lifelong_solver_from_name(solver_name, grid_area, 15).unwrap();
+        let mut runner_fresh = SimulationRunner::new(
+            output.grid.clone(),
+            output.zones.clone(),
+            agents_fresh,
+            solver_fresh,
+            rng_after_fresh.clone(),
+            FaultConfig { enabled: false, ..Default::default() },
+            FaultSchedule::default(),
+        );
+        for _ in 0..200 {
+            runner_fresh.tick(scheduler.scheduler(), queue_policy.policy());
+        }
+        let fresh_tasks = runner_fresh.tasks_completed;
+        let fresh_positions: Vec<_> = runner_fresh.agents.iter().map(|a| a.pos).collect();
+
+        // Run 200, then reset and re-run 200
+        let mut rng_rewind = SeededRng::new(42);
+        let agents_rewind = place_agents(15, &output.grid, &output.zones, &mut rng_rewind);
+        let rng_after_rewind = rng_rewind.clone();
+        let solver_rewind =
+            mafis::solver::lifelong_solver_from_name(solver_name, grid_area, 15).unwrap();
+        let mut runner_rewind = SimulationRunner::new(
+            output.grid.clone(),
+            output.zones.clone(),
+            agents_rewind.clone(),
+            solver_rewind,
+            rng_after_rewind.clone(),
+            FaultConfig { enabled: false, ..Default::default() },
+            FaultSchedule::default(),
+        );
+
+        // First run: advance to tick 200 (builds up solver internal state)
+        for _ in 0..200 {
+            runner_rewind.tick(scheduler.scheduler(), queue_policy.policy());
+        }
+
+        // Reset (simulates rewind to tick 0)
+        runner_rewind.reset();
+
+        // Restore agent positions to initial placement
+        for (i, agent) in runner_rewind.agents.iter_mut().enumerate() {
+            agent.pos = agents_rewind[i].pos;
+            agent.goal = agents_rewind[i].goal;
+            agent.task_leg = mafis::core::task::TaskLeg::Free;
+            agent.heat = 0.0;
+            agent.alive = true;
+            agent.planned_path.clear();
+            agent.operational_age = 0;
+            agent.latency_remaining = 0;
+            agent.next_fault_tick = None;
+        }
+
+        // Restore RNG to post-placement state
+        *runner_rewind.rng_mut() = rng_after_rewind;
+
+        // Re-run 200 ticks
+        for _ in 0..200 {
+            runner_rewind.tick(scheduler.scheduler(), queue_policy.policy());
+        }
+        let rewind_tasks = runner_rewind.tasks_completed;
+        let rewind_positions: Vec<_> = runner_rewind.agents.iter().map(|a| a.pos).collect();
+
+        assert_eq!(
+            fresh_tasks, rewind_tasks,
+            "{solver_name}: tasks differ after reset+re-run ({fresh_tasks} vs {rewind_tasks})"
+        );
+        assert_eq!(
+            fresh_positions, rewind_positions,
+            "{solver_name}: agent positions differ after reset+re-run"
+        );
+
+        eprintln!("  {solver_name}: rewind determinism OK (tasks={fresh_tasks})");
+    }
 }

@@ -94,6 +94,96 @@ pub fn t_critical_95(n: usize) -> f64 {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Cliff's delta — non-parametric effect size (Romano et al. 2006)
+// ---------------------------------------------------------------------------
+
+/// Compute Cliff's delta effect size between two groups.
+///
+/// delta = (count(a_i > b_j) - count(a_i < b_j)) / (n_a * n_b)
+///
+/// Range: [-1, 1]. Positive = group A tends to be larger.
+/// Thresholds (Romano et al. 2006):
+/// |d| < 0.147 → negligible, < 0.33 → small, < 0.474 → medium, else → large.
+pub fn cliff_delta(a: &[f64], b: &[f64]) -> f64 {
+    if a.is_empty() || b.is_empty() {
+        return 0.0;
+    }
+    let mut more = 0i64;
+    let mut less = 0i64;
+    for &ai in a {
+        for &bj in b {
+            if ai > bj {
+                more += 1;
+            } else if ai < bj {
+                less += 1;
+            }
+        }
+    }
+    (more - less) as f64 / (a.len() * b.len()) as f64
+}
+
+/// Categorize Cliff's delta magnitude per Romano et al. 2006.
+pub fn cliff_delta_label(d: f64) -> &'static str {
+    let abs_d = d.abs();
+    if abs_d < 0.147 {
+        "negligible"
+    } else if abs_d < 0.33 {
+        "small"
+    } else if abs_d < 0.474 {
+        "medium"
+    } else {
+        "large"
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Bootstrap CI — percentile method
+// ---------------------------------------------------------------------------
+
+/// Compute bootstrap confidence interval for the mean.
+///
+/// Resamples `values` with replacement `n_resamples` times, computes the mean
+/// of each resample, and returns the (lo, hi) percentile interval.
+///
+/// Uses a simple LCG for resampling (deterministic, no external RNG dependency).
+/// `confidence` is typically 0.95 for a 95% CI.
+pub fn bootstrap_ci(values: &[f64], n_resamples: usize, confidence: f64) -> (f64, f64) {
+    let n = values.len();
+    if n == 0 {
+        return (f64::NAN, f64::NAN);
+    }
+    if n == 1 {
+        return (values[0], values[0]);
+    }
+
+    let alpha = 1.0 - confidence;
+    let lo_pct = alpha / 2.0;
+    let hi_pct = 1.0 - alpha / 2.0;
+
+    // Simple LCG for deterministic resampling (seed = 0xCAFE)
+    let mut rng_state: u64 = 0xCAFE;
+    let mut means = Vec::with_capacity(n_resamples);
+
+    for _ in 0..n_resamples {
+        let mut sum = 0.0;
+        for _ in 0..n {
+            // LCG: state = state * 6364136223846793005 + 1442695040888963407
+            rng_state = rng_state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            let idx = (rng_state >> 33) as usize % n;
+            sum += values[idx];
+        }
+        means.push(sum / n as f64);
+    }
+
+    means.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+
+    let lo_idx = ((lo_pct * n_resamples as f64) as usize).min(n_resamples - 1);
+    let hi_idx = ((hi_pct * n_resamples as f64) as usize).min(n_resamples - 1);
+
+    (means[lo_idx], means[hi_idx])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -199,6 +289,89 @@ mod tests {
             s.ci95_hi
         );
     }
+
+    // ── Cliff's delta tests ──────────────────────────────────────────
+
+    #[test]
+    fn cliff_delta_identical_groups() {
+        let a = [1.0, 2.0, 3.0];
+        let b = [1.0, 2.0, 3.0];
+        let d = cliff_delta(&a, &b);
+        assert!(d.abs() < 1e-10, "identical groups should have delta=0, got {d}");
+        assert_eq!(cliff_delta_label(d), "negligible");
+    }
+
+    #[test]
+    fn cliff_delta_perfectly_separated() {
+        let a = [10.0, 11.0, 12.0];
+        let b = [1.0, 2.0, 3.0];
+        let d = cliff_delta(&a, &b);
+        assert!((d - 1.0).abs() < 1e-10, "perfectly separated should be 1.0, got {d}");
+        assert_eq!(cliff_delta_label(d), "large");
+    }
+
+    #[test]
+    fn cliff_delta_reversed() {
+        let a = [1.0, 2.0, 3.0];
+        let b = [10.0, 11.0, 12.0];
+        let d = cliff_delta(&a, &b);
+        assert!((d - (-1.0)).abs() < 1e-10, "reversed should be -1.0, got {d}");
+        assert_eq!(cliff_delta_label(d), "large");
+    }
+
+    #[test]
+    fn cliff_delta_empty() {
+        assert_eq!(cliff_delta(&[], &[1.0]), 0.0);
+        assert_eq!(cliff_delta(&[1.0], &[]), 0.0);
+    }
+
+    #[test]
+    fn cliff_delta_known_value() {
+        // A = [2, 4, 6], B = [1, 3, 5]
+        // Comparisons: 2>1, 2<3, 2<5, 4>1, 4>3, 4<5, 6>1, 6>3, 6>5
+        // more=6, less=3, delta = (6-3)/9 = 0.333...
+        let d = cliff_delta(&[2.0, 4.0, 6.0], &[1.0, 3.0, 5.0]);
+        assert!((d - 1.0 / 3.0).abs() < 1e-10);
+        assert_eq!(cliff_delta_label(d), "medium");
+    }
+
+    // ── Bootstrap CI tests ─────────────────────────────────────────
+
+    #[test]
+    fn bootstrap_ci_single_value() {
+        let (lo, hi) = bootstrap_ci(&[5.0], 1000, 0.95);
+        assert_eq!(lo, 5.0);
+        assert_eq!(hi, 5.0);
+    }
+
+    #[test]
+    fn bootstrap_ci_empty() {
+        let (lo, hi) = bootstrap_ci(&[], 1000, 0.95);
+        assert!(lo.is_nan());
+        assert!(hi.is_nan());
+    }
+
+    #[test]
+    fn bootstrap_ci_contains_mean() {
+        let vals = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0];
+        let mean = 5.5;
+        let (lo, hi) = bootstrap_ci(&vals, 10_000, 0.95);
+        assert!(lo < mean && hi > mean,
+            "95% CI ({lo:.2}, {hi:.2}) should contain mean {mean}");
+    }
+
+    #[test]
+    fn bootstrap_ci_narrows_with_samples() {
+        let vals = [2.0, 4.0, 6.0];
+        let (lo3, hi3) = bootstrap_ci(&vals, 5000, 0.95);
+        let big = [2.0, 4.0, 6.0, 2.0, 4.0, 6.0, 2.0, 4.0, 6.0, 2.0, 4.0, 6.0];
+        let (lo12, hi12) = bootstrap_ci(&big, 5000, 0.95);
+        let width3 = hi3 - lo3;
+        let width12 = hi12 - lo12;
+        assert!(width12 < width3, "CI should narrow with more data: {width3:.3} vs {width12:.3}");
+    }
+
+    // ── Original tests ─────────────────────────────────────────────
 
     #[test]
     fn nan_filtering_sample_size() {

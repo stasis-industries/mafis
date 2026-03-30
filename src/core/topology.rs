@@ -338,7 +338,97 @@ impl TopologyRegistry {
             zones.queue_lines = build_queue_lines(&delivery_directions, &grid);
         }
 
+        // Validate connectivity: all pickup/delivery cells must be reachable
+        if let Err(unreachable) = validate_connectivity(&grid, &zones) {
+            #[cfg(not(target_arch = "wasm32"))]
+            eprintln!(
+                "Topology validation failed: {} zone cells are unreachable: {:?}",
+                unreachable.len(),
+                &unreachable[..unreachable.len().min(5)],
+            );
+            return None;
+        }
+
         Some((grid, zones))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Connectivity validation
+// ---------------------------------------------------------------------------
+
+/// Validate that all pickup and delivery cells are reachable from each other.
+///
+/// Runs BFS from the first walkable cell and checks that every pickup and
+/// delivery cell belongs to the same connected component. Returns `Ok(())`
+/// if the map is valid, or `Err(unreachable)` listing zone cells that are
+/// isolated from the main walkable area.
+///
+/// Maps with no pickup AND no delivery cells pass (custom/empty maps).
+pub fn validate_connectivity(grid: &GridMap, zones: &ZoneMap) -> Result<(), Vec<IVec2>> {
+    // If there are no zone cells at all, nothing to validate
+    if zones.pickup_cells.is_empty() && zones.delivery_cells.is_empty() {
+        return Ok(());
+    }
+
+    // Find the first walkable cell as BFS seed (prefer first pickup, then delivery, then any)
+    let seed = zones.pickup_cells.first()
+        .or(zones.delivery_cells.first())
+        .copied()
+        .or_else(|| {
+            for y in 0..grid.height {
+                for x in 0..grid.width {
+                    let pos = IVec2::new(x, y);
+                    if grid.is_walkable(pos) {
+                        return Some(pos);
+                    }
+                }
+            }
+            None
+        });
+
+    let seed = match seed {
+        Some(s) => s,
+        None => return Ok(()), // No walkable cells at all — degenerate but not our problem
+    };
+
+    // BFS from seed
+    let capacity = (grid.width * grid.height) as usize;
+    let mut visited = vec![false; capacity];
+    let mut queue = std::collections::VecDeque::new();
+
+    let idx = |pos: IVec2| -> usize { (pos.y * grid.width + pos.x) as usize };
+
+    visited[idx(seed)] = true;
+    queue.push_back(seed);
+
+    while let Some(pos) = queue.pop_front() {
+        for neighbor in grid.walkable_neighbors(pos) {
+            let ni = idx(neighbor);
+            if !visited[ni] {
+                visited[ni] = true;
+                queue.push_back(neighbor);
+            }
+        }
+    }
+
+    // Check all pickup and delivery cells are in the reachable set
+    let mut unreachable = Vec::new();
+    for &pos in &zones.pickup_cells {
+        if !visited[idx(pos)] {
+            unreachable.push(pos);
+        }
+    }
+    for &pos in &zones.delivery_cells {
+        if !visited[idx(pos)] {
+            unreachable.push(pos);
+        }
+    }
+
+    if unreachable.is_empty() {
+        Ok(())
+    } else {
+        Err(unreachable)
     }
 }
 
@@ -500,6 +590,99 @@ mod tests {
         // Should fall back to first available topology
         assert!(!at.name().is_empty());
     }
+
+    // ── Connectivity validation tests ───────────────────────────────
+
+    #[test]
+    fn validate_connected_map_passes() {
+        use crate::core::grid::GridMap;
+        let grid = GridMap::new(10, 10); // fully open
+        let mut zones = ZoneMap::default();
+        zones.pickup_cells.push(IVec2::new(1, 1));
+        zones.delivery_cells.push(IVec2::new(8, 8));
+        assert!(validate_connectivity(&grid, &zones).is_ok());
+    }
+
+    #[test]
+    fn validate_disconnected_map_fails() {
+        use crate::core::grid::GridMap;
+        use std::collections::HashSet;
+        // Wall splits grid vertically at x=5
+        let mut obstacles = HashSet::new();
+        for y in 0..10 {
+            obstacles.insert(IVec2::new(5, y));
+        }
+        let grid = GridMap::with_obstacles(10, 10, obstacles);
+        let mut zones = ZoneMap::default();
+        zones.pickup_cells.push(IVec2::new(1, 1)); // left side
+        zones.delivery_cells.push(IVec2::new(8, 8)); // right side
+        let result = validate_connectivity(&grid, &zones);
+        assert!(result.is_err());
+        let unreachable = result.unwrap_err();
+        assert!(unreachable.contains(&IVec2::new(8, 8)));
+    }
+
+    #[test]
+    fn validate_island_pickup_fails() {
+        use crate::core::grid::GridMap;
+        use std::collections::HashSet;
+        // Pickup at (5,5) surrounded by walls
+        let mut obstacles = HashSet::new();
+        for d in &[IVec2::new(0, 1), IVec2::new(0, -1), IVec2::new(1, 0), IVec2::new(-1, 0)] {
+            obstacles.insert(IVec2::new(5, 5) + *d);
+        }
+        let grid = GridMap::with_obstacles(10, 10, obstacles);
+        let mut zones = ZoneMap::default();
+        zones.pickup_cells.push(IVec2::new(5, 5)); // isolated
+        zones.delivery_cells.push(IVec2::new(0, 0)); // reachable
+        let result = validate_connectivity(&grid, &zones);
+        // The BFS seeds from the first pickup cell (5,5) which is isolated,
+        // so delivery at (0,0) becomes unreachable
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn validate_island_delivery_fails() {
+        use crate::core::grid::GridMap;
+        use std::collections::HashSet;
+        // Delivery at (5,5) surrounded by walls
+        let mut obstacles = HashSet::new();
+        for d in &[IVec2::new(0, 1), IVec2::new(0, -1), IVec2::new(1, 0), IVec2::new(-1, 0)] {
+            obstacles.insert(IVec2::new(5, 5) + *d);
+        }
+        let grid = GridMap::with_obstacles(10, 10, obstacles);
+        let mut zones = ZoneMap::default();
+        zones.pickup_cells.push(IVec2::new(0, 0)); // reachable
+        zones.delivery_cells.push(IVec2::new(5, 5)); // isolated
+        let result = validate_connectivity(&grid, &zones);
+        assert!(result.is_err());
+        let unreachable = result.unwrap_err();
+        assert!(unreachable.contains(&IVec2::new(5, 5)));
+    }
+
+    #[test]
+    fn validate_no_zones_passes() {
+        use crate::core::grid::GridMap;
+        let grid = GridMap::new(10, 10);
+        let zones = ZoneMap::default(); // no pickup, no delivery
+        assert!(validate_connectivity(&grid, &zones).is_ok());
+    }
+
+    #[test]
+    fn validate_existing_topologies_pass() {
+        let registry = TopologyRegistry::load_from_dir(std::path::Path::new("topologies"));
+        assert!(!registry.entries.is_empty(), "No topologies found in topologies/");
+        for entry in &registry.entries {
+            let result = TopologyRegistry::parse_entry(entry);
+            assert!(
+                result.is_some(),
+                "Topology '{}' failed connectivity validation",
+                entry.id,
+            );
+        }
+    }
+
+    // ── Original tests ──────────────────────────────────────────────
 
     #[test]
     fn custom_map_topology_preserves_data() {

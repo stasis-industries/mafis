@@ -417,11 +417,12 @@ fn restore_runner_state(
     runner.fault_rng_mut().reseed(fault_seed);
     runner.fault_rng_mut().rng.set_word_pos(snapshot.fault_rng_word_pos);
 
-    // Solver
+    // Solver — always reset first to clear transient state (congestion_streak,
+    // plan_buffer, ticks_since_replan, etc.), then restore priorities if available.
+    // Without the unconditional reset, RHCR's transient state persists across rewind.
+    runner.solver_mut().reset();
     if !snapshot.solver_priorities.is_empty() {
         runner.solver_mut().restore_priorities(&snapshot.solver_priorities);
-    } else {
-        runner.solver_mut().reset();
     }
 
     // Completion state
