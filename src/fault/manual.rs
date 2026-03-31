@@ -633,6 +633,12 @@ pub fn process_manual_faults(
     // (idempotent, but avoids redundant work for multiple commands).
     let mut causality_applied = false;
 
+    // Alive count for propagation rate denominator
+    let alive_count = sim.as_ref().map_or(
+        fault_metrics.initial_agent_count,
+        |s| s.runner.agents.iter().filter(|a| a.alive).count() as u32,
+    );
+
     for cmd in manual_cmds.read() {
         match cmd {
             ManualFaultCommand::KillAgent(id) | ManualFaultCommand::KillAgentScheduled(id) => {
@@ -661,9 +667,10 @@ pub fn process_manual_faults(
                             source,
                             tick: effective_tick,
                             position: pos,
+                            paths_invalidated: 0, // manual faults: cascade handled by BFS
                         });
                         fault_metrics.register_manual_event(
-                            effective_tick, FaultType::Breakdown, source, pos,
+                            effective_tick, FaultType::Breakdown, source, pos, alive_count,
                         );
                         // Causality: changing the past invalidates the future.
                         if is_replay && !causality_applied {
@@ -694,7 +701,7 @@ pub fn process_manual_faults(
                         &mut obstacle_mesh, &mut obstacle_mat, *cell,
                     );
                     fault_metrics.register_manual_event(
-                        effective_tick, FaultType::Breakdown, FaultSource::Manual, *cell,
+                        effective_tick, FaultType::Breakdown, FaultSource::Manual, *cell, alive_count,
                     );
                     if is_replay && !causality_applied {
                         fault_log.truncate_after_tick(effective_tick);
@@ -736,9 +743,10 @@ pub fn process_manual_faults(
                                 source,
                                 tick: effective_tick,
                                 position: pos,
+                                paths_invalidated: 0,
                             });
                             fault_metrics.register_manual_event(
-                                effective_tick, FaultType::Latency, source, pos,
+                                effective_tick, FaultType::Latency, source, pos, alive_count,
                             );
                             if is_replay && !causality_applied {
                                 fault_log.truncate_after_tick(effective_tick);

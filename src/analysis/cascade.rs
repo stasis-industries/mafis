@@ -112,6 +112,12 @@ pub fn propagate_cascade(
             }
         }
 
+        // Use the larger of ADG-based cascade and pre-replan path invalidation count.
+        // ADG BFS misses obstacle-creation impact because it runs after replanning;
+        // paths_invalidated captures agents whose paths crossed the dead cell at
+        // the instant of death.
+        let total_affected = event_affected.max(event.paths_invalidated);
+
         cascade.max_depth = cascade.max_depth.max(event_max_depth);
         cascade.fault_count += 1;
 
@@ -121,7 +127,7 @@ pub fn propagate_cascade(
             fault_type: event.fault_type,
             source: event.source,
             position: event.position,
-            agents_affected: event_affected,
+            agents_affected: total_affected,
             max_depth: event_max_depth,
         });
     }

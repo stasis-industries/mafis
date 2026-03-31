@@ -180,14 +180,21 @@ pub fn update_resilience_scorecard(
     }
 
     // --- NRR: 1 - MTTR/MTBF (Or 2025) ---
-    // Requires MTBF (2+ fault events).
-    scorecard.nrr = fault_metrics.mtbf.map(|mtbf| {
-        if mtbf <= 0.0 {
-            0.0
-        } else {
-            (1.0 - fault_metrics.mttr / mtbf).clamp(0.0, 1.0)
-        }
-    });
+    // Requires MTBF (2+ fault events) AND at least one cascade-affected agent.
+    // For permanent deaths with no cascade (e.g., isolated wear failures),
+    // MTTR is trivially 0 → NRR would be a meaningless 100%. Fleet damage
+    // in those cases is captured by Fleet Utilization instead.
+    scorecard.nrr = if fault_metrics.total_affected == 0 {
+        None
+    } else {
+        fault_metrics.mtbf.map(|mtbf| {
+            if mtbf <= 0.0 {
+                0.0
+            } else {
+                (1.0 - fault_metrics.mttr / mtbf).clamp(0.0, 1.0)
+            }
+        })
+    };
 
     // --- Fleet Utilization Ratio: alive+tasked / initial fleet ---
     // Captures how much productive capacity is retained post-fault.

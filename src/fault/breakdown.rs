@@ -13,6 +13,9 @@ pub struct FaultEvent {
     pub source: FaultSource,
     pub tick: u64,
     pub position: IVec2,
+    /// Path invalidations counted at the instant of death (before replanning).
+    /// Used as a floor for cascade `agents_affected` when ADG BFS finds fewer.
+    pub paths_invalidated: u32,
 }
 
 /// Latency injection: forces Wait for `remaining` ticks, then auto-removes.

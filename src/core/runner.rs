@@ -114,6 +114,11 @@ pub struct FaultRecord {
     pub source: FaultSource,
     pub tick: u64,
     pub position: IVec2,
+    /// Number of other alive agents whose planned paths cross the dead cell.
+    /// Computed at the instant of death, before `replan_after_fault` clears the
+    /// evidence. This captures obstacle-creation cascade impact that the ADG-based
+    /// BFS misses (because it runs post-replan).
+    pub paths_invalidated: u32,
 }
 
 // ---------------------------------------------------------------------------
@@ -320,6 +325,26 @@ impl CollisionBuffers {
         }
         self.dirty_dead.clear();
     }
+}
+
+/// Count alive agents (excluding `skip_agent`) whose planned paths pass through `cell`.
+/// Free function to avoid borrow conflicts when called inside `&mut self` methods.
+fn count_paths_through_cell(agents: &[SimAgent], cell: IVec2, skip_agent: usize) -> u32 {
+    let mut count = 0u32;
+    for (i, agent) in agents.iter().enumerate() {
+        if i == skip_agent || !agent.alive || agent.planned_path.is_empty() {
+            continue;
+        }
+        let mut pos = agent.pos;
+        for action in &agent.planned_path {
+            pos = action.apply(pos);
+            if pos == cell {
+                count += 1;
+                break;
+            }
+        }
+    }
+    count
 }
 
 impl SimulationRunner {
@@ -618,6 +643,7 @@ impl SimulationRunner {
                 SimCommand::KillAgent { index, source } => {
                     if index < self.agents.len() && self.agents[index].alive {
                         let pos = self.agents[index].pos;
+                        let invalidated = count_paths_through_cell(&self.agents, pos, index);
                         self.agents[index].alive = false;
                         self.agents[index].planned_path.clear();
                         self.grid.set_obstacle(pos);
@@ -627,6 +653,7 @@ impl SimulationRunner {
                             source,
                             tick: self.tick,
                             position: pos,
+                            paths_invalidated: invalidated,
                         });
                     }
                 }
@@ -649,6 +676,7 @@ impl SimulationRunner {
                             source,
                             tick: self.tick,
                             position: pos,
+                            paths_invalidated: 0,
                         });
                     }
                 }
@@ -692,6 +720,7 @@ impl SimulationRunner {
                         let idx = self.rng.rng.random_range(0..self.available_agents_buf.len());
                         let agent_idx = self.available_agents_buf.swap_remove(idx);
                         let pos = self.agents[agent_idx].pos;
+                        let invalidated = count_paths_through_cell(&self.agents, pos, agent_idx);
                         self.agents[agent_idx].alive = false;
                         self.agents[agent_idx].planned_path.clear();
                         self.grid.set_obstacle(pos);
@@ -701,6 +730,7 @@ impl SimulationRunner {
                             source: FaultSource::Scheduled,
                             tick,
                             position: pos,
+                            paths_invalidated: invalidated,
                         });
                     }
                 }
@@ -743,6 +773,7 @@ impl SimulationRunner {
                                     source: FaultSource::Scheduled,
                                     tick,
                                     position: self.agents[i].pos,
+                                    paths_invalidated: 0,
                                 });
                             }
                         }
@@ -858,6 +889,7 @@ impl SimulationRunner {
                                 continue;
                             }
                             if blocked_set.contains(&self.agents[i].pos) {
+                                let invalidated = count_paths_through_cell(&self.agents, self.agents[i].pos, i);
                                 self.agents[i].alive = false;
                                 self.agents[i].planned_path.clear();
                                 fault_events.push(FaultRecord {
@@ -866,6 +898,7 @@ impl SimulationRunner {
                                     source: FaultSource::Scheduled,
                                     tick,
                                     position: self.agents[i].pos,
+                                    paths_invalidated: invalidated,
                                 });
                             }
                         }
@@ -1347,23 +1380,23 @@ impl SimulationRunner {
     /// `operational_age` increments only on actual moves (distance-based wear).
     /// Grid-blocked moves (e.g., obstacle from a dead agent) are converted to
     /// `Action::Wait` during collision resolution, so they do not count as wear.
-    /// `heat` is repurposed as the Weibull CDF F(t) = 1 - exp(-(t/eta)^beta),
-    /// a smooth 0->1 stress indicator used by the renderer for color mapping.
+    /// `heat` shows individual progress toward this agent's sampled failure tick:
+    /// 0.0 = fresh, 1.0 = about to fail. This replaces the old Weibull CDF which
+    /// showed population-level failure probability, causing agents to visually die
+    /// at random heat levels.
     fn update_agent_wear(&mut self) {
-        let beta = self.fault_config.weibull_beta;
-        let eta = self.fault_config.weibull_eta;
-
-        for agent in &mut self.agents {
-            if !agent.alive {
+        for i in 0..self.agents.len() {
+            if !self.agents[i].alive {
                 continue;
             }
-            if matches!(agent.last_action, Action::Move(_)) {
-                agent.operational_age = agent.operational_age.saturating_add(1);
+            if matches!(self.agents[i].last_action, Action::Move(_)) {
+                self.agents[i].operational_age = self.agents[i].operational_age.saturating_add(1);
             }
-            // Visual stress: Weibull CDF -- rises smoothly from 0 to 1 as agent ages.
-            if eta > 0.0 {
-                let t_over_eta = agent.operational_age as f32 / eta;
-                agent.heat = 1.0 - (-t_over_eta.powf(beta)).exp();
+            // Visual stress: progress toward individual failure tick (0 → 1 at death).
+            if i < self.weibull_failure_ticks.len() && self.weibull_failure_ticks[i] > 0 {
+                self.agents[i].heat = (self.agents[i].operational_age as f32
+                    / self.weibull_failure_ticks[i] as f32)
+                    .min(1.0);
             }
         }
     }
@@ -1391,8 +1424,13 @@ impl SimulationRunner {
             }
         }
 
-        for (i, ft) in self.faults_buf.drain(..) {
+        // Process faults by index to avoid borrow conflict with count_paths_through_cell.
+        let fault_count = self.faults_buf.len();
+        for fi in 0..fault_count {
+            let (i, ft) = self.faults_buf[fi];
             let pos = self.agents[i].pos;
+            // Count paths crossing dead cell BEFORE clearing (captures obstacle cascade impact)
+            let invalidated = count_paths_through_cell(&self.agents, pos, i);
             self.agents[i].alive = false;
             self.agents[i].planned_path.clear();
             self.grid.set_obstacle(pos);
@@ -1402,8 +1440,10 @@ impl SimulationRunner {
                 source: FaultSource::Automatic,
                 tick,
                 position: pos,
+                paths_invalidated: invalidated,
             });
         }
+        self.faults_buf.clear();
     }
 
     /// Inject temporary intermittent faults via exponential inter-arrival times.
@@ -1458,6 +1498,7 @@ impl SimulationRunner {
                 source: FaultSource::Automatic,
                 tick,
                 position: pos,
+                paths_invalidated: 0,
             });
         }
     }

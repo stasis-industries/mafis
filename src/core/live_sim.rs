@@ -75,6 +75,7 @@ pub fn drive_simulation(
                 source: fe.source,
                 tick: fe.tick,
                 position: fe.position,
+                paths_invalidated: fe.paths_invalidated,
             });
         }
     }

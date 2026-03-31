@@ -40,6 +40,9 @@ pub struct FaultEventRecord {
     pub throughput_delta: f32,
     pub recovered: bool,
     pub recovery_tick: Option<u64>,
+    /// Alive agent count at the time this fault event occurred.
+    /// Used as denominator for propagation rate (instead of initial fleet size).
+    pub alive_at_event: u32,
 }
 
 // ---------------------------------------------------------------------------
@@ -129,6 +132,7 @@ impl FaultMetrics {
         fault_type: FaultType,
         source: FaultSource,
         position: IVec2,
+        alive_count: u32,
     ) {
         let id = self.event_records.len();
         self.event_records.push(FaultEventRecord {
@@ -144,6 +148,7 @@ impl FaultMetrics {
             throughput_delta: 0.0,
             recovered: false,
             recovery_tick: None,
+            alive_at_event: alive_count,
         });
     }
 
@@ -234,10 +239,16 @@ impl FaultMetrics {
 pub fn register_fault_recovery(
     cascade: Res<CascadeState>,
     sim_config: Res<SimulationConfig>,
+    alive_agents: Query<Entity, (With<LogicalAgent>, Without<Dead>)>,
     mut fault_metrics: ResMut<FaultMetrics>,
 ) {
     let fault_log = &cascade.fault_log;
     let already_processed = fault_metrics.last_fault_log_len;
+
+    // Count alive agents once (used as denominator for propagation rate).
+    // This is the alive count at processing time — close enough since cascade
+    // processing happens the same tick as the fault event.
+    let alive_now = alive_agents.iter().count() as u32;
 
     for entry in fault_log.iter().skip(already_processed) {
         fault_metrics.cascade_spreads.push(entry.agents_affected);
@@ -258,6 +269,7 @@ pub fn register_fault_recovery(
             throughput_delta: 0.0,
             recovered: false,
             recovery_tick: None,
+            alive_at_event: alive_now,
         });
 
         for (&entity, record) in &cascade.records {
@@ -286,12 +298,14 @@ pub fn register_fault_recovery(
     let event_ticks: Vec<u64> = fault_metrics.event_records.iter().map(|r| r.tick).collect();
     fault_metrics.mtbf = FaultMetrics::compute_mtbf(&event_ticks);
 
-    // --- Propagation Rate: normalized cascade spread ---
-    if !fault_metrics.event_records.is_empty() && fault_metrics.initial_agent_count > 0 {
+    // --- Propagation Rate: use alive-at-event as denominator (not initial fleet) ---
+    // After burst kills half the fleet, subsequent deaths affect a smaller population.
+    // Using initial_agent_count would systematically underestimate propagation severity.
+    if !fault_metrics.event_records.is_empty() {
         let events: Vec<(u32, u32)> = fault_metrics
             .event_records
             .iter()
-            .map(|r| (r.agents_affected, fault_metrics.initial_agent_count))
+            .map(|r| (r.agents_affected, r.alive_at_event))
             .collect();
         fault_metrics.propagation_rate = FaultMetrics::compute_propagation_rate(&events);
     }
@@ -303,7 +317,6 @@ pub fn register_fault_recovery(
 
 pub fn update_fault_metrics(
     mut agents: Query<(Entity, &LogicalAgent, &LastAction, Option<&mut AgentActionStats>), Without<Dead>>,
-    mut dead_agents: Query<Option<&mut AgentActionStats>, With<Dead>>,
     all_agents: Query<Entity, With<LogicalAgent>>,
     sim_config: Res<SimulationConfig>,
     mut fault_metrics: ResMut<FaultMetrics>,
@@ -398,14 +411,10 @@ pub fn update_fault_metrics(
         record.throughput_delta = record.throughput_before - record.throughput_min;
     }
 
-    // --- Idle ratio: dead agents count as waiting every tick ---
-    for mut stats in (&mut dead_agents).into_iter().flatten() {
-        stats.total_actions += 1;
-        stats.wait_actions += 1;
-        total_actions_sum += stats.total_actions;
-        wait_actions_sum += stats.wait_actions;
-    }
-
+    // --- Idle ratio: alive agents only ---
+    // Dead agents are excluded — their fleet loss is captured by survival_rate and
+    // fleet_utilization. Counting dead agents as permanently idle would make this
+    // metric unresponsive to late-stage events (old deaths dominate the cumulative sum).
     if total_actions_sum > 0 {
         fault_metrics.idle_ratio = wait_actions_sum as f32 / total_actions_sum as f32;
     }
@@ -443,6 +452,7 @@ mod tests {
             throughput_delta: 0.0,
             recovered: false,
             recovery_tick: None,
+            alive_at_event: 50,
         };
 
         // Simulate throughput dip
@@ -472,6 +482,7 @@ mod tests {
             throughput_delta: 0.0,
             recovered: false,
             recovery_tick: None,
+            alive_at_event: 30,
         };
         assert_eq!(record.fault_type, FaultType::Latency);
         assert_eq!(record.source, FaultSource::Manual);

@@ -62,12 +62,19 @@ const METRIC_KEYS = [
 
 // Compute composite resilience score from scorecard fields.
 // Returns { composite, filledDots } where composite is 0-1 and filledDots is 0-5.
+// When NRR is N/A (permanent deaths, no cascade recovery), its weight is
+// redistributed proportionally to the remaining three metrics.
 function computeCompositeScore(sc) {
-    const ft = sc.fault_tolerance || 0;
-    const nrrVal = sc.nrr != null ? sc.nrr : 0.5;
+    const ft = Math.min(sc.fault_tolerance || 0, 1.0); // Cap FT at 1.0 for composite (Braess doesn't inflate verdict)
     const fur = sc.fleet_utilization || 0;
     const critNorm = Math.max(0, Math.min(1, 1.0 - (sc.critical_time || 0)));
-    const composite = ft * 0.3 + nrrVal * 0.25 + fur * 0.25 + critNorm * 0.2;
+    let composite;
+    if (sc.nrr != null) {
+        composite = ft * 0.3 + sc.nrr * 0.25 + fur * 0.25 + critNorm * 0.2;
+    } else {
+        // NRR unavailable — redistribute: FT 40%, FUR 33%, CritTime 27%
+        composite = ft * 0.40 + fur * 0.33 + critNorm * 0.27;
+    }
     return { composite, filledDots: Math.round(composite * 5) };
 }
 
@@ -1437,7 +1444,7 @@ function updateUI(s) {
                 } else {
                     nrrEl.textContent = 'N/A';
                     const zoneEl = document.getElementById('sc-nrr-zone');
-                    if (zoneEl) { zoneEl.textContent = 'Requires 2+ fault events'; zoneEl.dataset.zone = ''; }
+                    if (zoneEl) { zoneEl.textContent = 'No cascade recovery events'; zoneEl.dataset.zone = ''; }
                 }
             }
 
@@ -2433,21 +2440,27 @@ function populateResultsFromState(s) {
         const sc = s.scorecard;
         const metrics = [
             { name: 'Fault Tolerance', value: sc.fault_tolerance || 0 },
-            { name: 'NRR', value: sc.nrr != null ? sc.nrr : 0 },
+            { name: 'NRR', value: sc.nrr },
             { name: 'Fleet Utilization', value: sc.fleet_utilization || 0 },
             { name: 'Critical Time', value: sc.critical_time || 0, inverted: true },
         ];
         scorecardBars.innerHTML = metrics.map(m => {
-            const pct = (m.value * 100).toFixed(0);
-            const color = m.inverted
-                ? (m.value <= 0.1 ? 'var(--state-moving)' : m.value <= 0.3 ? 'var(--state-delayed)' : 'var(--state-dead)')
-                : (m.value >= 0.7 ? 'var(--state-moving)' : m.value >= 0.4 ? 'var(--state-delayed)' : 'var(--state-dead)');
+            const label = m.value != null ? (m.value * 100).toFixed(0) + '%' : 'N/A';
+            if (m.inverted) {
+                const color = m.value <= 0.1 ? 'var(--state-moving)' : m.value <= 0.3 ? 'var(--state-delayed)' : 'var(--state-dead)';
+                const pct = (m.value * 100).toFixed(0);
+                return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+                    <span style="width:90px;font-size:10px;color:var(--text-muted);text-transform:uppercase;">${m.name}</span>
+                    <div style="flex:1;height:8px;background:var(--bg-card);border:1px solid var(--border);">
+                        <div style="width:${pct}%;height:100%;background:${color};"></div>
+                    </div>
+                    <span style="width:30px;font-size:10px;color:var(--text-secondary);text-align:right;">${label}</span>
+                </div>`;
+            }
             return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
                 <span style="width:90px;font-size:10px;color:var(--text-muted);text-transform:uppercase;">${m.name}</span>
-                <div style="flex:1;height:8px;background:var(--bg-card);border:1px solid var(--border);">
-                    <div style="width:${pct}%;height:100%;background:${color};"></div>
-                </div>
-                <span style="width:30px;font-size:10px;color:var(--text-secondary);text-align:right;">${pct}%</span>
+                ${buildLayeredBar(m.value, 8)}
+                <span style="width:30px;font-size:10px;color:var(--text-secondary);text-align:right;">${label}</span>
             </div>`;
         }).join('');
     } else if (scorecardBars && !hadFaults) {
@@ -2756,6 +2769,35 @@ function updateLiveVerdict(sc) {
 }
 
 // ---------------------------------------------------------------------------
+// Layered bar helper — wraps at 100%, stacking layers for overflow (Braess)
+// ---------------------------------------------------------------------------
+// Each layer = 100%. Layer 0 is the current partial fill, layers behind it are
+// fully filled with progressively dimmer opacity to show "how many times 100%".
+// Colors per layer: layer 0 = metric color, layer 1+ = desaturated previous.
+function buildLayeredBar(value, height) {
+    if (value == null) return `<div style="flex:1;height:${height}px;background:var(--bg-card);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;"><span style="font-size:8px;color:var(--text-muted);">N/A</span></div>`;
+    const layers = Math.floor(value);    // full 100% layers behind
+    const partial = (value - layers);    // current partial (0-1)
+    const partialPct = (partial * 100).toFixed(1);
+    const baseColor = value >= 0.7 ? 'var(--state-moving)' : value >= 0.4 ? 'var(--state-delayed)' : 'var(--state-fault)';
+    // Layer colors: each completed layer gets a slightly different hue
+    const layerColors = ['rgba(74,158,130,0.25)', 'rgba(74,158,130,0.40)', 'rgba(74,158,130,0.55)'];
+    let bgLayers = '';
+    if (layers > 0) {
+        // Stacked gradient: each full layer is a stripe of completed color
+        const stripes = [];
+        for (let i = 0; i < Math.min(layers, 3); i++) {
+            stripes.push(layerColors[i]);
+        }
+        bgLayers = `background:${stripes[stripes.length - 1]};`;
+    }
+    return `<div style="flex:1;height:${height}px;background:var(--bg-card);border:1px solid var(--border);position:relative;overflow:hidden;">` +
+        (layers > 0 ? `<div style="position:absolute;inset:0;${bgLayers}"></div>` : '') +
+        `<div style="position:relative;width:${partialPct}%;height:100%;background:${baseColor};"></div>` +
+    `</div>`;
+}
+
+// ---------------------------------------------------------------------------
 // Live scorecard bars (compact, in Fault Response section)
 // ---------------------------------------------------------------------------
 function updateLiveScorecard(sc) {
@@ -2764,18 +2806,15 @@ function updateLiveScorecard(sc) {
 
     const metrics = [
         { name: 'FT', value: sc.fault_tolerance || 0 },
-        { name: 'NRR', value: sc.nrr != null ? sc.nrr : 0 },
+        { name: 'NRR', value: sc.nrr },
         { name: 'FUR', value: sc.fleet_utilization || 0 },
     ];
     container.innerHTML = metrics.map(m => {
-        const pct = (m.value * 100).toFixed(0);
-        const color = m.value >= 0.7 ? 'var(--state-moving)' : m.value >= 0.4 ? 'var(--state-delayed)' : 'var(--state-fault)';
+        const label = m.value != null ? (m.value * 100).toFixed(0) + '%' : 'N/A';
         return `<div style="display:flex;align-items:center;gap:4px;margin-bottom:2px;">
             <span style="width:28px;font-size:9px;color:var(--text-muted);text-transform:uppercase;">${m.name}</span>
-            <div style="flex:1;height:4px;background:var(--bg-card);border:1px solid var(--border);">
-                <div style="width:${pct}%;height:100%;background:${color};"></div>
-            </div>
-            <span style="width:24px;font-size:9px;color:var(--text-secondary);text-align:right;">${pct}%</span>
+            ${buildLayeredBar(m.value, 4)}
+            <span style="width:24px;font-size:9px;color:var(--text-secondary);text-align:right;">${label}</span>
         </div>`;
     }).join('');
 }
