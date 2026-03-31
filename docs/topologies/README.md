@@ -8,15 +8,14 @@ Topologies are JSON files in `topologies/`. Each one defines a grid: walls, pick
 
 ## Available Topologies
 
-| Topology | Size | Density | Inspired by | Agents |
-|----------|------|---------|-------------|--------|
-| Warehouse Medium | 32x21 | 51% | Amazon Kiva (standard) | 20 |
-| Kiva Large | 57x33 | 52% | Amazon Robotics (large) | 30 |
-| Sorting Center | 40x20 | 43% | FedEx/UPS hub (bidirectional) | 25 |
-| Compact Grid | 24x24 | 37% | Ocado micro-fulfillment | 15 |
-| Kiva Warehouse | 48x48 | 52% | Amazon Kiva (dense shelf rows, 3-wall deliveries) | 80 |
-| Rack Warehouse | 56x32 | 45% | Exotec Skypod (column racks, cross-aisles) | 60 |
-| Fulfillment Center | 64x64 | 41% | Multi-dock FC (4 docks, central sorting) | 120 |
+| Topology | Size | Inspired by | Agents |
+|----------|------|-------------|--------|
+| Warehouse Medium | 30x15 | Amazon Kiva (standard) | 13 |
+| Warehouse Large | 57x33 | Amazon Robotics (large) | 60 |
+| Compact Grid | 26x26 | Ocado micro-fulfillment | 25 |
+| Kiva Warehouse | 48x48 | Amazon Kiva (dense shelf rows, 3-wall deliveries) | 80 |
+| Sorting Center | 45x20 | FedEx/UPS hub (bidirectional) | 40 |
+| Fulfillment Center | 54x24 | Multi-dock FC | 36 |
 
 All topologies pass BFS connectivity validation (all pickup/delivery cells reachable). Delivery queue directions are distributed across multiple walls for realistic traffic patterns.
 
