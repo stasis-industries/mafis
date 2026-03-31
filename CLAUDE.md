@@ -14,7 +14,7 @@ Multi-Agent Fault Injection Simulator — Bevy 0.18 → WASM. A **fault resilien
 # Step 1 — type & borrow check (~5s). Catches 80% of errors instantly.
 cargo check
 
-# Step 2 — logic correctness (~3 min). 473 tests across core, solver, analysis, experiments.
+# Step 2 — logic correctness (~3 min). 501 tests across core, solver, analysis, experiments.
 cargo test
 
 # Step 3 — only if Steps 1-2 pass AND the change touches rendering, bridge, or ECS systems.
@@ -29,7 +29,7 @@ basic-http-server web
 | Step | Time | Covers |
 |------|------|--------|
 | `cargo check` | ~5s | Types, borrow checker, imports |
-| `cargo test` | ~10s | Grid, actions, heuristics, PIBT, task scheduling, cascade, ADG, fault metrics, heatmap, Weibull, determinism, collision, CI95, metrics formulas, topology connectivity, scale (300 agents), rewind determinism, Cliff's delta, bootstrap CI |
+| `cargo test` | ~10s | Grid, actions, heuristics, PIBT, task scheduling, cascade, ADG, fault metrics, heatmap, Weibull, determinism, collision, CI95, metrics formulas, topology connectivity, scale (300 agents), rewind determinism, Cliff's delta, bootstrap CI, scorecard, propagation rate |
 | WASM build | ~2-3 min | Rendering, Bevy ECS systems, JS bridge, visual correctness |
 
 **When WASM build is NOT needed:** pure logic changes (solver tweaks, analysis math, constants). `cargo test` is sufficient.
@@ -279,13 +279,66 @@ All tunable limits live here. Never hardcode magic numbers elsewhere.
 
 | Constant | Value | Notes |
 |----------|-------|-------|
-| `MAX_AGENTS` | 500 | UI slider max |
-| `MAX_GRID_DIM` | 128 | UI slider max |
-| `ADG_AGENT_LIMIT` | 100 | Auto-disables ADG above this |
+| `MAX_AGENTS` | 1000 (WASM) / 5000 (native) | UI slider max |
+| `MAX_GRID_DIM` | 512 | UI slider max (raised for MovingAI maps) |
 | `MAX_CASCADE_DEPTH` | 10 | BFS depth cap |
 | `AGGREGATE_THRESHOLD` | 50 | Switch to summary JSON above this |
-| `HEAT_PALETTE_STEPS` | 16 | Material palette size |
+| `HEATMAP_PALETTE_STEPS` | 8 | Heatmap color gradient steps |
 | `GRID_LINE_THRESHOLD` | 64 | Skip grid lines above this |
+| `CRITICAL_TIME_THRESHOLD` | 0.5 | Scorecard: below 50% baseline = critical |
+| `THROUGHPUT_WINDOW_SIZE` | 100 | Rolling mean window for throughput |
+
+---
+
+## Fault Pipeline (`src/fault/`, `src/core/runner.rs`)
+
+### Fault Scenarios (5 types)
+
+| Scenario | Mechanism | Duration | FaultConfig |
+|----------|-----------|----------|-------------|
+| BurstFailure | Kill X% agents at tick T | Permanent | Scheduled event |
+| WearBased | Weibull model: agents die when `operational_age >= sampled failure tick` | Permanent | `weibull_enabled` (continuous) |
+| ZoneOutage | Latency on agents in busiest zone for N ticks | Temporary | Scheduled event |
+| IntermittentFault | Per-agent recurring latency (exponential inter-arrival) | Temporary | `intermittent_enabled` (continuous) |
+| PermanentZoneOutage | Block cells in busiest zone at tick T | Permanent (terrain) | Scheduled event |
+
+### Weibull Wear Model
+
+- **Pre-sampled failure ticks**: `t_fail = eta * (-ln(U))^(1/beta)` per agent at init via `fault_rng`
+- **Death trigger**: `operational_age >= weibull_failure_ticks[i]` (no per-tick RNG consumption)
+- **Heat visual**: `heat = operational_age / failure_tick` — individual progress 0→1, NOT Weibull CDF
+- **Wear presets**: Low (β=2.0, η=900), Medium (β=2.5, η=500), High (β=3.5, η=150)
+
+### Cascade BFS (`src/analysis/cascade.rs`)
+
+- On each `FaultEvent`, BFS through ADG to find dependent agents
+- **Path invalidation**: `count_paths_through_cell()` runs at instant of death (before replanning clears evidence), counts agents whose planned paths cross the dead cell
+- `agents_affected = max(adg_bfs_result, paths_invalidated)` — captures both ADG dependency cascade AND obstacle-creation impact
+- `FaultRecord.paths_invalidated` / `FaultEvent.paths_invalidated` carry this from runner → ECS
+
+### Resilience Scorecard (`src/analysis/scorecard.rs`)
+
+| Metric | Formula | Range | Notes |
+|--------|---------|-------|-------|
+| Fault Tolerance (FT) | `P_fault / P_nominal` | 0–∞ | Can exceed 1.0 (Braess paradox) |
+| NRR | `1 - MTTR/MTBF` | 0–1 or N/A | N/A when `total_affected == 0` (permanent deaths, no cascade) |
+| Fleet Utilization | `alive+tasked / initial_fleet` | 0–1 | Counts latency-affected agents as tasked |
+| Critical Time | `ticks_below_50%_baseline / ticks_since_fault` | 0–1 | Lower = better |
+
+**Composite score** (JS): `FT*0.3 + NRR*0.25 + FUR*0.25 + (1-CritTime)*0.2`. When NRR is N/A, weight redistributed: FT 40%, FUR 33%, CritTime 27%. FT capped at 1.0 in composite (Braess doesn't inflate verdict).
+
+### FaultMetrics (`src/analysis/fault_metrics.rs`)
+
+- **MTTR**: mean recovery time of cascade-affected neighbors (not dead agents). 0.0 when no cascade.
+- **MTBF**: mean interval between fault events. Requires 2+ events, else N/A.
+- **Propagation Rate**: `avg(agents_affected / alive_at_event)` — uses alive count at event time, not initial fleet.
+- **Idle Ratio**: `wait_actions / total_actions` for alive agents only. Dead agents excluded (their loss captured by survival_rate + fleet_utilization).
+- **Survival Rate**: `alive / initial_count` time series.
+
+### UI Scorecard Bars
+
+- **Layered bar** (`buildLayeredBar()` in app.js): values >100% render stacked layers (each layer = 100%) with progressively visible backgrounds. Handles Braess paradox FT values.
+- NRR shows "N/A" bar with centered label when null.
 
 ---
 
