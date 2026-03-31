@@ -198,7 +198,7 @@ impl PibtCore {
     /// and an APF field is added to `apf_field`. Subsequent agents see the
     /// accumulated field when sorting candidates.
     ///
-    /// Reference: Pertzovsky et al., arXiv:2505.22753, Equations 11-12.
+    /// Reference: Pertzovsky et al., arXiv:2505.22753v1, Equations 11-12.
     pub fn one_step_with_apf(
         &mut self,
         positions: &[IVec2],
@@ -714,7 +714,7 @@ fn pibt_assign_grid(
 }
 
 // ---------------------------------------------------------------------------
-// APF field construction (paper-accurate, arXiv:2505.22753)
+// APF field construction (paper-accurate, arXiv:2505.22753v1)
 // ---------------------------------------------------------------------------
 
 /// Project agent's path forward from `start` toward `goal` for `t_max` steps,

@@ -520,7 +520,8 @@ impl LifelongSolver for RtLaCAMSolver {
             optimality: Optimality::Suboptimal,
             complexity: "O(node_budget) per tick, amortized config-space DFS",
             scalability: Scalability::High,
-            description: "RT-LaCAM — real-time lazy constraint DFS with PIBT config generator, persistent search, and rerooting. Paper: Liang et al., SoCS 2025.",
+            description: "RT-LaCAM — real-time lazy constraint DFS with PIBT config generator, persistent search, and rerooting.",
+            source: "Liang et al., SoCS 2025",
             recommended_max_agents: None,
         }
     }

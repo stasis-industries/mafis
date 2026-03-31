@@ -422,7 +422,8 @@ impl LifelongSolver for TptsSolver {
             complexity: "O(n × A* + swap_checks × A*) per replan",
             scalability: Scalability::Medium,
             description:
-                "TPTS — Token Passing with Task Swaps. A* cost swap evaluation with snapshot/restore. Paper: Ma et al., AAMAS 2017.",
+                "TPTS — Token Passing with Task Swaps. A* cost swap evaluation with snapshot/restore.",
+            source: "Ma et al., AAMAS 2017",
             recommended_max_agents: Some(100),
         }
     }

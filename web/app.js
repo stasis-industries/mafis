@@ -1332,6 +1332,7 @@ function updateUI(s) {
         document.getElementById('info-opt').textContent = s.solver_info.optimality;
         document.getElementById('info-scale').textContent = s.solver_info.scalability;
         document.getElementById('info-desc').textContent = s.solver_info.description;
+        document.getElementById('info-source').textContent = s.solver_info.source || '';
 
         const warningEl = document.getElementById('info-warning');
         if (s.solver_info.recommended_max_agents && s.num_agents > s.solver_info.recommended_max_agents) {

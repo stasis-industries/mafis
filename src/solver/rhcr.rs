@@ -344,6 +344,7 @@ impl LifelongSolver for RhcrSolver {
             complexity: "O(W⁻¹ × mode_cost) amortized per tick",
             scalability,
             description: desc,
+            source: "Li et al., AAAI 2021",
             recommended_max_agents: match self.config.mode {
                 RhcrMode::Pbs => Some(200),
                 RhcrMode::PibtWindow => None,

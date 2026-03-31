@@ -50,6 +50,7 @@ pub struct SolverInfo {
     pub complexity: &'static str,
     pub scalability: Scalability,
     pub description: &'static str,
+    pub source: &'static str,
     pub recommended_max_agents: Option<usize>,
 }
 

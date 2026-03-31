@@ -77,6 +77,7 @@ impl<G: GuidanceLayer> LifelongSolver for GuidedSolver<G> {
             complexity: base_info.complexity,
             scalability: base_info.scalability,
             description: base_info.description,
+            source: base_info.source,
             recommended_max_agents: base_info.recommended_max_agents,
         }
     }

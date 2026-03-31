@@ -6,7 +6,7 @@
 //! accumulated field when sorting candidate neighbors.
 //!
 //! Reference: Pertzovsky et al., "Enhancing Lifelong Multi-Agent Path-finding
-//! by Using Artificial Potential Fields", arXiv:2505.22753, May 2025.
+//! by Using Artificial Potential Fields", arXiv:2505.22753v1, May 2025.
 //! Reference impl: github.com/Arseni1919/APFs_for_MAPF_Implementation_v2
 
 use bevy::prelude::*;
@@ -79,7 +79,8 @@ impl LifelongSolver for PibtApfSolver {
             optimality: Optimality::Suboptimal,
             complexity: "O(n log n + n * t_max * d_max^2) per timestep",
             scalability: Scalability::High,
-            description: "PIBT+APF — PIBT with sequential artificial potential fields. APF updated after each agent commits, projecting future path. Paper: Pertzovsky et al., arXiv:2505.22753.",
+            description: "PIBT+APF — PIBT with sequential artificial potential fields. APF updated after each agent commits, projecting future path.",
+            source: "Pertzovsky et al., arXiv:2505.22753v1",
             recommended_max_agents: None,
         }
     }
@@ -387,7 +388,7 @@ mod tests {
     /// Paper property: APF with w=0 must produce identical plans to vanilla PIBT.
     /// This is the ablation test — proves the bias mechanism doesn't alter
     /// base PIBT behavior when disabled.
-    /// Reference: Pertzovsky et al., arXiv:2505.22753, Section 4 (ablation).
+    /// Reference: Pertzovsky et al., arXiv:2505.22753v1, Section 4 (ablation).
     #[test]
     fn paper_property_apf_zero_weight_equals_vanilla_pibt() {
         let grid = GridMap::new(8, 8);
@@ -459,7 +460,7 @@ mod tests {
     /// Paper property: idle agents (has_task = false) contribute to the APF
     /// field by adding repulsion at their current position.
     ///
-    /// The paper (Pertzovsky et al., arXiv:2505.22753) states that all agents —
+    /// The paper (Pertzovsky et al., arXiv:2505.22753v1) states that all agents —
     /// including idle ones — contribute to the potential field so that tasked
     /// agents are repelled from occupied idle positions. This is the fix
     /// verified here: `one_step_with_apf` pre-decides idle agents and

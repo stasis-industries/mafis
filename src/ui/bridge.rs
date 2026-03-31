@@ -490,6 +490,7 @@ struct SolverInfoSnapshot {
     complexity: String,
     scalability: String,
     description: String,
+    source: String,
     recommended_max_agents: Option<usize>,
 }
 
@@ -831,6 +832,7 @@ fn sync_state_to_js(
         complexity: info.complexity.to_string(),
         scalability: info.scalability.label().to_string(),
         description: info.description.to_string(),
+        source: info.source.to_string(),
         recommended_max_agents: info.recommended_max_agents,
     };
 

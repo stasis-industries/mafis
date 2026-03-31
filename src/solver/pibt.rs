@@ -65,6 +65,7 @@ impl LifelongSolver for PibtLifelongSolver {
             complexity: "O(n log n) per timestep",
             scalability: Scalability::High,
             description: "PIBT — fast, reactive, one-step planner. Scales to 1000+ agents.",
+            source: "Okumura et al., AAAI 2019",
             recommended_max_agents: None,
         }
     }
@@ -181,6 +182,7 @@ impl MAPFSolver for PibtSolver {
             complexity: "O(n log n) per timestep",
             scalability: Scalability::High,
             description: "Priority Inheritance with Backtracking — fast, reactive, one-step planner. Scales to 1000+ agents with O(n log n) per timestep.",
+            source: "Okumura et al., AAAI 2019",
             recommended_max_agents: None,
         }
     }

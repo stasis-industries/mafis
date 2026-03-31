@@ -206,7 +206,7 @@ pub const TPTS_SWAP_COOLDOWN: u64 = 10;
 
 // ── APF Guidance (Artificial Potential Fields) ──────────────────
 // Paper: Pertzovsky et al., "Enhancing Lifelong MAPF by Using APFs"
-// arXiv:2505.22753. Formula: w * gamma^(-dist) for dist <= d_max.
+// arXiv:2505.22753v1. Formula: w * gamma^(-dist) for dist <= d_max.
 // Recommended PIBT+APF params from Table 1: w=0.1, d_max=2, gamma=3, t_max=2.
 
 /// Steps ahead to project each agent's path for APF construction (t_max).

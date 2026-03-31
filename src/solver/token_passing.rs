@@ -142,6 +142,7 @@ impl LifelongSolver for TokenPassingSolver {
             complexity: "O(n × A* per idle agent)",
             scalability: Scalability::Medium,
             description: "Token Passing — decentralized sequential planning. Each idle agent plans a collision-free path against all others' TOKEN paths.",
+            source: "Ma et al., AAMAS 2017",
             recommended_max_agents: Some(100),
         }
     }

@@ -10,6 +10,7 @@ struct SolverInfo {
     optimality: &'static str,
     scalability: &'static str,
     description: &'static str,
+    source: &'static str,
     warning: Option<&'static str>,
 }
 
@@ -19,36 +20,63 @@ fn solver_info(id: &str) -> SolverInfo {
             optimality: "Suboptimal",
             scalability: "Excellent",
             description: "Reactive one-step priority inheritance. Replans every tick — fast, handles high density.",
+            source: "Okumura et al., AAAI 2019",
+            warning: None,
+        },
+        "pibt+apf" => SolverInfo {
+            optimality: "Suboptimal",
+            scalability: "Excellent",
+            description: "PIBT with sequential artificial potential fields. APF updated after each agent commits.",
+            source: "Pertzovsky et al., arXiv:2505.22753v1",
             warning: None,
         },
         "rhcr_pbs" => SolverInfo {
             optimality: "Bounded",
             scalability: "Good",
             description: "Rolling-horizon with PBS windowed planner. Better path quality, higher compute cost.",
+            source: "Li et al., AAAI 2021",
             warning: None,
         },
         "rhcr_pibt" => SolverInfo {
             optimality: "Suboptimal",
             scalability: "Good",
             description: "Rolling-horizon with unrolled PIBT windows. Cooperative multi-step planning.",
+            source: "Li et al., AAAI 2021",
             warning: None,
         },
         "rhcr_priority_astar" => SolverInfo {
             optimality: "Optimal (per agent)",
             scalability: "Moderate",
             description: "Rolling-horizon with sequential spacetime A*. Good for moderate density.",
+            source: "Li et al., AAAI 2021",
+            warning: None,
+        },
+        "rt_lacam" => SolverInfo {
+            optimality: "Suboptimal",
+            scalability: "Excellent",
+            description: "Real-time lazy constraint DFS with PIBT config generator, persistent search, and rerooting.",
+            source: "Liang et al., SoCS 2025",
             warning: None,
         },
         "token_passing" => SolverInfo {
             optimality: "Optimal (per agent)",
             scalability: "Limited",
             description: "Decentralized sequential planning via shared TOKEN. Each agent plans against all others.",
+            source: "Ma et al., AAMAS 2017",
+            warning: Some("Recommended ≤100 agents"),
+        },
+        "tpts" => SolverInfo {
+            optimality: "Optimal (per agent)",
+            scalability: "Limited",
+            description: "Token Passing with Task Swaps. A* cost swap evaluation with snapshot/restore.",
+            source: "Ma et al., AAMAS 2017",
             warning: Some("Recommended ≤100 agents"),
         },
         _ => SolverInfo {
             optimality: "?",
             scalability: "?",
             description: "Unknown solver.",
+            source: "",
             warning: None,
         },
     }
@@ -102,6 +130,10 @@ pub fn solver_panel(
                 ui.label(info.scalability);
             });
             ui.weak(info.description);
+            if !info.source.is_empty() {
+                ui.add_space(2.0);
+                ui.weak(info.source);
+            }
             if let Some(warn) = info.warning {
                 ui.colored_label(theme::STATE_PAUSED, warn);
             }
