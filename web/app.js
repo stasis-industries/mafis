@@ -2116,9 +2116,6 @@ function initResultsPhase() {
     }
 
     // Export buttons
-    const btnPdf = document.getElementById('btn-export-pdf');
-    if (btnPdf) btnPdf.addEventListener('click', exportResultsPdf);
-
     const btnJson = document.getElementById('btn-export-json-results');
     if (btnJson) btnJson.addEventListener('click', () => sendCommand({ type: 'export_now' }));
 
@@ -2568,42 +2565,6 @@ function populateResultsFromState(s) {
         ];
         configDl.innerHTML = items.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('');
     }
-}
-
-function exportResultsPdf() {
-    // Screenshot the results dashboard as PNG (no external dependencies).
-    // Uses the browser's native scrollWidth/scrollHeight to capture the full area.
-    const dashboard = document.getElementById('results-dashboard');
-    if (!dashboard) return;
-
-    // Collect all uPlot canvases and merge with HTML content
-    const canvases = dashboard.querySelectorAll('canvas');
-    if (canvases.length === 0) {
-        // Fallback: capture via window.print() for the results section
-        window.print();
-        return;
-    }
-
-    // Create a composite canvas from the first chart canvas as a quick screenshot
-    // For a full dashboard screenshot, we serialize chart data as JSON instead
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-    const filename = `mafis-report-${timestamp}`;
-
-    // Export all chart canvases as individual PNGs in a zip-like download sequence
-    // For simplicity, export the first (main) chart canvas
-    const mainCanvas = canvases[0];
-    mainCanvas.toBlob(blob => {
-        if (!blob) return;
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `${filename}-chart.png`;
-        a.click();
-        URL.revokeObjectURL(url);
-    }, 'image/png');
-
-    // Also trigger JSON export for complete data
-    exportResultsJson();
 }
 
 // ---------------------------------------------------------------------------

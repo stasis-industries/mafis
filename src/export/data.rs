@@ -5,7 +5,6 @@ pub struct ExportSnapshot {
     pub metadata: ExportMetadata,
     pub config: ExportSimConfig,
     pub agents: Vec<ExportAgent>,
-    pub tick_history: Vec<ExportTickRow>,
     pub faults: Vec<ExportFault>,
     pub metrics: ExportMetrics,
     pub heatmap: Vec<ExportHeatmapCell>,
@@ -21,6 +20,8 @@ pub struct ExportMetadata {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ExportSimConfig {
+    pub topology_name: String,
+    pub scheduler_name: String,
     pub grid_width: i32,
     pub grid_height: i32,
     pub num_agents: usize,
@@ -43,26 +44,15 @@ pub struct ExportSimConfig {
 #[derive(Debug, Clone, Serialize)]
 pub struct ExportAgent {
     pub agent_index: usize,
-    pub start_pos: [i32; 2],
     pub goal_pos: [i32; 2],
     pub current_pos: [i32; 2],
     pub is_dead: bool,
     pub heat: f32,
     pub total_moves: u32,
-    pub delay_direct: u32,
-    pub delay_indirect: u32,
     pub cascade_depth: u32,
     pub idle_ratio: f32,
     pub total_actions: u32,
     pub wait_actions: u32,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct ExportTickRow {
-    pub tick: u64,
-    pub agent_index: usize,
-    pub x: i32,
-    pub y: i32,
 }
 
 #[derive(Debug, Clone, Serialize)]

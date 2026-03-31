@@ -38,6 +38,8 @@ pub fn gather_snapshot(
     registry: &AgentRegistry,
     fault_log: &FaultLog,
     fault_metrics: &FaultMetrics,
+    topology_name: &str,
+    scheduler_name: &str,
     solver_name: &str,
     solver_optimality: &str,
     solver_scalability: &str,
@@ -57,6 +59,8 @@ pub fn gather_snapshot(
     obstacle_positions.sort();
 
     let config = ExportSimConfig {
+        topology_name: topology_name.to_string(),
+        scheduler_name: scheduler_name.to_string(),
         grid_width: grid.width,
         grid_height: grid.height,
         num_agents: ui_state.num_agents,
@@ -92,14 +96,11 @@ pub fn gather_snapshot(
 
             ExportAgent {
                 agent_index,
-                start_pos: [agent.current_pos.x, agent.current_pos.y],
                 goal_pos: [agent.goal_pos.x, agent.goal_pos.y],
                 current_pos: [agent.current_pos.x, agent.current_pos.y],
                 is_dead: *is_dead,
                 heat: heat_val,
                 total_moves: moves,
-                delay_direct: 0,
-                delay_indirect: 0,
                 cascade_depth: depth,
                 idle_ratio: action_stats.map_or(0.0, |s| s.idle_ratio()),
                 total_actions: action_stats.map_or(0, |s| s.total_actions),
@@ -200,7 +201,6 @@ pub fn gather_snapshot(
         metadata,
         config,
         agents,
-        tick_history: Vec::new(),
         faults,
         metrics: export_metrics,
         heatmap: heatmap_cells,

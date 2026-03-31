@@ -20,6 +20,8 @@ use crate::fault::breakdown::{Dead, FaultEvent};
 use crate::fault::config::{FaultConfig, FaultType};
 use crate::fault::heat::HeatState;
 use crate::fault::FaultSet;
+use crate::core::task::ActiveScheduler;
+use crate::core::topology::ActiveTopology;
 use crate::solver::ActiveSolver;
 use crate::ui::controls::UiState;
 
@@ -162,6 +164,8 @@ fn process_export_requests(
     fault_log: Res<FaultLog>,
     fault_metrics: Res<FaultMetrics>,
     solver: Res<ActiveSolver>,
+    topology: Res<ActiveTopology>,
+    scheduler: Res<ActiveScheduler>,
     agents: Query<(
         Entity,
         &LogicalAgent,
@@ -188,6 +192,8 @@ fn process_export_requests(
             &registry,
             &fault_log,
             &fault_metrics,
+            topology.name(),
+            scheduler.name(),
             solver.name(),
             info.optimality.label(),
             info.scalability.label(),
