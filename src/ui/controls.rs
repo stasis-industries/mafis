@@ -156,7 +156,7 @@ impl Default for UiState {
             grid_width: 25,
             grid_height: 15,
             solver_name: "pibt".to_string(),
-            topology_name: "warehouse_medium".to_string(),
+            topology_name: "warehouse_large".to_string(),
             imported_scenario: None,
             rhcr_horizon: None,
             rhcr_replan_interval: None,
@@ -298,7 +298,7 @@ fn begin_loading(
 
             // Always provide grid_override so the baseline uses the exact same
             // grid as the LiveSim. Without this, registry topologies (e.g.
-            // "warehouse_medium") call ActiveTopology::from_name() which panics
+            // "warehouse_large") call ActiveTopology::from_name() which panics
             // on WASM and can produce subtly different grids on native.
             let grid_override = Some(generate_grid_and_zones(
                 &res.ui_state.topology_name,

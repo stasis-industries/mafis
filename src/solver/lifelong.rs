@@ -87,6 +87,12 @@ pub trait LifelongSolver: Send + Sync + 'static {
     /// Set a cell-level heuristic bias function for guided planning.
     /// Solvers that support guidance override this. Default: no-op.
     fn set_cell_bias(&mut self, _bias: Option<Box<dyn Fn(IVec2, usize) -> f64 + Send + Sync>>) {}
+
+    /// Drain pending goal overrides produced by the last `step()`.
+    /// Solvers that swap goals (e.g. TPTS) return `(agent_index, new_goal)` pairs.
+    /// The runner applies these to update `agent.goal` in the task system.
+    /// Default: no overrides.
+    fn drain_goal_overrides(&mut self) -> Vec<(usize, IVec2)> { Vec::new() }
 }
 
 // ---------------------------------------------------------------------------

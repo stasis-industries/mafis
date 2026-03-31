@@ -164,7 +164,7 @@ pub fn solver_resilience() -> ExperimentMatrix {
             "tpts".into(),
             "pibt+apf".into(),
         ],
-        topologies: vec!["warehouse_medium".into()],
+        topologies: vec!["warehouse_large".into()],
         scenarios: paper_scenarios(),
         schedulers: vec!["random".into()],
         agent_counts: vec![40],
@@ -185,7 +185,7 @@ pub fn solver_resilience() -> ExperimentMatrix {
 /// Agent counts scaled to topology capacity.
 /// Tests whether layout structure (aisles vs open vs dense) affects fault impact.
 ///
-/// 5 topologies x 6 scenarios x 30 seeds = 900 runs
+/// 5 topologies x 7 scenarios x 30 seeds = 1050 runs
 ///
 /// Note: agent counts are per-topology, not Cartesian. This function returns
 /// 5 separate matrices (one per topology) to be run and merged.
@@ -194,7 +194,7 @@ pub fn topology_effect() -> Vec<ExperimentMatrix> {
     vec![
         ExperimentMatrix {
             solvers: vec!["pibt".into()],
-            topologies: vec!["warehouse_medium".into()],
+            topologies: vec!["warehouse_large".into()],
             scenarios: scenarios.clone(),
             schedulers: vec!["random".into()],
             agent_counts: vec![40],
@@ -203,7 +203,7 @@ pub fn topology_effect() -> Vec<ExperimentMatrix> {
         },
         ExperimentMatrix {
             solvers: vec!["pibt".into()],
-            topologies: vec!["kiva_large".into()],
+            topologies: vec!["kiva_warehouse".into()],
             scenarios: scenarios.clone(),
             schedulers: vec!["random".into()],
             agent_counts: vec![80],
@@ -222,9 +222,18 @@ pub fn topology_effect() -> Vec<ExperimentMatrix> {
         ExperimentMatrix {
             solvers: vec!["pibt".into()],
             topologies: vec!["compact_grid".into()],
+            scenarios: scenarios.clone(),
+            schedulers: vec!["random".into()],
+            agent_counts: vec![25],
+            seeds: SEEDS.to_vec(),
+            tick_count: TICK_COUNT,
+        },
+        ExperimentMatrix {
+            solvers: vec!["pibt".into()],
+            topologies: vec!["fullfilment_center".into()],
             scenarios,
             schedulers: vec!["random".into()],
-            agent_counts: vec![30],
+            agent_counts: vec![35],
             seeds: SEEDS.to_vec(),
             tick_count: TICK_COUNT,
         },
@@ -246,7 +255,7 @@ pub fn topology_effect() -> Vec<ExperimentMatrix> {
 pub fn scale_sensitivity() -> ExperimentMatrix {
     ExperimentMatrix {
         solvers: vec!["pibt".into()],
-        topologies: vec!["warehouse_medium".into()],
+        topologies: vec!["warehouse_large".into()],
         scenarios: paper_scenarios(),
         schedulers: vec!["random".into()],
         agent_counts: vec![10, 20, 40, 80],
@@ -270,7 +279,7 @@ pub fn scale_sensitivity() -> ExperimentMatrix {
 pub fn scheduler_effect() -> ExperimentMatrix {
     ExperimentMatrix {
         solvers: vec!["pibt".into()],
-        topologies: vec!["warehouse_medium".into()],
+        topologies: vec!["warehouse_large".into()],
         scenarios: paper_scenarios(),
         schedulers: vec!["random".into(), "closest".into()],
         agent_counts: vec![40],
@@ -309,7 +318,7 @@ pub fn braess_resilience() -> ExperimentMatrix {
             "tpts".into(),
             "pibt+apf".into(),
         ],
-        topologies: vec!["warehouse_medium".into()],
+        topologies: vec!["warehouse_large".into()],
         scenarios: paper_scenarios(),
         schedulers: vec!["random".into()],
         agent_counts: vec![10, 20, 40, 80],
@@ -334,11 +343,11 @@ pub fn all_paper_experiments() -> Vec<(&'static str, ExperimentMatrix)> {
         ("scheduler_effect", scheduler_effect()),
     ];
     let topo_names = [
-        "topology_small",
-        "topology_medium",
-        "topology_kiva_large",
+        "topology_warehouse_large",
+        "topology_kiva_warehouse",
         "topology_sorting_center",
         "topology_compact_grid",
+        "topology_fullfilment_center",
     ];
     for (i, m) in topology_effect().into_iter().enumerate() {
         experiments.push((topo_names[i], m));
@@ -355,12 +364,12 @@ pub fn all_paper_experiments() -> Vec<(&'static str, ExperimentMatrix)> {
 pub fn smoke_test() -> ExperimentMatrix {
     ExperimentMatrix {
         solvers: vec!["pibt".into()],
-        topologies: vec!["warehouse_medium".into()],
+        topologies: vec!["warehouse_large".into()],
         scenarios: vec![Some(burst_20())],
         schedulers: vec!["random".into()],
-        agent_counts: vec![8],
+        agent_counts: vec![15],
         seeds: vec![42, 123],
-        tick_count: 50,
+        tick_count: 100,
     }
 }
 
@@ -368,7 +377,7 @@ pub fn smoke_test() -> ExperimentMatrix {
 // Tier 3: Solver benchmark — all 8 solvers, baseline throughput comparison
 // ---------------------------------------------------------------------------
 
-/// Benchmark all 8 solvers at 40 agents on warehouse_medium, no faults.
+/// Benchmark all 8 solvers at 40 agents on warehouse_large, no faults.
 /// 5 seeds for statistical confidence. ~80 runs total (8 solvers × 2 scenarios × 5 seeds).
 pub fn solver_benchmark() -> ExperimentMatrix {
     ExperimentMatrix {
@@ -382,7 +391,7 @@ pub fn solver_benchmark() -> ExperimentMatrix {
             "tpts".into(),
             "pibt+apf".into(),
         ],
-        topologies: vec!["warehouse_medium".into()],
+        topologies: vec!["warehouse_large".into()],
         scenarios: vec![None, Some(burst_20())],
         schedulers: vec!["random".into()],
         agent_counts: vec![40],
@@ -405,7 +414,7 @@ mod tests {
     fn topology_effect_count() {
         let matrices = topology_effect();
         let total: usize = matrices.iter().map(|m| m.total_runs()).sum();
-        assert_eq!(total, 840); // 4 x (7 x 30)
+        assert_eq!(total, 1050); // 5 x (7 x 30)
     }
 
     #[test]
@@ -424,7 +433,7 @@ mod tests {
     fn all_paper_total() {
         let all = all_paper_experiments();
         let total: usize = all.iter().map(|(_, m)| m.total_runs()).sum();
-        assert_eq!(total, 3570); // 1470+840+840+420
+        assert_eq!(total, 3780); // 1470+1050+840+420
     }
 
     #[test]
@@ -454,7 +463,7 @@ mod tests {
                 "rhcr_priority_astar".into(),
                 "token_passing".into(),
             ],
-            topologies: vec!["warehouse_medium".into()],
+            topologies: vec!["warehouse_large".into()],
             scenarios: vec![Some(perm_zone_outage())],
             schedulers: vec!["random".into()],
             agent_counts: vec![10, 20, 40, 80],
@@ -553,7 +562,7 @@ mod tests {
                 "tpts".into(),
                 "pibt+apf".into(),
             ],
-            topologies: vec!["warehouse_medium".into()],
+            topologies: vec!["warehouse_large".into()],
             scenarios: vec![None, Some(burst_20()), Some(burst_50())],
             schedulers: vec!["closest".into()],
             agent_counts: vec![20],
@@ -605,7 +614,7 @@ mod tests {
     /// Tier 3: Run all 8 solvers and validate performance expectations.
     ///
     /// This is the benchmark comparison test. It runs each solver on
-    /// warehouse_medium with 40 agents for 500 ticks (5 seeds, no faults)
+    /// warehouse_large with 40 agents for 500 ticks (5 seeds, no faults)
     /// and validates:
     /// 1. All solvers produce non-zero throughput
     /// 2. Performance ranking roughly matches paper expectations
@@ -633,7 +642,7 @@ mod tests {
                 "tpts".into(),
                 "pibt+apf".into(),
             ],
-            topologies: vec!["warehouse_medium".into()],
+            topologies: vec!["warehouse_large".into()],
             scenarios: vec![None],
             schedulers: vec!["random".into()],
             agent_counts: vec![40],
@@ -658,7 +667,7 @@ mod tests {
                 .push(run.baseline_metrics.avg_throughput);
         }
 
-        eprintln!("\n=== Solver Benchmark Results (40 agents, warehouse_medium, 500 ticks) ===");
+        eprintln!("\n=== Solver Benchmark Results (40 agents, warehouse_large, 500 ticks) ===");
         eprintln!("{:<25} {:>8} {:>8} {:>8}", "Solver", "Mean TP", "Min TP", "Max TP");
         eprintln!("{}", "-".repeat(55));
 
@@ -682,7 +691,7 @@ mod tests {
         for (solver, mean) in &solver_means {
             assert!(
                 *mean > 0.0,
-                "solver {solver} produced zero throughput on warehouse_medium with 40 agents"
+                "solver {solver} produced zero throughput on warehouse_large with 40 agents"
             );
         }
 

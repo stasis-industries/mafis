@@ -1219,8 +1219,7 @@ function loadMapData(w, h, obstacles) {
         }
     }
 
-    // Auto-classify zones (JS port of Rust heuristic)
-    classifyZones();
+    // .map files load as walls-only — user adds zones manually in the editor
 
     robots = [];
     deliveryDirections = {};
@@ -1447,11 +1446,11 @@ function buildJsonData() {
     const name = nameEl?.value?.trim() || `${gridW}x${gridH}`;
 
     return {
-        version: 1,
         name,
         width: gridW,
         height: gridH,
         seed,
+        number_agents: robots.length,
         cells: cellsData,
         robots: robots.map(r => ({ x: r.x, y: r.y })),
     };

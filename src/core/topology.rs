@@ -41,7 +41,7 @@ pub struct ZoneMap {
 pub struct TopologyOutput {
     pub grid: GridMap,
     pub zones: ZoneMap,
-    pub suggested_agents: usize,
+    pub number_agents: usize,
 }
 
 pub trait Topology: Send + Sync + 'static {
@@ -71,7 +71,7 @@ impl Topology for CustomMap {
                 self.grid.obstacles().clone(),
             ),
             zones: self.zones.clone(),
-            suggested_agents: 0,
+            number_agents: 0,
         }
     }
 }
@@ -187,7 +187,7 @@ pub struct TopologyEntry {
     pub name: String,
     pub width: i32,
     pub height: i32,
-    pub suggested_agents: usize,
+    pub number_agents: usize,
     pub walkable_cells: usize,
     /// Raw JSON string for passing to the experiment runner or custom map loader.
     pub json_data: String,
@@ -200,7 +200,7 @@ pub struct TopologyRegistry {
 }
 
 impl TopologyRegistry {
-    /// Find an entry by id (e.g. "warehouse_medium").
+    /// Find an entry by id (e.g. "warehouse_large").
     pub fn find(&self, id: &str) -> Option<&TopologyEntry> {
         self.entries.iter().find(|e| e.id == id)
     }
@@ -237,11 +237,7 @@ impl TopologyRegistry {
             let name = v.get("name").and_then(|v| v.as_str()).unwrap_or(&filename).to_string();
             let id = filename.replace(".json", "").replace('-', "_");
 
-            let robots = v.get("robots").and_then(|r| r.as_array()).map(|a| a.len()).unwrap_or(0);
-            let suggested = v.get("suggested_agents").and_then(|v| v.as_u64()).map(|n| n as usize)
-                .unwrap_or(robots);
-
-            // Compute walkable cells
+            // Compute walkable cells first (needed for auto-suggestion)
             let walkable = if let Some(wc) = v.get("walkable_cells").and_then(|v| v.as_u64()) {
                 wc as usize
             } else if let Some(cells) = v.get("cells").and_then(|c| c.as_array()) {
@@ -251,12 +247,20 @@ impl TopologyRegistry {
                 (width * height) as usize
             };
 
+            // Agent count: number_agents > suggested_agents (legacy) > robots array > 0
+            let robots = v.get("robots").and_then(|r| r.as_array()).map(|a| a.len()).unwrap_or(0);
+            let num_agents = v.get("number_agents")
+                .or_else(|| v.get("suggested_agents"))
+                .and_then(|v| v.as_u64())
+                .map(|n| n as usize)
+                .unwrap_or(robots);
+
             entries.push(TopologyEntry {
                 id,
                 name,
                 width,
                 height,
-                suggested_agents: suggested,
+                number_agents: num_agents,
                 walkable_cells: walkable,
                 json_data,
             });
@@ -450,8 +454,7 @@ pub fn validate_connectivity(grid: &GridMap, zones: &ZoneMap) -> Result<(), Vec<
 ///
 /// `.` and `G` = walkable. `@`, `T`, `O`, `W` = obstacle.
 /// All walkable cells become corridors (no pickup/delivery zones).
-/// For lifelong benchmarks, pickup/delivery zones should be assigned
-/// separately via `assign_random_zones()`.
+/// In the map creator, the user adds zones manually before saving as JSON.
 pub fn parse_movingai_map(text: &str) -> Option<(GridMap, ZoneMap)> {
     let lines: Vec<&str> = text.lines().collect();
     let mut width: i32 = 0;
@@ -497,9 +500,7 @@ pub fn parse_movingai_map(text: &str) -> Option<(GridMap, ZoneMap)> {
 
     let grid = GridMap::with_obstacles(width, height, obstacles);
 
-    // Build a basic ZoneMap: all walkable cells are corridors.
-    // For lifelong MAPF benchmarks, call assign_random_zones() to designate
-    // some cells as pickup/delivery.
+    // Build a basic ZoneMap: all walkable cells are corridors (no zones).
     let mut corridor_cells = Vec::new();
     for y in 0..height {
         for x in 0..width {

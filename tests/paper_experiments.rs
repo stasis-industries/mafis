@@ -82,7 +82,7 @@ fn full_paper_matrix() {
     }
 
     // Verify sanity — warn on zero-task baselines but don't fail.
-    // RHCR-PIBT at high density (40 agents on warehouse_medium) can produce 0
+    // RHCR-PIBT at high density (40 agents on warehouse_large) can produce 0
     // baseline tasks for some seeds due to windowed planning deadlocks. This is
     // a legitimate (poor) solver outcome, not a pipeline failure.
     let mut zero_task_runs = Vec::new();
@@ -155,7 +155,7 @@ fn scheduler_effect() {
 fn topology_medium() {
     ensure_output_dir();
     let matrices = paper::topology_effect();
-    let matrix = &matrices[0]; // warehouse_medium
+    let matrix = &matrices[0]; // warehouse_large
     eprintln!("─── topology_medium ({} runs) ───", matrix.total_runs());
     let result = run_matrix(matrix, None);
     write_experiment_results("topology_medium", &result);
@@ -168,7 +168,7 @@ fn topology_medium() {
 fn topology_large() {
     ensure_output_dir();
     let matrices = paper::topology_effect();
-    let matrix = &matrices[1]; // kiva_large
+    let matrix = &matrices[1]; // kiva_warehouse
     eprintln!("─── topology_large ({} runs) ───", matrix.total_runs());
     let result = run_matrix(matrix, None);
     write_experiment_results("topology_large", &result);

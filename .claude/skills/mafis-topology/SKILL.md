@@ -36,7 +36,7 @@ pub trait Topology: Send + Sync + 'static {
 pub struct TopologyOutput {
     pub grid: GridMap,
     pub zones: ZoneMap,
-    pub suggested_agents: usize,
+    pub number_agents: usize,
 }
 ```
 
@@ -152,7 +152,7 @@ impl Topology for YourTopology {
         TopologyOutput {
             grid,
             zones,
-            suggested_agents: self.width as usize / 3,
+            number_agents: self.width as usize / 3,
         }
     }
 }
@@ -224,7 +224,7 @@ Add topology-specific constants to `src/constants.rs`.
 2. **Connectivity** — All walkable cells must be reachable. A disconnected grid causes agent deadlocks.
 3. **Non-empty zones** — `pickup_cells` and `delivery_cells` must never be empty.
 4. **Walkable zones** — Every zone cell must be walkable in the grid.
-5. **Suggested agents** — Must fit on walkable cells. `suggested_agents <= walkable_count`.
+5. **Suggested agents** — Must fit on walkable cells. `number_agents <= walkable_count`.
 
 ## Common Topology Ideas
 

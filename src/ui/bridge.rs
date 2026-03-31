@@ -1496,7 +1496,7 @@ fn process_js_commands(
                             sim_res.ui_state.topology_name = entry.id.clone();
                             sim_res.ui_state.grid_width = entry.width;
                             sim_res.ui_state.grid_height = entry.height;
-                            sim_res.ui_state.num_agents = entry.suggested_agents;
+                            sim_res.ui_state.num_agents = entry.number_agents;
                             if let Some(at) = ActiveTopology::from_entry(entry) {
                                 *lifelong_res.topology = at;
                             }
@@ -1555,7 +1555,7 @@ fn process_js_commands(
                         if let Some(entry) = lifelong_res.topo_registry.find(&name) {
                             sim_res.ui_state.grid_width = entry.width;
                             sim_res.ui_state.grid_height = entry.height;
-                            sim_res.ui_state.num_agents = entry.suggested_agents;
+                            sim_res.ui_state.num_agents = entry.number_agents;
                             if let Some(at) = ActiveTopology::from_entry(entry) {
                                 *lifelong_res.topology = at;
                             }

@@ -701,7 +701,7 @@ mod tests {
         use crate::core::topology::TopologyRegistry;
 
         let registry = TopologyRegistry::load_from_dir(std::path::Path::new("topologies"));
-        let entry = registry.find("warehouse_medium").expect("warehouse_medium.json missing");
+        let entry = registry.find("warehouse_large").expect("warehouse_large.json missing");
         let (grid_owned, zones_owned) = TopologyRegistry::parse_entry(entry).unwrap();
         let grid = &grid_owned;
         let zones = &zones_owned;
@@ -729,7 +729,7 @@ mod tests {
         use crate::core::topology::TopologyRegistry;
 
         let registry = TopologyRegistry::load_from_dir(std::path::Path::new("topologies"));
-        let entry = registry.find("warehouse_medium").expect("warehouse_medium.json missing");
+        let entry = registry.find("warehouse_large").expect("warehouse_large.json missing");
         let (grid_owned, zones_owned) = TopologyRegistry::parse_entry(entry).unwrap();
         let grid = &grid_owned;
         let zones = &zones_owned;
@@ -753,7 +753,7 @@ mod tests {
         use crate::core::topology::TopologyRegistry;
 
         let registry = TopologyRegistry::load_from_dir(std::path::Path::new("topologies"));
-        let entry = registry.find("warehouse_medium").expect("warehouse_medium.json missing");
+        let entry = registry.find("warehouse_large").expect("warehouse_large.json missing");
         let (grid_owned, zones_owned) = TopologyRegistry::parse_entry(entry).unwrap();
         let grid = &grid_owned;
         let zones = &zones_owned;
@@ -777,7 +777,7 @@ mod tests {
         use crate::core::topology::TopologyRegistry;
 
         let registry = TopologyRegistry::load_from_dir(std::path::Path::new("topologies"));
-        let entry = registry.find("warehouse_medium").expect("warehouse_medium.json missing");
+        let entry = registry.find("warehouse_large").expect("warehouse_large.json missing");
         let (grid_owned, zones_owned) = TopologyRegistry::parse_entry(entry).unwrap();
         let grid = &grid_owned;
         let zones = &zones_owned;

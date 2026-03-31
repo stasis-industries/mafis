@@ -51,7 +51,7 @@ pub trait Topology: Send + Sync + 'static {
 pub struct TopologyOutput {
     pub grid: GridMap,
     pub zones: ZoneMap,
-    pub suggested_agents: usize,
+    pub number_agents: usize,
 }
 ```
 
@@ -165,7 +165,7 @@ impl Topology for MyTopology {
         TopologyOutput {
             grid,
             zones,
-            suggested_agents: 20,
+            number_agents: 20,
         }
     }
 }

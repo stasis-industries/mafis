@@ -36,7 +36,7 @@ const SOLVERS: &[&str] = &[
 /// its PBS node limit (clamp(N*3, 50, max) = 50 for N≤16 agents) is too tight
 /// for unstructured open-space planning — it falls back to PIBT per-agent but
 /// still produces near-zero task completion in 200 ticks. PBS works correctly
-/// on structured topologies like warehouse_medium (verified in verification.rs).
+/// on structured topologies like warehouse_large (verified in verification.rs).
 const LIVENESS_SOLVERS: &[&str] = &[
     "pibt", "rhcr_pibt", "rhcr_priority_astar",
     "token_passing", "rt_lacam", "tpts", "pibt+apf",

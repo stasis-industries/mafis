@@ -416,19 +416,10 @@ impl PibtCore {
             }
         }
 
-        // Pre-decide idle agents (has_task == false): force Wait and exclude
-        // from PIBT planning so they don't interfere with tasked agents via
-        // priority inheritance.
-        if !has_task.is_empty() {
-            for i in 0..n {
-                if !has_task[i] && !self.decided_buf[i] {
-                    // Stay in place (Wait)
-                    self.next_pos_buf[i] = positions[i];
-                    self.decided_buf[i] = true;
-                    self.next_occ.set(positions[i], i);
-                }
-            }
-        }
+        // Idle agents (has_task == false) are NOT pre-decided: they participate
+        // in PIBT normally so higher-priority agents can push them out of the way
+        // via priority inheritance. They naturally prefer staying at their goal
+        // (BFS distance = 0) but are movable when blocking traffic.
 
         // Sort UNCONSTRAINED agents by priority (descending).
         // Task-aware: agents with active tasks sort before idle agents

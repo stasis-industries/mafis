@@ -50,7 +50,7 @@ const SEEDS: &[u64] = &[42, 123, 456, 789, 1024];
 
 #[test]
 fn property_throughput_saturation_pibt() {
-    let topology = "warehouse_medium"; // 32×21 = 672 cells
+    let topology = "warehouse_large"; // 32×21 = 672 cells
     let ticks = 300;
 
     // Sweep: 5, 10, 20, 40, 60, 80 agents
@@ -92,7 +92,7 @@ fn property_throughput_saturation_pibt() {
 #[test]
 fn property_pibt_completeness() {
     // Run on all topologies at moderate density
-    let topologies = ["warehouse_medium", "kiva_large", "sorting_center", "compact_grid"];
+    let topologies = ["warehouse_large", "kiva_warehouse", "sorting_center", "compact_grid"];
     let ticks = 500;
     let agents = 20;
 
@@ -151,7 +151,7 @@ fn property_pibt_liveness_at_high_density() {
 
 #[test]
 fn property_solver_paradigm_consistency() {
-    let topology = "warehouse_medium";
+    let topology = "warehouse_large";
     let ticks = 300;
     let agents = 20;
 
@@ -201,7 +201,7 @@ fn property_topology_sensitivity() {
     let ticks = 300;
     let agents = 20;
 
-    let topologies = ["warehouse_medium", "compact_grid", "sorting_center"];
+    let topologies = ["warehouse_large", "compact_grid", "sorting_center"];
     let mut throughputs = Vec::new();
 
     for &topo in &topologies {
@@ -237,8 +237,8 @@ fn property_topology_sensitivity() {
 
 #[test]
 fn property_differential_measurement_validity() {
-    let topology = "warehouse_medium";
-    let agents = 30; // higher count so burst kills more agents
+    let topology = "compact_grid";
+    let agents = 25; // dense on compact_grid (380 walkable) so burst has clear impact
     let ticks = 500; // longer run for more signal
 
     // Test 1: determinism — two identical runs produce identical results

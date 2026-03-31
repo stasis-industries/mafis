@@ -1311,6 +1311,14 @@ impl SimulationRunner {
             StepResult::Continue => {}
         }
 
+        // Apply goal overrides from solvers that swap tasks (e.g. TPTS).
+        let overrides = self.solver.drain_goal_overrides();
+        for (idx, new_goal) in overrides {
+            if idx < n && self.agents[idx].alive {
+                self.agents[idx].goal = new_goal;
+            }
+        }
+
         // Put scratch buffer back
         self.solver_states_buf = agent_states;
 

@@ -835,7 +835,7 @@ mod tests {
     /// they should receive different pickup cells drawn from a random pool.
     #[test]
     fn closest_batch_no_hotspot_regression() {
-        // Simulate warehouse_medium geometry: pickup rows at y=1,4,7 spanning x=2..8,
+        // Simulate warehouse_large geometry: pickup rows at y=1,4,7 spanning x=2..8,
         // delivery column at x=10. After delivery all agents are near x=10.
         let mut zone_type = std::collections::HashMap::new();
         let mut pickup_cells = Vec::new();

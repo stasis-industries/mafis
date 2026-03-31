@@ -235,13 +235,14 @@ Topologies are defined exclusively as JSON files in `topologies/`. No Rust-gener
 - `TopologyRegistry::parse_json_value()`: parses JSON → (GridMap, ZoneMap) including `queue_direction` + BFS connectivity validation
 - `validate_connectivity(grid, zones)`: BFS reachability check — all pickup/delivery cells must be in the same connected component
 - `Topology` trait: `fn name()` + `fn generate(seed) -> TopologyOutput`
-- `TopologyOutput`: grid + ZoneMap + suggested_agents
+- `TopologyOutput`: grid + ZoneMap + number_agents
 - `ZoneMap` resource: pickup_cells, delivery_cells, corridor_cells, queue_lines, zone_type HashMap
-- Bridge command: `set_topology "warehouse_medium"|"kiva_warehouse"` (any id from registry)
-- 7 topologies: warehouse_medium, kiva_large, sorting_center, compact_grid, kiva_warehouse, rack_warehouse, fulfillment_center
+- Bridge command: `set_topology "warehouse_large"|"kiva_warehouse"` (any id from registry)
+- 6 topologies: warehouse_medium (30×15), warehouse_large (57×33), compact_grid (26×26), kiva_warehouse (48×48), sorting_center (45×20), fullfilment_center (54×24)
+- `number_agents`: required agent count from JSON (no auto-compute; map won't simulate if missing)
 - To add a new topology: create JSON in `topologies/`, run `sh topologies/build-manifest.sh`
 - `parse_movingai_map(text)`: parses MovingAI `.map` files → (GridMap, ZoneMap) for benchmark testing
-- `assign_random_zones(zones, n_pickup, n_delivery)`: designates corridor cells as pickup/delivery zones
+- `.map` files load as walls-only; zones must be added manually in the map creator before saving as JSON
 
 ## Task Scheduling (`src/core/task.rs`)
 

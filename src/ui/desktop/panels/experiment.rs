@@ -39,7 +39,7 @@ struct PresetConfig {
 fn preset_solver_resilience() -> PresetConfig {
     PresetConfig {
         solvers: vec!["pibt".into(), "rhcr_pibt".into(), "rhcr_priority_astar".into()],
-        topologies: vec!["warehouse_medium".into()],
+        topologies: vec!["warehouse_large".into()],
         schedulers: vec!["random".into()],
         agent_counts: "40".into(),
         seeds: "42, 123, 456, 789, 1024".into(),
@@ -51,7 +51,7 @@ fn preset_solver_resilience() -> PresetConfig {
 fn preset_scale_sensitivity() -> PresetConfig {
     PresetConfig {
         solvers: vec!["pibt".into()],
-        topologies: vec!["warehouse_medium".into()],
+        topologies: vec!["warehouse_large".into()],
         schedulers: vec!["random".into()],
         agent_counts: "10, 20, 40, 80".into(),
         seeds: "42, 123, 456, 789, 1024".into(),
@@ -63,7 +63,7 @@ fn preset_scale_sensitivity() -> PresetConfig {
 fn preset_scheduler_effect() -> PresetConfig {
     PresetConfig {
         solvers: vec!["pibt".into()],
-        topologies: vec!["warehouse_medium".into()],
+        topologies: vec!["warehouse_large".into()],
         schedulers: vec!["random".into(), "closest".into()],
         agent_counts: "40".into(),
         seeds: "42, 123, 456, 789, 1024".into(),
@@ -75,7 +75,7 @@ fn preset_scheduler_effect() -> PresetConfig {
 fn preset_smoke_test() -> PresetConfig {
     PresetConfig {
         solvers: vec!["pibt".into()],
-        topologies: vec!["warehouse_medium".into()],
+        topologies: vec!["warehouse_large".into()],
         schedulers: vec!["random".into()],
         agent_counts: "8".into(),
         seeds: "42, 123".into(),

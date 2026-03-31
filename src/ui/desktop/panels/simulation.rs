@@ -37,7 +37,7 @@ pub fn simulation_panel(
             if let Some((grid, zones)) = TopologyRegistry::parse_entry(entry) {
                 ui_state.grid_width = grid.width;
                 ui_state.grid_height = grid.height;
-                ui_state.num_agents = entry.suggested_agents;
+                ui_state.num_agents = entry.number_agents;
                 topology.set(Box::new(CustomMap { grid, zones }));
             }
         }
@@ -62,8 +62,11 @@ pub fn simulation_panel(
                         ui_state.grid_width = grid.width;
                         ui_state.grid_height = grid.height;
 
-                        // Use suggested_agents from JSON, or count robots, or keep current
-                        if let Some(n) = v.get("suggested_agents").and_then(|v| v.as_u64()) {
+                        // Use number_agents from JSON, fall back to suggested_agents/robots
+                        if let Some(n) = v.get("number_agents")
+                            .or_else(|| v.get("suggested_agents"))
+                            .and_then(|v| v.as_u64())
+                        {
                             ui_state.num_agents = n as usize;
                         } else if let Some(robots) = v.get("robots").and_then(|r| r.as_array()) {
                             if !robots.is_empty() {
@@ -82,7 +85,7 @@ pub fn simulation_panel(
 
     for entry in &registry.entries {
         let selected = ui_state.topology_name == entry.id;
-        let desc = format!("{}×{} · {} agents", entry.width, entry.height, entry.suggested_agents);
+        let desc = format!("{}×{} · {} agents", entry.width, entry.height, entry.number_agents);
         let text = if selected {
             egui::RichText::new(format!("▸ {}  {}", entry.name, desc)).strong()
         } else {
@@ -97,7 +100,7 @@ pub fn simulation_panel(
                 ui_state.topology_name = entry.id.clone();
                 ui_state.grid_width = grid.width;
                 ui_state.grid_height = grid.height;
-                ui_state.num_agents = entry.suggested_agents;
+                ui_state.num_agents = entry.number_agents;
                 topology.set(Box::new(CustomMap { grid, zones }));
             }
         }

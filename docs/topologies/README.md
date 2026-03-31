@@ -32,7 +32,7 @@ Every topology file follows this structure:
   "name": "My Warehouse",
   "width": 32,
   "height": 24,
-  "suggested_agents": 15,
+  "number_agents": 15,
   "cells": [
     { "x": 0, "y": 0, "type": "wall" },
     { "x": 5, "y": 3, "type": "pickup" },
@@ -51,7 +51,7 @@ Every topology file follows this structure:
 | `width` | Yes | Grid width in cells |
 | `height` | Yes | Grid height in cells |
 | `cells` | Yes | Array of cell definitions |
-| `suggested_agents` | No | Recommended agent count for this layout |
+| `number_agents` | Yes | Number of agents to spawn |
 | `seed` | No | Random seed |
 | `robots` | No | Initial robot positions (`[{x, y}, ...]`) |
 
@@ -155,7 +155,7 @@ Maps with no pickup and no delivery cells pass (custom/empty maps). This validat
   "name": "My Layout",
   "width": 20,
   "height": 15,
-  "suggested_agents": 10,
+  "number_agents": 10,
   "cells": [
     { "x": 0, "y": 0, "type": "wall" },
     { "x": 1, "y": 0, "type": "wall" },
@@ -184,7 +184,7 @@ Tips:
 - Surround the grid with walls to prevent agents from leaving the map
 - Place pickups and deliveries on opposite sides for interesting traffic patterns
 - Use `queue_direction` pointing away from the delivery cell into open corridors
-- `suggested_agents` helps the UI pick a reasonable default
+- `number_agents` helps the UI pick a reasonable default
 
 ---
 

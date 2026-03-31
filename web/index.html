@@ -186,13 +186,10 @@
 
                     <!-- Customize controls (shown for custom/imported maps) -->
                     <div id="sim-customize-controls" style="display:none">
-                        <div class="input-group" title="Number of agents in the simulation (1-1000)">
-                            <label class="input-label" for="input-agents">Agents <span class="capacity-hint" id="map-capacity"></span></label>
-                            <div class="slider-row">
-                                <input type="range" id="input-agents" min="1" max="1000" value="15" step="1" aria-label="Number of agents">
-                                <span class="slider-value" id="val-agents">15</span>
-                            </div>
-                        </div>
+                        <!-- Agent count is determined by map JSON (number_agents field) — no slider -->
+                        <input type="hidden" id="input-agents" value="0">
+                        <span id="val-agents" style="display:none">0</span>
+                        <span id="map-capacity" style="display:none"></span>
 
                         <div class="input-group" title="Grid width in cells (8-512).">
                             <label class="input-label" for="input-grid-width">Grid width</label>

@@ -115,6 +115,13 @@ pub struct TptsSolver {
     max_swap_checks: usize,
     swap_radius: i32,
     swap_cooldown: HashMap<(usize, usize), u64>,
+
+    /// Persistent swap mapping: agent_index → swapped goal.
+    /// Populated when a swap commits, cleared when the agent reaches
+    /// the swapped goal or is recycled to Free.
+    swap_goal_overrides: HashMap<usize, IVec2>,
+    /// Pending overrides to send to the runner (drained once per tick).
+    pending_runner_overrides: Vec<(usize, IVec2)>,
 }
 
 impl Default for TptsSolver {
@@ -138,6 +145,8 @@ impl TptsSolver {
             max_swap_checks: TPTS_MAX_SWAP_CHECKS,
             swap_radius: TPTS_SWAP_RADIUS,
             swap_cooldown: HashMap::new(),
+            swap_goal_overrides: HashMap::new(),
+            pending_runner_overrides: Vec::new(),
         }
     }
 
@@ -377,6 +386,13 @@ impl TptsSolver {
                         self.token.set_path(local_j, positions_j.clone());
                         self.swap_cooldown.insert(key, tick);
                         committed_swaps.push((i, j));
+
+                        // Persist swap so solver plans consistently across ticks,
+                        // and notify runner to update agent.goal for task completion.
+                        self.swap_goal_overrides.insert(agents[i].index, goal_j);
+                        self.swap_goal_overrides.insert(agents[j].index, goal_i);
+                        self.pending_runner_overrides.push((agents[i].index, goal_j));
+                        self.pending_runner_overrides.push((agents[j].index, goal_i));
                         continue;
                     }
 
@@ -419,6 +435,8 @@ impl LifelongSolver for TptsSolver {
         self.last_agent_indices.clear();
         self.replanned_set.clear();
         self.swap_cooldown.clear();
+        self.swap_goal_overrides.clear();
+        self.pending_runner_overrides.clear();
         self.initialized = false;
     }
 
@@ -452,6 +470,15 @@ impl LifelongSolver for TptsSolver {
             }
         }
 
+        // Clear stale swap overrides: agent reached swapped goal or was recycled to Free
+        self.swap_goal_overrides.retain(|&agent_idx, &mut override_goal| {
+            agents.iter().any(|a| {
+                a.index == agent_idx
+                    && a.pos != override_goal
+                    && !matches!(a.task_leg, TaskLeg::Free)
+            })
+        });
+
         // Build master constraint index
         self.master_ci
             .reset(ctx.grid.width, ctx.grid.height, TOKEN_PATH_MAX_TIME);
@@ -463,8 +490,14 @@ impl LifelongSolver for TptsSolver {
         // Committed swaps have already updated token paths and master CI.
         let committed_swaps = self.attempt_swaps(agents, ctx.tick, ctx.grid, distance_cache);
 
-        // Build swapped goals for agents involved in committed swaps
-        let mut swapped_goals: Vec<Option<IVec2>> = agents.iter().map(|a| a.goal).collect();
+        // Build swapped goals from persistent overrides + this tick's new swaps
+        let mut swapped_goals: Vec<Option<IVec2>> = agents.iter().map(|a| {
+            if let Some(&override_goal) = self.swap_goal_overrides.get(&a.index) {
+                Some(override_goal)
+            } else {
+                a.goal
+            }
+        }).collect();
         for &(i, j) in &committed_swaps {
             let tmp = swapped_goals[i];
             swapped_goals[i] = swapped_goals[j];
@@ -541,6 +574,10 @@ impl LifelongSolver for TptsSolver {
         }
 
         StepResult::Replan(&self.plan_buffer)
+    }
+
+    fn drain_goal_overrides(&mut self) -> Vec<(usize, IVec2)> {
+        std::mem::take(&mut self.pending_runner_overrides)
     }
 }
 

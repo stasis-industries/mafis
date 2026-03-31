@@ -3726,6 +3726,20 @@ async function loadTopologyManifest() {
                     const walls = data.cells.filter(c => c.type === 'wall').length;
                     data.walkable_cells = (data.width * data.height) - walls;
                 }
+                // Normalize agent count: number_agents > suggested_agents (legacy) > robots array > 0
+                if (!data.number_agents) {
+                    data.number_agents = data.suggested_agents || (data.robots ? data.robots.length : 0) || 0;
+                }
+                // Validate minimal setup: needs zones + agents to simulate
+                const hasPickup = data.cells && data.cells.some(c => c.type === 'pickup');
+                const hasDelivery = data.cells && data.cells.some(c => c.type === 'delivery');
+                if (!hasPickup || !hasDelivery) {
+                    console.warn(`Topology ${filename}: missing pickup or delivery zones, skipping`);
+                    continue;
+                }
+                if (!data.number_agents) {
+                    console.warn(`Topology ${filename}: no number_agents specified, loading with 0 agents`);
+                }
                 loadedTopologies.push({ filename, data, name, id, imported: false });
             } catch (e) {
                 console.warn('Failed to load topology:', filename, e);
@@ -3900,16 +3914,11 @@ function applyTopologyByIndex(idx) {
     // Send the full map JSON as a custom map load
     sendCommand({ type: 'load_custom_map', ...topo.data });
 
-    // Use suggested_agents if available, else count robots, else 0
-    const agents = topo.data.suggested_agents || (topo.data.robots ? topo.data.robots.length : 0) || 0;
-    const capacity = topo.data.walkable_cells || 0;
+    const agents = topo.data.number_agents || 0;
     setSlider('input-grid-width', topo.data.width, 'val-grid-width');
     setSlider('input-grid-height', topo.data.height, 'val-grid-height');
-    setSlider('input-agents', agents, 'val-agents');
-
-    // Update capacity indicator
-    const capEl = document.getElementById('map-capacity');
-    if (capEl) capEl.textContent = capacity > 0 ? `max ${capacity}` : '';
+    // Agent count from map JSON — send directly (no slider)
+    sendCommand({ type: 'set_num_agents', value: agents });
 
     const densityGroup = document.getElementById('density-group');
     if (densityGroup) densityGroup.style.display = 'none';
@@ -4250,10 +4259,7 @@ function bindControls() {
         sendCommand({ type: 'set_tick_hz', value: parseFloat(v) });
     });
 
-    // Simulation config
-    bindSlider('input-agents', 'val-agents', v => {
-        sendCommand({ type: 'set_num_agents', value: parseInt(v) });
-    });
+    // Simulation config — agent count set by map JSON (number_agents), not user slider
     bindSlider('input-grid-width', 'val-grid-width', v => {
         sendCommand({ type: 'set_grid_width', value: parseInt(v) });
     });
@@ -6267,7 +6273,7 @@ async function applySharedState(hash) {
 
     if (shared.s) sendCommand({ type: 'set_solver', value: shared.s });
     if (shared.sc) sendCommand({ type: 'set_scheduler', value: shared.sc });
-    // set_num_agents after set_topology (set_topology resets num_agents to suggested_agents)
+    // set_num_agents after set_topology (set_topology resets num_agents to number_agents)
     if (shared.n) sendCommand({ type: 'set_num_agents', value: shared.n });
     if (shared.sd != null) sendCommand({ type: 'set_seed', value: shared.sd });
     if (shared.hz) sendCommand({ type: 'set_tick_hz', value: shared.hz });

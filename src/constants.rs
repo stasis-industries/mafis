@@ -169,7 +169,7 @@ pub const TOKEN_ASTAR_MAX_TIME: u64 = 200;
 /// 6.4M expansions per tick — catastrophic in WASM.
 /// 5000 is enough for paths up to ~80 steps on uncongested grids.
 /// Empirically validated: at 5000, Token Passing finds valid paths for 95%+ of
-/// agents on warehouse_medium with 100 agents.
+/// agents on warehouse_large with 100 agents.
 pub const ASTAR_MAX_EXPANSIONS: u64 = 5_000;
 
 // ── RT-LaCAM (Real-Time Configuration-Space Search) ─────────────

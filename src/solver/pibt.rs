@@ -448,7 +448,7 @@ mod tests {
         use rand::Rng;
 
         let registry = TopologyRegistry::load_from_dir(std::path::Path::new("topologies"));
-        let entry = registry.find("warehouse_medium").expect("warehouse_medium.json missing");
+        let entry = registry.find("warehouse_large").expect("warehouse_large.json missing");
         let (grid_owned, zones) = TopologyRegistry::parse_entry(entry).unwrap();
         let grid = &grid_owned;
         let mut rng = ChaCha8Rng::seed_from_u64(123);
@@ -614,5 +614,77 @@ mod tests {
             }
         }
         assert!(goals_reached > 0, "no agent reached its goal in 200 ticks — PIBT may be deadlocked");
+    }
+
+    /// Diagnostic: run PIBT on warehouse_medium and print per-tick task state
+    /// distribution to identify where agents stall.
+    /// Run with: cargo test pibt_throughput_diagnostic -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn pibt_throughput_diagnostic() {
+        use crate::core::runner::SimulationRunner;
+        use crate::core::topology::TopologyRegistry;
+        use crate::core::task::{ActiveScheduler, TaskLeg};
+        use crate::core::queue::ActiveQueuePolicy;
+        use crate::core::seed::SeededRng;
+        use crate::analysis::baseline::place_agents;
+        use crate::fault::config::FaultConfig;
+        use crate::fault::scenario::FaultSchedule;
+
+        let registry = TopologyRegistry::load_from_dir(std::path::Path::new("topologies"));
+        let entry = registry.find("warehouse_medium").expect("warehouse_medium missing");
+        let (grid, zones) = TopologyRegistry::parse_entry(entry).unwrap();
+        let grid_area = (grid.width * grid.height) as usize;
+        let num = 15;
+
+        let mut rng = SeededRng::new(42);
+        let agents = place_agents(num, &grid, &zones, &mut rng);
+        let rng_after = rng.clone();
+
+        let solver = crate::solver::lifelong_solver_from_name("pibt", grid_area, num).unwrap();
+        let mut runner = SimulationRunner::new(
+            grid, zones, agents, solver, rng_after,
+            FaultConfig { enabled: false, ..Default::default() },
+            FaultSchedule::default(),
+        );
+
+        let sched = ActiveScheduler::from_name("random");
+        let qp = ActiveQueuePolicy::from_name("closest");
+
+        eprintln!("tick | free tempt load  t2q  queu tlod unld | atGoal waits | tasks");
+        for tick in 1..=200 {
+            runner.tick(sched.scheduler(), qp.policy());
+
+            let mut counts = [0u32; 8]; // free, tempt, load, t2q, queu, tlod, unld, charge
+            let mut at_goal = 0u32;
+            let mut wait_count = 0u32;
+
+            for a in &runner.agents {
+                if !a.alive { continue; }
+                let idx = match &a.task_leg {
+                    TaskLeg::Free => 0,
+                    TaskLeg::TravelEmpty(_) => 1,
+                    TaskLeg::Loading(_) => 2,
+                    TaskLeg::TravelToQueue { .. } => 3,
+                    TaskLeg::Queuing { .. } => 4,
+                    TaskLeg::TravelLoaded { .. } => 5,
+                    TaskLeg::Unloading { .. } => 6,
+                    TaskLeg::Charging => 7,
+                };
+                counts[idx] += 1;
+                if a.pos == a.goal { at_goal += 1; }
+                if a.last_action == crate::core::action::Action::Wait { wait_count += 1; }
+            }
+
+            if tick <= 10 || tick % 20 == 0 || tick == 200 {
+                eprintln!(
+                    "{tick:4} | {fr:4} {te:5} {ld:4} {tq:4} {qu:4} {tl:4} {ul:4} | {ag:6} {wt:5} | {tasks:5}",
+                    fr=counts[0], te=counts[1], ld=counts[2], tq=counts[3],
+                    qu=counts[4], tl=counts[5], ul=counts[6],
+                    ag=at_goal, wt=wait_count, tasks=runner.tasks_completed,
+                );
+            }
+        }
+        eprintln!("\nFinal: {} tasks in 200 ticks with 15 agents", runner.tasks_completed);
     }
 }
