@@ -1,22 +1,28 @@
-name: Release WASM
+name: Deploy WASM
 
 on:
   push:
-    tags:
-      - "v*"
+    branches: [main]
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build-and-release:
-    name: Build WASM & Create Release
+  deploy:
+    name: Build WASM & Deploy
     runs-on: ubuntu-latest
     permissions:
       contents: write
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Extract version from Cargo.toml
+        id: version
+        run: |
+          VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Detected version: $VERSION"
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -40,8 +46,7 @@ jobs:
         run: cargo install wasm-bindgen-cli
 
       - name: Install binaryen (wasm-opt)
-        run: |
-          sudo apt-get install -y binaryen
+        run: sudo apt-get install -y binaryen
 
       - name: Run tests
         run: cargo test
@@ -70,9 +75,12 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: v${{ steps.version.outputs.version }}
+          name: v${{ steps.version.outputs.version }}
           files: |
             mafis-wasm.tar.gz
           generate_release_notes: true
+          make_latest: true
 
       - name: Trigger website rebuild
         run: |
@@ -80,4 +88,4 @@ jobs:
             -H "Accept: application/vnd.github+json" \
             -H "Authorization: Bearer ${{ secrets.WEBSITE_DISPATCH_TOKEN }}" \
             https://api.github.com/repos/stasis-industries/stasis-website/dispatches \
-            -d '{"event_type":"wasm-updated","client_payload":{"tag":"${{ github.ref_name }}"}}'
+            -d '{"event_type":"wasm-updated","client_payload":{"tag":"v${{ steps.version.outputs.version }}"}}'

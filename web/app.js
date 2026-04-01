@@ -1184,6 +1184,11 @@ function updateUI(s) {
     // Loading overlay
     updateLoadingOverlay(s);
 
+    // Version in header (set once)
+    if (s.version && !document.getElementById('header-version').textContent) {
+        document.getElementById('header-version').textContent = 'v' + s.version;
+    }
+
     // FPS in header
     if (s.fps !== undefined) {
         const fpsEl = document.getElementById('header-fps');

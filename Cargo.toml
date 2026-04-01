@@ -4,7 +4,7 @@ resolver = "3"
 
 [package]
 name = "mafis"
-version = "0.1.1"
+version = "0.4.4"
 edition = "2024"
 
 [lib]

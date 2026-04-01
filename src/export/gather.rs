@@ -46,6 +46,7 @@ pub fn gather_snapshot(
     agent_data: &[AgentQueryItem],
 ) -> ExportSnapshot {
     let metadata = ExportMetadata {
+        mafis_version: crate::constants::VERSION.to_string(),
         export_trigger: trigger.to_string(),
         export_tick: sim_config.tick,
         seed: rng.seed(),

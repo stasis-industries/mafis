@@ -13,6 +13,7 @@ pub struct ExportSnapshot {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ExportMetadata {
+    pub mafis_version: String,
     pub export_trigger: String,
     pub export_tick: u64,
     pub seed: u64,

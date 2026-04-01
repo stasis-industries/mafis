@@ -265,6 +265,12 @@ pub fn get_simulation_state() -> String {
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
+pub fn get_version() -> String {
+    crate::constants::VERSION.to_string()
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
 pub fn send_command(cmd: &str) {
     if let Some(parsed) = parse_command(cmd) {
         BRIDGE.with(|b| {
