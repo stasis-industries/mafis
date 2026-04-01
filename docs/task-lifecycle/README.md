@@ -16,7 +16,8 @@ Every agent cycles through a series of **task legs** — states that describe wh
 | **TravelToQueue** | Carrying cargo, moving to the back of a delivery queue |
 | **Queuing** | In a queue slot, shuffling forward toward the delivery cell |
 | **TravelLoaded** | Carrying cargo, moving directly to the delivery cell |
-| **Unloading** | At delivery, unloading (placeholder — not currently used) |
+| **Unloading** | At delivery, unloading (placeholder — reserved for future use) |
+| **Charging** | At a recharging station (placeholder — reserved for future energy system) |
 
 ---
 

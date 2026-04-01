@@ -222,15 +222,21 @@ stateDiagram-v2
 src/
   main.rs          Entry point (creates App, configures window)
   lib.rs           MapfFisPlugin + wasm_bindgen exports
-  constants.rs     All tunable limits (MAX_AGENTS, ADG_AGENT_LIMIT, etc.)
+  constants.rs     All tunable limits + VERSION constant
   core/            Tick loop, agents, grid, state machine, task scheduling, topology
   solver/          8 lifelong solvers + shared heuristics + A*
   fault/           Heat/wear accumulation, fault detection, replanning
   analysis/        ADG, cascade BFS, metrics, heatmap, scorecard
-  render/          Environment, robot visuals, orbit camera, picking/hover
-  ui/              controls.rs (UiState), bridge.rs (Bevy-JS bridge)
+  render/          Environment, robot visuals, orbit camera, picking/hover (WASM only)
+  ui/
+    controls.rs    UiState resource
+    bridge.rs      Bevy↔JS bridge (WASM) — wasm_bindgen exports
+    desktop/       Native egui panels (non-WASM only)
   export/          CSV/JSON export with triggers
+  experiment/      Multi-seed experiment runner, stats, paper output
+cli/               Standalone CLI binary (cargo run -p mafis-cli)
 web/
   index.html       HTML/CSS shell
   app.js           JS polling loop, uPlot charts, bridge commands
+  experiment-worker.js  Headless experiment runner (Web Worker)
 ```

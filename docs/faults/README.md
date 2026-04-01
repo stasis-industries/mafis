@@ -37,15 +37,14 @@ Agents accumulate **operational age** — a counter that increments by 1 each ti
 ### The formula
 
 ```
-heat = 1 - exp(-(age / eta) ^ beta)
+heat = operational_age / failure_tick
 ```
 
-- `age` = operational age (movement ticks only)
-- `eta` = scale parameter (characteristic life)
-- `beta` = shape parameter (wear-out acceleration)
-- `heat` = stress indicator shown as color on the agent
+- `operational_age` = movement ticks accumulated so far
+- `failure_tick` = pre-sampled Weibull failure threshold for this agent
+- `heat` = individual progress toward death (0 → 1)
 
-When `beta > 1`, the failure rate accelerates over time (wear-out phase). This matches real-world mechanical degradation.
+This is a **linear progress indicator**, not the Weibull CDF. An agent at `heat = 0.8` has consumed 80% of its lifetime. The Weibull distribution governs *where* the failure tick is set — the heat display itself is just normalized age.
 
 ### How failure works
 
