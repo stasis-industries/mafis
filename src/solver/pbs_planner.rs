@@ -5,7 +5,6 @@
 //! and agent_j > agent_i). Bounded by node limit.
 
 use bevy::prelude::*;
-use std::collections::BinaryHeap;
 
 use crate::core::action::Action;
 use crate::core::grid::GridMap;
@@ -30,32 +29,12 @@ struct PbsNode {
     priority_pairs: Vec<(usize, usize)>,
     /// Number of conflicts in this node (for best-first ordering).
     conflicts: usize,
+    /// Earliest timestep at which a collision occurs (usize::MAX if none).
+    earliest_collision: usize,
     /// Node ID for tie-breaking (lower = earlier).
     id: usize,
 }
 
-impl Eq for PbsNode {}
-impl PartialEq for PbsNode {
-    fn eq(&self, other: &Self) -> bool {
-        self.conflicts == other.conflicts && self.id == other.id
-    }
-}
-
-impl Ord for PbsNode {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        // Min-heap: fewer conflicts = higher priority
-        other
-            .conflicts
-            .cmp(&self.conflicts)
-            .then_with(|| other.id.cmp(&self.id))
-    }
-}
-
-impl PartialOrd for PbsNode {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
 
 // ---------------------------------------------------------------------------
 // Spatial conflict detection — O(n × H) replacing O(n² × H)
@@ -97,13 +76,14 @@ impl ConflictGrid {
         }
     }
 
-    fn detect_first(&mut self, timelines: &[Vec<IVec2>], grid_w: i32) -> Option<Conflict> {
+    fn detect_first(&mut self, timelines: &[Vec<IVec2>], grid_w: i32, window: usize) -> Option<Conflict> {
         let n = timelines.len();
         if n < 2 {
             return None;
         }
 
         let max_t = timelines.iter().map(|tl| tl.len().saturating_sub(1)).max().unwrap_or(0);
+        let max_t = max_t.min(window);
 
         // Fill t=0 positions into prev
         self.prev.fill(NO_AGENT);
@@ -158,13 +138,14 @@ impl ConflictGrid {
         None
     }
 
-    fn count_conflicts(&mut self, timelines: &[Vec<IVec2>], grid_w: i32) -> usize {
+    fn count_conflicts(&mut self, timelines: &[Vec<IVec2>], grid_w: i32, window: usize) -> usize {
         let n = timelines.len();
         if n < 2 {
             return 0;
         }
 
         let max_t = timelines.iter().map(|tl| tl.len().saturating_sub(1)).max().unwrap_or(0);
+        let max_t = max_t.min(window);
         let mut count = 0;
 
         // Fill t=0 positions into prev
@@ -407,63 +388,85 @@ impl WindowedPlanner for PbsPlanner {
         // Build timelines once for initial plans
         let initial_timelines = build_timelines(&initial_plans, ctx.agents);
 
-        // Check for conflicts in initial solution
-        if self.conflict_grid.detect_first(&initial_timelines, ctx.grid.width).is_none() {
-            return to_window_result(initial_plans, ctx.agents);
-        }
-
-        // PBS tree search
-        let mut open: BinaryHeap<PbsNode> = BinaryHeap::new();
+        // PBS tree search — DFS with best-node tracking
+        let mut dfs: Vec<PbsNode> = Vec::new();
         let mut node_count = 0usize;
+        let mut best_node: Option<PbsNode> = None;
 
-        let root_conflicts = self.conflict_grid.count_conflicts(&initial_timelines, ctx.grid.width);
-        open.push(PbsNode {
+        // Build root node with earliest_collision
+        let root_conflicts = self.conflict_grid.count_conflicts(&initial_timelines, ctx.grid.width, ctx.horizon);
+        let root_earliest = self.conflict_grid.detect_first(&initial_timelines, ctx.grid.width, ctx.horizon)
+            .map(|c| c.time as usize)
+            .unwrap_or(usize::MAX);
+
+        dfs.push(PbsNode {
             plans: initial_plans,
             timelines: initial_timelines,
             priority_pairs: Vec::new(),
             conflicts: root_conflicts,
+            earliest_collision: root_earliest,
             id: node_count,
         });
         node_count += 1;
 
-        while let Some(node) = open.pop() {
+        while let Some(node) = dfs.pop() {
             if node_count >= ctx.node_limit {
-                return to_partial_result(node.plans, ctx.agents);
+                let best = best_node.unwrap_or(node);
+                return to_partial_result(best.plans, ctx.agents);
             }
 
-            if let Some(conflict) = self.conflict_grid.detect_first(&node.timelines, ctx.grid.width) {
-                // Branch 1: agent_a has priority over agent_b
-                if let Some(child1) = try_branch(
+            // Update best node (prefer later earliest_collision, tie-break on fewer conflicts)
+            let dominated = match &best_node {
+                Some(bn) => node.earliest_collision > bn.earliest_collision
+                    || (node.earliest_collision == bn.earliest_collision && node.conflicts < bn.conflicts),
+                None => true,
+            };
+            if dominated {
+                best_node = Some(PbsNode {
+                    plans: node.plans.clone(),
+                    timelines: node.timelines.clone(),
+                    priority_pairs: node.priority_pairs.clone(),
+                    conflicts: node.conflicts,
+                    earliest_collision: node.earliest_collision,
+                    id: node.id,
+                });
+            }
+
+            if let Some(conflict) = self.conflict_grid.detect_first(&node.timelines, ctx.grid.width, ctx.horizon) {
+                let child1 = try_branch(
                     &node, conflict.agent_a, conflict.agent_b,
                     ctx.agents, ctx.grid, ctx.horizon, ctx.distance_maps,
                     &mut self.ci_buf, &mut self.stg,
-                ) {
-                    let c1_conflicts = self.conflict_grid.count_conflicts(&child1.timelines, ctx.grid.width);
-                    open.push(PbsNode {
-                        plans: child1.plans,
-                        timelines: child1.timelines,
-                        priority_pairs: child1.priority_pairs,
-                        conflicts: c1_conflicts,
-                        id: node_count,
-                    });
-                    node_count += 1;
-                }
-
-                // Branch 2: agent_b has priority over agent_a
-                if let Some(child2) = try_branch(
+                );
+                let child2 = try_branch(
                     &node, conflict.agent_b, conflict.agent_a,
                     ctx.agents, ctx.grid, ctx.horizon, ctx.distance_maps,
                     &mut self.ci_buf, &mut self.stg,
-                ) {
-                    let c2_conflicts = self.conflict_grid.count_conflicts(&child2.timelines, ctx.grid.width);
-                    open.push(PbsNode {
-                        plans: child2.plans,
-                        timelines: child2.timelines,
-                        priority_pairs: child2.priority_pairs,
-                        conflicts: c2_conflicts,
-                        id: node_count,
-                    });
-                    node_count += 1;
+                );
+
+                // Push worse child first, better child second (better popped first in DFS)
+                let mut children: Vec<PbsNode> = Vec::new();
+                for child_opt in [child1, child2] {
+                    if let Some(mut child) = child_opt {
+                        let c_conflicts = self.conflict_grid.count_conflicts(&child.timelines, ctx.grid.width, ctx.horizon);
+                        let c_earliest = self.conflict_grid.detect_first(&child.timelines, ctx.grid.width, ctx.horizon)
+                            .map(|c| c.time as usize)
+                            .unwrap_or(usize::MAX);
+                        child.conflicts = c_conflicts;
+                        child.earliest_collision = c_earliest;
+                        child.id = node_count;
+                        node_count += 1;
+                        children.push(child);
+                    }
+                }
+
+                // Sort: worse first (bottom of stack), better second (top = explored first)
+                children.sort_by(|a, b| {
+                    a.conflicts.cmp(&b.conflicts)
+                        .then_with(|| a.earliest_collision.cmp(&b.earliest_collision).reverse())
+                });
+                for child in children {
+                    dfs.push(child);
                 }
             } else {
                 // No conflicts — solution found
@@ -471,10 +474,10 @@ impl WindowedPlanner for PbsPlanner {
             }
         }
 
-        // No solution found
-        WindowResult::Partial {
-            solved: Vec::new(),
-            failed: (0..n).collect(),
+        // No solution found — return best partial
+        match best_node {
+            Some(best) => to_partial_result(best.plans, ctx.agents),
+            None => WindowResult::Partial { solved: Vec::new(), failed: (0..n).collect() },
         }
     }
 }
@@ -531,6 +534,7 @@ fn try_branch(
             timelines: new_timelines,
             priority_pairs: new_pairs,
             conflicts: 0,
+            earliest_collision: 0,
             id: 0,
         })
     } else {
@@ -674,7 +678,7 @@ mod tests {
             vec![IVec2::new(0, 0), IVec2::new(1, 0)],
             vec![IVec2::new(2, 0), IVec2::new(1, 0)],
         ];
-        let conflict = cg.detect_first(&timelines, 5);
+        let conflict = cg.detect_first(&timelines, 5, usize::MAX);
         assert!(conflict.is_some());
     }
 
@@ -688,7 +692,7 @@ mod tests {
             vec![IVec2::new(0, 0), IVec2::new(1, 0)],
             vec![IVec2::new(1, 0), IVec2::new(0, 0)],
         ];
-        let conflict = cg.detect_first(&timelines, 5);
+        let conflict = cg.detect_first(&timelines, 5, usize::MAX);
         assert!(conflict.is_some());
     }
 
@@ -701,6 +705,46 @@ mod tests {
             vec![IVec2::new(0, 0), IVec2::new(1, 0)],
             vec![IVec2::new(0, 4), IVec2::new(1, 4)],
         ];
-        assert!(cg.detect_first(&timelines, 5).is_none());
+        assert!(cg.detect_first(&timelines, 5, usize::MAX).is_none());
+    }
+
+    #[test]
+    fn pbs_finds_solution_with_tight_node_limit() {
+        let grid = GridMap::new(5, 5);
+        let agents = vec![
+            WindowAgent { index: 0, pos: IVec2::new(0, 2), goal: IVec2::new(4, 2), goal_sequence: SmallVec::new() },
+            WindowAgent { index: 1, pos: IVec2::new(4, 2), goal: IVec2::new(0, 2), goal_sequence: SmallVec::new() },
+        ];
+        let dm0 = DistanceMap::compute(&grid, IVec2::new(4, 2));
+        let dm1 = DistanceMap::compute(&grid, IVec2::new(0, 2));
+        let dist_maps: Vec<&DistanceMap> = vec![&dm0, &dm1];
+        let ctx = WindowContext {
+            grid: &grid,
+            horizon: 12,
+            node_limit: 6,
+            agents: &agents,
+            distance_maps: &dist_maps,
+        };
+        let mut planner = PbsPlanner::new();
+        let mut rng = SeededRng::new(42);
+        let result = planner.plan_window(&ctx, &mut rng);
+        assert!(matches!(result, WindowResult::Solved(_)),
+            "DFS should solve 2 crossing agents within 6 nodes");
+    }
+
+    #[test]
+    fn conflict_grid_respects_window_scope() {
+        let mut cg = ConflictGrid::new();
+        cg.ensure_size(25); // 5x5
+
+        // Two agents that collide at t=2 (both at position (2,0))
+        let timelines = vec![
+            vec![IVec2::new(0,0), IVec2::new(1,0), IVec2::new(2,0)],
+            vec![IVec2::new(4,0), IVec2::new(3,0), IVec2::new(2,0)],
+        ];
+        // Full window: should detect conflict at t=2
+        assert!(cg.detect_first(&timelines, 5, usize::MAX).is_some());
+        // Window=1: only check t=0..1, no conflict
+        assert!(cg.detect_first(&timelines, 5, 1).is_none());
     }
 }
