@@ -1,0 +1,367 @@
+#!/usr/bin/env python3
+"""
+Solver Resilience Analysis for MAFIS Paper.
+
+RQ1: How do different solvers degrade under each fault type?
+
+Reads results/solver_resilience_runs.csv, computes:
+  1. FT ratios per solver × scenario
+  2. Mann-Whitney U significance tests (BH-FDR corrected)
+  3. LaTeX table (solver × scenario FT matrix)
+  4. Heatmap SVG visualization
+
+Usage:
+  python3 analysis/solver_resilience_analysis.py
+
+Outputs (in results/):
+  solver_resilience_metrics.csv  -- mean FT, CI, p-values per (solver, scenario)
+  solver_resilience_table.tex    -- LaTeX table for paper
+  solver_resilience_heatmap.svg  -- visual heatmap
+"""
+
+import csv
+import math
+import os
+import sys
+from collections import defaultdict
+
+sys.path.insert(0, os.path.dirname(__file__))
+from stats import (
+    load_runs, pair_runs, mean, ci95, mann_whitney_u, effect_size_r,
+    cliffs_delta, benjamini_hochberg, format_p, RESULTS_DIR,
+)
+from constants import (
+    SCENARIO_ORDER, SCENARIO_LABEL, SCENARIO_LABEL_SHORT,
+    SOLVER_ORDER, SOLVER_LABEL,
+)
+
+
+# ---------------------------------------------------------------------------
+# FT ratio computation
+# ---------------------------------------------------------------------------
+
+def compute_ft_ratios(pairs):
+    """Group by (solver, scenario); compute FT = fault_throughput / baseline."""
+    ratios = defaultdict(list)
+    baselines = defaultdict(list)
+    faults = defaultdict(list)
+    for (solver, topology, scenario, scheduler, num_agents, seed), data in pairs.items():
+        bl = data.get("baseline", float("nan"))
+        ft = data.get("fault", float("nan"))
+        if math.isnan(bl) or math.isnan(ft) or bl == 0:
+            continue
+        key = (solver, scenario)
+        ratios[key].append(ft / bl)
+        baselines[key].append(bl)
+        faults[key].append(ft)
+    return ratios, baselines, faults
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def solvers_present(ratios):
+    """Return solvers from SOLVER_ORDER that have data."""
+    return [s for s in SOLVER_ORDER if any(k[0] == s for k in ratios)]
+
+
+def ft_color(ratio):
+    """Map FT ratio to a hex color. 1.0 = neutral, < 1 = red, > 1 = green."""
+    if math.isnan(ratio): return "#2a2a3e"
+    if ratio < 0.50:  return "#7b1010"
+    if ratio < 0.70:  return "#c0392b"
+    if ratio < 0.85:  return "#e67e22"
+    if ratio < 0.95:  return "#d4ac0d"
+    if ratio < 1.05:  return "#4a5568"
+    if ratio < 1.20:  return "#27ae60"
+    if ratio < 1.40:  return "#1e8449"
+    return "#0d5c34"
+
+
+# ---------------------------------------------------------------------------
+# Output: metrics CSV
+# ---------------------------------------------------------------------------
+
+def write_metrics_csv(ratios, baselines, faults, adjusted_p):
+    path = os.path.join(RESULTS_DIR, "solver_resilience_metrics.csv")
+    with open(path, "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow([
+            "solver", "scenario", "n_seeds",
+            "ft_mean", "ft_ci95_lo", "ft_ci95_hi",
+            "baseline_mean", "fault_mean",
+            "mw_u", "mw_p_raw", "mw_p_adj", "effect_r", "cliffs_d",
+        ])
+        for solver in solvers_present(ratios):
+            for scenario in SCENARIO_ORDER:
+                key = (solver, scenario)
+                rs = ratios.get(key, [])
+                if not rs:
+                    continue
+                bl = baselines.get(key, [])
+                ft = faults.get(key, [])
+                r_mean = mean(rs)
+                r_lo, r_hi = ci95(rs)
+                u, p = mann_whitney_u(ft, bl)
+                er = effect_size_r(u, len(ft), len(bl))
+                cd = cliffs_delta(ft, bl)
+                p_adj = adjusted_p.get(key, float("nan"))
+                w.writerow([
+                    solver, scenario, len(rs),
+                    f"{r_mean:.4f}", f"{r_lo:.4f}", f"{r_hi:.4f}",
+                    f"{mean(bl):.4f}", f"{mean(ft):.4f}",
+                    f"{u:.1f}" if not math.isnan(u) else "",
+                    f"{p:.4f}" if not math.isnan(p) else "",
+                    f"{p_adj:.4f}" if not math.isnan(p_adj) else "",
+                    f"{er:.3f}" if not math.isnan(er) else "",
+                    f"{cd:.3f}" if not math.isnan(cd) else "",
+                ])
+    print(f"Saved: {path}")
+
+
+# ---------------------------------------------------------------------------
+# Output: LaTeX table
+# ---------------------------------------------------------------------------
+
+def write_latex_table(ratios, adjusted_p):
+    """Solver × Scenario table with significance markers."""
+    path = os.path.join(RESULTS_DIR, "solver_resilience_table.tex")
+    solvers = solvers_present(ratios)
+    col_spec = "l" + "c" * len(SCENARIO_ORDER)
+
+    lines = [
+        "% Solver resilience table — auto-generated by analysis/solver_resilience_analysis.py",
+        "% Cells: mean FT ratio (fault/baseline throughput).",
+        "% * BH-adj. p<0.05;  ** BH-adj. p<0.01;  † FT < 0.8 (severe degradation).",
+        "",
+        "\\begin{table}[ht]",
+        "  \\caption{Solver fault tolerance (FT ratio = fault\\,/\\,baseline throughput) "
+        "per fault scenario. FT\\,$<$\\,1 = degradation; FT\\,$>$\\,1 = congestion relief (Braess).}",
+        "  \\label{tab:solver_resilience}",
+        "  \\centering",
+        "  \\footnotesize",
+        f"  \\begin{{tabular}}{{{col_spec}}}",
+        "    \\toprule",
+    ]
+    sc_hdrs = " & ".join(f"\\textbf{{{SCENARIO_LABEL.get(s, s)}}}" for s in SCENARIO_ORDER)
+    lines.append(f"    \\textbf{{Solver}} & {sc_hdrs} \\\\")
+    lines.append("    \\midrule")
+
+    for solver in solvers:
+        cells = [SOLVER_LABEL.get(solver, solver)]
+        for scenario in SCENARIO_ORDER:
+            key = (solver, scenario)
+            rs = ratios.get(key, [])
+            if not rs:
+                cells.append("—")
+                continue
+            r = mean(rs)
+            p_adj = adjusted_p.get(key, 1.0)
+            sig  = not math.isnan(p_adj) and p_adj < 0.05
+            sig2 = not math.isnan(p_adj) and p_adj < 0.01
+            sev  = r < 0.8
+
+            if sev and sig2:
+                cells.append(f"$\\mathbf{{{r:.3f}}}^{{\\dagger**}}$")
+            elif sev and sig:
+                cells.append(f"$\\mathbf{{{r:.3f}}}^{{\\dagger*}}$")
+            elif sev:
+                cells.append(f"$\\mathbf{{{r:.3f}}}^{{\\dagger}}$")
+            elif sig2:
+                cells.append(f"${r:.3f}^{{**}}$")
+            elif sig:
+                cells.append(f"${r:.3f}^{{*}}$")
+            else:
+                cells.append(f"${r:.3f}$")
+        lines.append("    " + " & ".join(cells) + " \\\\")
+
+    lines += [
+        "    \\bottomrule",
+        f"    \\multicolumn{{{len(SCENARIO_ORDER)+1}}}{{l}}{{",
+        "      \\footnotesize "
+        "$\\dagger$ FT $< 0.8$ (severe); $^*$ BH-adj.~$p < 0.05$; $^{**}$ BH-adj.~$p < 0.01$.}}",
+        "  \\end{tabular}",
+        "\\end{table}",
+    ]
+
+    with open(path, "w") as f:
+        f.write("\n".join(lines))
+    print(f"Saved: {path}")
+
+
+# ---------------------------------------------------------------------------
+# Output: Heatmap SVG
+# ---------------------------------------------------------------------------
+
+def write_heatmap_svg(ratios, adjusted_p):
+    """Solver (rows) × Scenario (cols) heatmap of mean FT ratio."""
+    solvers = solvers_present(ratios)
+
+    CELL_W, CELL_H = 88, 46
+    LEFT   = 122
+    TOP    = 82
+    RIGHT  = 20
+    BOTTOM = 55   # legend row
+
+    W = LEFT + len(SCENARIO_ORDER) * CELL_W + RIGHT
+    H = TOP  + len(solvers) * CELL_H + BOTTOM
+
+    lines = [
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}">',
+        f'  <rect width="{W}" height="{H}" fill="#1a1a2e"/>',
+        f'  <style>text {{ font-family: monospace; fill: #c8c8d4; }}</style>',
+        f'  <text x="{W//2}" y="15" text-anchor="middle" font-size="10" fill="#a0a0c0">'
+        f'FT Ratio = fault throughput / baseline (1.0 = no change)</text>',
+    ]
+
+    # Column headers (rotated)
+    for ci, sc in enumerate(SCENARIO_ORDER):
+        cx = LEFT + ci * CELL_W + CELL_W // 2
+        label = SCENARIO_LABEL_SHORT.get(sc, sc)
+        lines.append(
+            f'  <text transform="rotate(-40,{cx},{TOP-8})" x="{cx}" y="{TOP-8}" '
+            f'text-anchor="end" font-size="10">{label}</text>'
+        )
+
+    # Row headers and cells
+    for ri, solver in enumerate(solvers):
+        cy_top = TOP + ri * CELL_H
+        cy_mid = cy_top + CELL_H // 2
+        lines.append(
+            f'  <text x="{LEFT-6}" y="{cy_mid+4}" text-anchor="end" font-size="11">'
+            f'{SOLVER_LABEL.get(solver, solver)}</text>'
+        )
+        for ci, scenario in enumerate(SCENARIO_ORDER):
+            cx  = LEFT + ci * CELL_W
+            key = (solver, scenario)
+            rs  = ratios.get(key, [])
+            r   = mean(rs) if rs else float("nan")
+            color = ft_color(r)
+            lines.append(
+                f'  <rect x="{cx+1}" y="{cy_top+1}" width="{CELL_W-2}" height="{CELL_H-2}" '
+                f'fill="{color}" rx="2"/>'
+            )
+            val  = f"{r:.3f}" if not math.isnan(r) else "—"
+            p_adj = adjusted_p.get(key, 1.0)
+            sig  = "*" if (not math.isnan(p_adj) and p_adj < 0.05) else ""
+            lines.append(
+                f'  <text x="{cx+CELL_W//2}" y="{cy_mid+4}" text-anchor="middle" '
+                f'font-weight="bold" fill="#fff" font-size="12">{val}{sig}</text>'
+            )
+
+    # Legend
+    ly  = H - BOTTOM + 14
+    lx  = LEFT
+    LEGEND = [
+        ("#7b1010", "< 0.50"),
+        ("#c0392b", "0.50–0.70"),
+        ("#e67e22", "0.70–0.85"),
+        ("#d4ac0d", "0.85–0.95"),
+        ("#4a5568", "0.95–1.05"),
+        ("#27ae60", "1.05–1.20"),
+        ("#1e8449", "> 1.20"),
+    ]
+    for color, label in LEGEND:
+        lines.append(f'  <rect x="{lx}" y="{ly}" width="14" height="14" fill="{color}" rx="2"/>')
+        lines.append(f'  <text x="{lx+18}" y="{ly+11}" font-size="9">{label}</text>')
+        lx += 90
+
+    lines.append("</svg>")
+
+    path = os.path.join(RESULTS_DIR, "solver_resilience_heatmap.svg")
+    with open(path, "w") as f:
+        f.write("\n".join(lines))
+    print(f"Saved: {path}")
+
+
+# ---------------------------------------------------------------------------
+# Console summary
+# ---------------------------------------------------------------------------
+
+def print_summary(ratios, baselines, faults, adjusted_p):
+    solvers = solvers_present(ratios)
+
+    print("\n" + "=" * 85)
+    print("SOLVER RESILIENCE — RQ1: Which solver degrades least under fault?")
+    print("=" * 85)
+    print(f"{'Solver':<20} {'Scenario':<22} {'FT':>7} {'95% CI':>17} {'p_adj':>8} {'Cliff':>6}")
+    print("-" * 85)
+
+    n_sig = n_severe = 0
+    for solver in solvers:
+        for scenario in SCENARIO_ORDER:
+            key = (solver, scenario)
+            rs  = ratios.get(key, [])
+            if not rs:
+                continue
+            ft  = faults.get(key, [])
+            bl  = baselines.get(key, [])
+            r   = mean(rs)
+            lo, hi = ci95(rs)
+            p_adj  = adjusted_p.get(key, float("nan"))
+            cd     = cliffs_delta(ft, bl)
+            sig    = not math.isnan(p_adj) and p_adj < 0.05
+            n_sig   += sig
+            n_severe += r < 0.8
+            note   = " ← SEVERE" if r < 0.5 else ""
+            cd_str = f"{cd:>6.3f}" if not math.isnan(cd) else "   —  "
+            print(f"{SOLVER_LABEL.get(solver, solver):<20} {scenario:<22} "
+                  f"{r:>7.3f} [{lo:.3f},{hi:.3f}] {format_p(p_adj):>8}  {cd_str}{note}")
+
+    print(f"\n--- {n_sig} significant (BH-adj. p<0.05), {n_severe} severe (FT<0.8)")
+
+    print("\n--- Overall ranking (mean FT across all scenarios) ---")
+    ranking = []
+    for solver in solvers:
+        all_rs = [r for sc in SCENARIO_ORDER for r in ratios.get((solver, sc), [])]
+        if all_rs:
+            ranking.append((mean(all_rs), solver))
+    for rank, (m, solver) in enumerate(sorted(ranking, reverse=True), 1):
+        print(f"  {rank}. {SOLVER_LABEL.get(solver, solver):<20} mean FT = {m:.3f}")
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
+def main():
+    print("Loading solver_resilience_runs.csv...")
+    rows = load_runs("solver_resilience_runs.csv")
+    print(f"  {len(rows)} rows loaded")
+
+    pairs = pair_runs(rows)
+    print(f"  {len(pairs)} paired configs")
+
+    ratios, baselines, faults = compute_ft_ratios(pairs)
+    solvers = solvers_present(ratios)
+    print(f"  {len(ratios)} (solver, scenario) groups — solvers: {solvers}")
+
+    print("\nComputing BH-FDR adjusted p-values...")
+    raw_p = []
+    for solver in solvers:
+        for scenario in SCENARIO_ORDER:
+            key = (solver, scenario)
+            bl  = baselines.get(key, [])
+            ft  = faults.get(key, [])
+            if bl and ft:
+                _, p = mann_whitney_u(ft, bl)
+                raw_p.append((key, p))
+            else:
+                raw_p.append((key, float("nan")))
+
+    adjusted_p = benjamini_hochberg(raw_p)
+    n_raw = sum(1 for _, p in raw_p if not math.isnan(p) and p < 0.05)
+    n_adj = sum(1 for p in adjusted_p.values() if not math.isnan(p) and p < 0.05)
+    print(f"  Raw p<0.05: {n_raw}  →  BH-adjusted p<0.05: {n_adj}  ({n_raw-n_adj} lost after correction)")
+
+    print("\nWriting outputs...")
+    write_metrics_csv(ratios, baselines, faults, adjusted_p)
+    write_latex_table(ratios, adjusted_p)
+    write_heatmap_svg(ratios, adjusted_p)
+
+    print_summary(ratios, baselines, faults, adjusted_p)
+
+
+if __name__ == "__main__":
+    main()
