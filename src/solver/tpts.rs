@@ -205,7 +205,7 @@ impl TptsSolver {
 
         let actions = spacetime_astar_fast(
             grid, start, goal, &self.master_ci, TOKEN_ASTAR_MAX_TIME,
-            Some(dm), &mut self.stg, ASTAR_MAX_EXPANSIONS,
+            Some(dm), &mut self.stg, ASTAR_MAX_EXPANSIONS, None,
         ).ok()?;
 
         let mut positions = Vec::with_capacity(actions.len() + 1);

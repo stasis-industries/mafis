@@ -241,6 +241,80 @@ impl ConstraintChecker for FlatConstraintIndex {
 }
 
 // ---------------------------------------------------------------------------
+// FlatCAT — Conflict Avoidance Table (soft-constraint tie-breaker)
+// ---------------------------------------------------------------------------
+
+/// Conflict Avoidance Table — counts how many agents occupy each (pos, time) cell.
+/// Used as a soft-constraint tie-breaker: among nodes with equal f-value,
+/// prefer those with fewer CAT conflicts. Matches reference ReservationTable::CAT.
+pub struct FlatCAT {
+    counts: Vec<u16>,
+    width: i32,
+    stride: usize,
+    #[allow(dead_code)]
+    cells: usize,
+}
+
+impl FlatCAT {
+    pub fn new(width: i32, height: i32, max_time: u64) -> Self {
+        let stride = (max_time + 1) as usize;
+        let cells = (width * height) as usize;
+        Self {
+            counts: vec![0; cells * stride],
+            width,
+            stride,
+            cells,
+        }
+    }
+
+    pub fn reset(&mut self, width: i32, height: i32, max_time: u64) {
+        let stride = (max_time + 1) as usize;
+        let cells = (width * height) as usize;
+        let total = cells * stride;
+        if self.counts.len() != total || self.width != width {
+            self.width = width;
+            self.stride = stride;
+            self.cells = cells;
+            self.counts = vec![0; total];
+        } else {
+            self.counts.fill(0);
+        }
+    }
+
+    /// Add an agent's trajectory to the CAT.
+    pub fn add_path(&mut self, actions: &[Action], start: IVec2) {
+        let mut pos = start;
+        // Mark start position at t=0
+        let idx = self.idx(pos, 0);
+        if idx < self.counts.len() { self.counts[idx] = self.counts[idx].saturating_add(1); }
+
+        for (t, &action) in actions.iter().enumerate() {
+            pos = action.apply(pos);
+            let idx = self.idx(pos, (t + 1) as u64);
+            if idx < self.counts.len() { self.counts[idx] = self.counts[idx].saturating_add(1); }
+        }
+        // Hold final position for remaining timesteps
+        let final_t = actions.len();
+        for t in (final_t + 1)..self.stride {
+            let idx = self.idx(pos, t as u64);
+            if idx < self.counts.len() { self.counts[idx] = self.counts[idx].saturating_add(1); }
+        }
+    }
+
+    /// Count conflicts at (pos, time).
+    #[inline]
+    pub fn conflicts_at(&self, pos: IVec2, time: u64) -> u16 {
+        let idx = self.idx(pos, time);
+        if idx < self.counts.len() { self.counts[idx] } else { 0 }
+    }
+
+    #[inline]
+    fn idx(&self, pos: IVec2, time: u64) -> usize {
+        (pos.y * self.width + pos.x) as usize * self.stride + time as usize
+    }
+}
+
+// ---------------------------------------------------------------------------
 // SpacetimeGrid — reusable flat-array storage for A*
 // ---------------------------------------------------------------------------
 
@@ -425,11 +499,14 @@ struct Node {
     time: u64,
     g: u64,
     f: u64,
+    conflicts: u32, // CAT conflicts accumulated along path
 }
 
 impl Ord for Node {
     fn cmp(&self, other: &Self) -> Ordering {
-        other.f.cmp(&self.f).then_with(|| other.g.cmp(&self.g))
+        other.f.cmp(&self.f)
+            .then_with(|| self.conflicts.cmp(&other.conflicts)) // fewer conflicts = better
+            .then_with(|| other.g.cmp(&self.g))
     }
 }
 
@@ -667,6 +744,9 @@ pub fn spacetime_astar_sequential<C: ConstraintChecker>(
 /// source is generic: works with `ConstraintIndex`, `FlatConstraintIndex`, or any
 /// type implementing `ConstraintChecker` (e.g., Token Passing's MasterConstraintIndex).
 ///
+/// When `cat` is `Some`, accumulated CAT conflicts are used as a secondary
+/// tie-breaker: among nodes with equal f-value, fewer conflicts wins.
+///
 /// The caller owns the `SpacetimeGrid` and reuses it across calls to avoid allocation.
 pub fn spacetime_astar_fast<C: ConstraintChecker>(
     grid: &GridMap,
@@ -677,6 +757,7 @@ pub fn spacetime_astar_fast<C: ConstraintChecker>(
     dist_map: Option<&DistanceMap>,
     stg: &mut SpacetimeGrid,
     max_expansions: u64,
+    cat: Option<&FlatCAT>,
 ) -> Result<Vec<Action>, SolverError> {
     if !grid.is_walkable(start) || !grid.is_walkable(goal) {
         return Err(SolverError::InvalidInput(format!(
@@ -700,8 +781,9 @@ pub fn spacetime_astar_fast<C: ConstraintChecker>(
     stg.best_g[start_st] = 0;
 
     let h = heuristic(start);
+    let start_conflicts = cat.map(|c| c.conflicts_at(start, 0) as u32).unwrap_or(0);
     let mut open: BinaryHeap<Node> = BinaryHeap::with_capacity(256);
-    open.push(Node { pos: start, time: 0, g: 0, f: h });
+    open.push(Node { pos: start, time: 0, g: 0, f: h, conflicts: start_conflicts });
     let mut expansions: u64 = 0;
 
     while let Some(current) = open.pop() {
@@ -754,7 +836,9 @@ pub fn spacetime_astar_fast<C: ConstraintChecker>(
                     action: Action::Wait,
                 };
                 let f = g + heuristic(current.pos);
-                open.push(Node { pos: current.pos, time: next_time, g, f });
+                let cat_cost = cat.map(|c| c.conflicts_at(current.pos, next_time) as u32).unwrap_or(0);
+                let conflicts = current.conflicts + cat_cost;
+                open.push(Node { pos: current.pos, time: next_time, g, f, conflicts });
             }
         }
 
@@ -787,7 +871,9 @@ pub fn spacetime_astar_fast<C: ConstraintChecker>(
                 action: Action::Move(dir),
             };
             let f = g + heuristic(next_pos);
-            open.push(Node { pos: next_pos, time: next_time, g, f });
+            let cat_cost = cat.map(|c| c.conflicts_at(next_pos, next_time) as u32).unwrap_or(0);
+            let conflicts = current.conflicts + cat_cost;
+            open.push(Node { pos: next_pos, time: next_time, g, f, conflicts });
         }
     }
 
@@ -859,6 +945,7 @@ pub fn spacetime_astar_with_index(
         time: 0,
         g: 0,
         f: h,
+        conflicts: 0,
     };
 
     let cap = (max_time as usize) * 8;
@@ -906,6 +993,7 @@ pub fn spacetime_astar_with_index(
                     time: next_time,
                     g,
                     f,
+                    conflicts: 0,
                 });
             }
         }
@@ -941,6 +1029,7 @@ pub fn spacetime_astar_with_index(
                 time: next_time,
                 g,
                 f,
+                conflicts: 0,
             });
         }
     }
@@ -1085,7 +1174,7 @@ mod tests {
 
         let mut stg = SpacetimeGrid::new();
         let fast = spacetime_astar_fast(
-            &grid, start, goal, &ci, 30, Some(&dm), &mut stg, u64::MAX,
+            &grid, start, goal, &ci, 30, Some(&dm), &mut stg, u64::MAX, None,
         ).unwrap();
 
         // Both should find optimal path of length 18 (Manhattan distance)
@@ -1114,7 +1203,7 @@ mod tests {
 
         let mut stg = SpacetimeGrid::new();
         let fast = spacetime_astar_fast(
-            &grid, start, goal, &ci, 20, None, &mut stg, u64::MAX,
+            &grid, start, goal, &ci, 20, None, &mut stg, u64::MAX, None,
         ).unwrap();
 
         assert_eq!(original.len(), fast.len());
@@ -1139,7 +1228,7 @@ mod tests {
 
         let mut stg = SpacetimeGrid::new();
         let result = spacetime_astar_fast(
-            &grid, start, goal, &fci, 20, None, &mut stg, u64::MAX,
+            &grid, start, goal, &fci, 20, None, &mut stg, u64::MAX, None,
         ).unwrap();
 
         let mut pos = start;
@@ -1162,7 +1251,7 @@ mod tests {
         let ci = ConstraintIndex::new();
         let mut stg = SpacetimeGrid::new();
         let result = spacetime_astar_fast(
-            &grid, IVec2::ZERO, IVec2::new(4, 0), &ci, 20, None, &mut stg, u64::MAX,
+            &grid, IVec2::ZERO, IVec2::new(4, 0), &ci, 20, None, &mut stg, u64::MAX, None,
         );
         assert!(result.is_err());
     }
@@ -1175,12 +1264,12 @@ mod tests {
 
         // First call
         let r1 = spacetime_astar_fast(
-            &grid, IVec2::ZERO, IVec2::new(4, 4), &ci, 20, None, &mut stg, u64::MAX,
+            &grid, IVec2::ZERO, IVec2::new(4, 4), &ci, 20, None, &mut stg, u64::MAX, None,
         ).unwrap();
 
         // Second call with same grid (reuses arrays)
         let r2 = spacetime_astar_fast(
-            &grid, IVec2::new(4, 0), IVec2::new(0, 4), &ci, 20, None, &mut stg, u64::MAX,
+            &grid, IVec2::new(4, 0), IVec2::new(0, 4), &ci, 20, None, &mut stg, u64::MAX, None,
         ).unwrap();
 
         // Both should find valid paths
@@ -1245,7 +1334,7 @@ mod tests {
 
         let mut stg_fast = SpacetimeGrid::new();
         let fast_path = spacetime_astar_fast(
-            &grid, start, goal, &ci, 30, Some(&dm), &mut stg_fast, u64::MAX,
+            &grid, start, goal, &ci, 30, Some(&dm), &mut stg_fast, u64::MAX, None,
         ).unwrap();
 
         let goals: Vec<(IVec2, &DistanceMap)> = vec![(goal, &dm)];
@@ -1368,5 +1457,39 @@ mod tests {
         );
         let plan = result.expect("should find path at exact horizon");
         assert_eq!(plan.len(), 4);
+    }
+
+    // -----------------------------------------------------------------------
+    // FlatCAT tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn cat_counts_conflicts() {
+        let mut cat = FlatCAT::new(5, 5, 10);
+        // Agent 1: (0,0) -> (1,0) -> (2,0)
+        cat.add_path(&[Action::Move(Direction::East), Action::Move(Direction::East)], IVec2::ZERO);
+
+        assert_eq!(cat.conflicts_at(IVec2::ZERO, 0), 1);
+        assert_eq!(cat.conflicts_at(IVec2::new(1, 0), 1), 1);
+        assert_eq!(cat.conflicts_at(IVec2::new(2, 0), 2), 1);
+        // Agent holds at (2,0) after plan ends
+        assert_eq!(cat.conflicts_at(IVec2::new(2, 0), 5), 1);
+        // No agent at (3,0) ever
+        assert_eq!(cat.conflicts_at(IVec2::new(3, 0), 0), 0);
+
+        // Add second agent at same path
+        cat.add_path(&[Action::Move(Direction::East), Action::Move(Direction::East)], IVec2::ZERO);
+        assert_eq!(cat.conflicts_at(IVec2::ZERO, 0), 2);
+        assert_eq!(cat.conflicts_at(IVec2::new(1, 0), 1), 2);
+    }
+
+    #[test]
+    fn cat_reset_clears() {
+        let mut cat = FlatCAT::new(5, 5, 10);
+        cat.add_path(&[Action::Wait], IVec2::ZERO);
+        assert_eq!(cat.conflicts_at(IVec2::ZERO, 0), 1);
+
+        cat.reset(5, 5, 10);
+        assert_eq!(cat.conflicts_at(IVec2::ZERO, 0), 0);
     }
 }

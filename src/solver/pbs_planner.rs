@@ -10,7 +10,7 @@ use crate::core::action::Action;
 use crate::core::grid::GridMap;
 use crate::core::seed::SeededRng;
 
-use super::astar::{Constraints, FlatConstraintIndex, SpacetimeGrid, SeqGoalGrid,
+use super::astar::{Constraints, FlatCAT, FlatConstraintIndex, SpacetimeGrid, SeqGoalGrid,
     spacetime_astar_guided, spacetime_astar_fast, spacetime_astar_sequential};
 use super::heuristics::DistanceMap;
 use super::windowed::{PlanFragment, WindowAgent, WindowContext, WindowResult, WindowedPlanner};
@@ -252,6 +252,7 @@ fn plan_agent(
     ci_buf: &mut FlatConstraintIndex,
     stg: &mut SpacetimeGrid,
     start_constraints: &[(IVec2, u64)],
+    cat: Option<&FlatCAT>,
 ) -> Option<Vec<Action>> {
     let agent = &agents[agent_idx];
 
@@ -293,6 +294,7 @@ fn plan_agent(
         dist_map,
         stg,
         u64::MAX, // PBS has its own node limit via PBS_MAX_NODE_LIMIT
+        cat,
     )
     .ok()
 }
@@ -307,6 +309,7 @@ pub struct PbsPlanner {
     stg: SpacetimeGrid,
     seq_stg: SeqGoalGrid,
     empty_ci: FlatConstraintIndex,
+    cat: FlatCAT,
 }
 
 impl Default for PbsPlanner {
@@ -323,6 +326,7 @@ impl PbsPlanner {
             stg: SpacetimeGrid::new(),
             seq_stg: SeqGoalGrid::new(),
             empty_ci: FlatConstraintIndex::new(1, 1, 1),
+            cat: FlatCAT::new(1, 1, 1),
         }
     }
 }
@@ -404,6 +408,12 @@ impl WindowedPlanner for PbsPlanner {
         // Build timelines once for initial plans
         let initial_timelines = build_timelines(&initial_plans, ctx.agents);
 
+        // Build CAT from all initial plans for soft-constraint tie-breaking
+        self.cat.reset(ctx.grid.width, ctx.grid.height, ctx.horizon as u64);
+        for (i, plan) in initial_plans.iter().enumerate() {
+            self.cat.add_path(plan, ctx.agents[i].pos);
+        }
+
         // PBS tree search — DFS with best-node tracking
         let mut dfs: Vec<PbsNode> = Vec::new();
         let mut node_count = 0usize;
@@ -453,13 +463,13 @@ impl WindowedPlanner for PbsPlanner {
                     &node, conflict.agent_a, conflict.agent_b,
                     ctx.agents, ctx.grid, ctx.horizon, ctx.distance_maps,
                     &mut self.ci_buf, &mut self.stg,
-                    &ctx.start_constraints,
+                    &ctx.start_constraints, &self.cat,
                 );
                 let child2 = try_branch(
                     &node, conflict.agent_b, conflict.agent_a,
                     ctx.agents, ctx.grid, ctx.horizon, ctx.distance_maps,
                     &mut self.ci_buf, &mut self.stg,
-                    &ctx.start_constraints,
+                    &ctx.start_constraints, &self.cat,
                 );
 
                 // Push worse child first, better child second (better popped first in DFS)
@@ -533,6 +543,7 @@ fn try_branch(
     ci_buf: &mut FlatConstraintIndex,
     stg: &mut SpacetimeGrid,
     start_constraints: &[(IVec2, u64)],
+    cat: &FlatCAT,
 ) -> Option<PbsNode> {
     if would_create_cycle(&parent.priority_pairs, higher, lower) {
         return None;
@@ -544,7 +555,7 @@ fn try_branch(
     let mut new_plans = parent.plans.clone();
 
     let dm = distance_maps.get(lower).copied();
-    if let Some(new_plan) = plan_agent(lower, agents, &new_plans, &new_pairs, grid, horizon, dm, ci_buf, stg, start_constraints) {
+    if let Some(new_plan) = plan_agent(lower, agents, &new_plans, &new_pairs, grid, horizon, dm, ci_buf, stg, start_constraints, Some(cat)) {
         new_plans[lower] = new_plan;
         let mut new_timelines = parent.timelines.clone();
         rebuild_timeline(&mut new_timelines, &new_plans, agents, lower);

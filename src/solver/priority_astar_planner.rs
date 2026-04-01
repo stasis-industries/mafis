@@ -9,7 +9,7 @@ use bevy::prelude::*;
 use crate::core::action::Action;
 use crate::core::seed::SeededRng;
 
-use super::astar::{FlatConstraintIndex, SpacetimeGrid, SeqGoalGrid,
+use super::astar::{FlatCAT, FlatConstraintIndex, SpacetimeGrid, SeqGoalGrid,
     spacetime_astar_fast, spacetime_astar_sequential};
 use super::heuristics::DistanceMap;
 use super::windowed::{PlanFragment, WindowContext, WindowResult, WindowedPlanner};
@@ -18,6 +18,7 @@ pub struct PriorityAStarPlanner {
     ci: FlatConstraintIndex,
     stg: SpacetimeGrid,
     seq_stg: SeqGoalGrid,
+    cat: FlatCAT,
 }
 
 impl Default for PriorityAStarPlanner {
@@ -32,6 +33,7 @@ impl PriorityAStarPlanner {
             ci: FlatConstraintIndex::new(1, 1, 1),
             stg: SpacetimeGrid::new(),
             seq_stg: SeqGoalGrid::new(),
+            cat: FlatCAT::new(1, 1, 1),
         }
     }
 }
@@ -61,6 +63,8 @@ impl WindowedPlanner for PriorityAStarPlanner {
         let mut all_plans: Vec<Option<Vec<Action>>> = vec![None; n];
         // Flat constraint index — zero-hashing O(1) lookups
         self.ci.reset(ctx.grid.width, ctx.grid.height, ctx.horizon as u64);
+        // CAT for soft-constraint tie-breaking (built incrementally)
+        self.cat.reset(ctx.grid.width, ctx.grid.height, ctx.horizon as u64);
 
         // Collect which agents have been planned (warm-started or A*).
         // Start constraints for unplanned agents are added per-agent below.
@@ -74,6 +78,7 @@ impl WindowedPlanner for PriorityAStarPlanner {
             // Warm-start: reuse previous plan if available
             if let Some(ref init_plan) = ctx.initial_plans[i] {
                 add_plan_to_flat_index(&mut self.ci, init_plan, agent.pos, ctx.horizon);
+                self.cat.add_path(init_plan, agent.pos);
                 all_plans[i] = Some(init_plan.clone());
                 planned[i] = true;
                 continue;
@@ -100,6 +105,7 @@ impl WindowedPlanner for PriorityAStarPlanner {
                     Some(ctx.distance_maps[i]),
                     &mut self.stg,
                     u64::MAX,
+                    Some(&self.cat),
                 )
             } else {
                 let seq_dms: Vec<DistanceMap> = agent.goal_sequence.iter()
@@ -124,7 +130,7 @@ impl WindowedPlanner for PriorityAStarPlanner {
                     result = spacetime_astar_fast(
                         ctx.grid, agent.pos, agent.goal, &self.ci,
                         ctx.horizon as u64, Some(ctx.distance_maps[i]),
-                        &mut self.stg, u64::MAX,
+                        &mut self.stg, u64::MAX, Some(&self.cat),
                     );
                 }
                 result
@@ -133,6 +139,7 @@ impl WindowedPlanner for PriorityAStarPlanner {
             match result {
                 Ok(plan) => {
                     add_plan_to_flat_index(&mut self.ci, &plan, agent.pos, ctx.horizon);
+                    self.cat.add_path(&plan, agent.pos);
                     all_plans[i] = Some(plan);
                     planned[i] = true;
                 }
