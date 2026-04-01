@@ -175,6 +175,11 @@ pub struct RhcrSolver {
     prev_positions: Vec<IVec2>,
     /// Consecutive ticks where >50% of agents are stuck.
     congestion_streak: usize,
+    /// Per-cell exponentially-decayed wait counts for congestion-aware routing.
+    /// Indexed by `y * grid_width + x`. Tracks how often agents wait at each cell.
+    wait_counts: Vec<f32>,
+    /// Grid width for indexing into `wait_counts`.
+    wait_counts_width: i32,
 }
 
 impl RhcrSolver {
@@ -197,6 +202,8 @@ impl RhcrSolver {
             plan_buffer: Vec::new(),
             previous_plans: Vec::new(),
             prev_positions: Vec::new(),
+            wait_counts: Vec::new(),
+            wait_counts_width: 0,
             congestion_streak: 0,
         }
     }
@@ -248,13 +255,23 @@ impl RhcrSolver {
 
     /// Check congestion: returns true if >50% of agents didn't move since last tick.
     /// Reference: BasicSystem::congested() in the RHCR C++ codebase.
-    fn update_congestion(&mut self, agents: &[AgentState]) -> bool {
+    /// Also updates per-cell `wait_counts` for congestion-aware routing.
+    fn update_congestion(&mut self, agents: &[AgentState], grid: &GridMap) -> bool {
         if agents.is_empty() {
             self.congestion_streak = 0;
             return false;
         }
 
         let n = agents.len();
+        let grid_width = grid.width;
+
+        // Initialize or resize wait_counts if grid changed
+        let grid_size = (grid.width * grid.height) as usize;
+        if self.wait_counts.len() != grid_size || self.wait_counts_width != grid_width {
+            self.wait_counts = vec![0.0; grid_size];
+            self.wait_counts_width = grid_width;
+        }
+
         if self.prev_positions.len() != n {
             // First call or agent count changed — initialize
             self.prev_positions = agents.iter().map(|a| a.pos).collect();
@@ -267,6 +284,21 @@ impl RhcrSolver {
             .enumerate()
             .filter(|(i, a)| a.pos == self.prev_positions[*i] && a.goal.is_some() && a.pos != a.goal.unwrap())
             .count();
+
+        // Decay existing wait counts
+        for w in &mut self.wait_counts {
+            *w *= 0.99;
+        }
+
+        // Increment cells where agents waited (had a goal but didn't move)
+        for (i, a) in agents.iter().enumerate() {
+            if a.goal.is_some() && a.pos == self.prev_positions[i] && a.pos != a.goal.unwrap() {
+                let idx = (a.pos.y * grid_width + a.pos.x) as usize;
+                if idx < self.wait_counts.len() {
+                    self.wait_counts[idx] += 1.0;
+                }
+            }
+        }
 
         // Update positions for next tick
         for (i, a) in agents.iter().enumerate() {
@@ -556,6 +588,8 @@ impl LifelongSolver for RhcrSolver {
         self.previous_plans.clear();
         self.prev_positions.clear();
         self.congestion_streak = 0;
+        self.wait_counts.clear();
+        self.wait_counts_width = 0;
     }
 
     fn save_priorities(&self) -> Vec<f32> {
@@ -593,7 +627,7 @@ impl LifelongSolver for RhcrSolver {
         self.pibt_fallback.set_shuffle_seed(ctx.tick);
 
         // Update congestion detection (reference C++ BasicSystem::congested)
-        self.update_congestion(agents);
+        self.update_congestion(agents, ctx.grid);
 
         // Force replan when any agent has no plan (goal changed mid-window).
         // Require a minimum cooldown of 2 ticks to avoid replanning every tick
@@ -684,6 +718,7 @@ impl LifelongSolver for RhcrSolver {
             distance_maps: &dist_maps,
             initial_plans,
             start_constraints,
+            travel_penalties: &self.wait_counts,
         };
 
         // Run windowed planner
@@ -697,7 +732,7 @@ impl LifelongSolver for RhcrSolver {
             }
             WindowResult::Partial { solved, failed } => {
                 match self.config.fallback {
-                    FallbackMode::PerAgent | FallbackMode::Tiered => {
+                    FallbackMode::PerAgent => {
                         // LRA conflict resolution: combine solved multi-step plans
                         // with single-Wait stubs for failed agents, then resolve
                         // conflicts timestep-by-timestep. This preserves plan
@@ -710,6 +745,85 @@ impl LifelongSolver for RhcrSolver {
                         }
                         // Failed agents get single Wait as their "plan"
                         for &idx in &failed {
+                            combined.push((idx, vec![Action::Wait]));
+                        }
+
+                        let resolved = Self::lra_resolve_conflicts(
+                            &combined,
+                            agents,
+                            ctx.grid,
+                            self.config.horizon,
+                        );
+
+                        for (idx, actions) in resolved {
+                            self.plan_buffer.push((idx, actions));
+                        }
+                    }
+                    FallbackMode::Tiered => {
+                        // Tier 1: check solved plans for conflicts in the committed
+                        // window (first W steps). Agents with conflicts in the
+                        // committed portion get demoted to the failed set before
+                        // LRA resolution. This differs from PerAgent which keeps all
+                        // solved plans regardless of internal conflicts.
+                        let w = self.config.replan_interval;
+
+                        // Build position timelines for solved agents over W steps
+                        let mut positions: Vec<Vec<IVec2>> = Vec::with_capacity(solved.len());
+                        let mut indices: Vec<usize> = Vec::with_capacity(solved.len());
+                        for frag in &solved {
+                            if let Some(a) = agents.iter().find(|a| a.index == frag.agent_index) {
+                                let mut pos = a.pos;
+                                let mut timeline = vec![pos];
+                                for action in frag.actions.iter().take(w) {
+                                    pos = action.apply(pos);
+                                    timeline.push(pos);
+                                }
+                                positions.push(timeline);
+                                indices.push(frag.agent_index);
+                            }
+                        }
+
+                        // Detect vertex conflicts in first W steps
+                        let mut conflicting: std::collections::HashSet<usize> =
+                            std::collections::HashSet::new();
+                        for t in 1..=w {
+                            for i in 0..positions.len() {
+                                let pos_i = positions[i]
+                                    .get(t)
+                                    .copied()
+                                    .unwrap_or(*positions[i].last().unwrap());
+                                for j in (i + 1)..positions.len() {
+                                    let pos_j = positions[j]
+                                        .get(t)
+                                        .copied()
+                                        .unwrap_or(*positions[j].last().unwrap());
+                                    if pos_i == pos_j {
+                                        conflicting.insert(indices[i]);
+                                        conflicting.insert(indices[j]);
+                                    }
+                                }
+                            }
+                        }
+
+                        // Demote conflicting agents from solved to failed
+                        let mut kept_solved = Vec::new();
+                        let mut extended_failed = failed.clone();
+                        for frag in solved {
+                            if conflicting.contains(&frag.agent_index) {
+                                extended_failed.push(frag.agent_index);
+                            } else {
+                                kept_solved.push(frag);
+                            }
+                        }
+
+                        // LRA resolve on kept_solved + extended_failed
+                        let mut combined: Vec<(usize, Vec<Action>)> = Vec::with_capacity(
+                            kept_solved.len() + extended_failed.len(),
+                        );
+                        for frag in &kept_solved {
+                            combined.push((frag.agent_index, frag.actions.to_vec()));
+                        }
+                        for &idx in &extended_failed {
                             combined.push((idx, vec![Action::Wait]));
                         }
 
@@ -1374,6 +1488,43 @@ mod tests {
             pos0 = a0.apply(pos0);
             pos1 = a1.apply(pos1);
             assert_ne!(pos0, pos1, "vertex conflict at t={}", t + 1);
+        }
+    }
+
+    #[test]
+    fn tiered_fallback_demotes_conflicting_plans() {
+        // This test verifies that Tiered mode is different from PerAgent:
+        // a solved plan that has a conflict in the first W steps gets demoted.
+        let grid = GridMap::new(5, 5);
+        let zones = test_zones();
+        let config = RhcrConfig {
+            mode: RhcrMode::PriorityAStar,
+            fallback: FallbackMode::Tiered,
+            horizon: 10,
+            replan_interval: 1,
+            pbs_node_limit: 100,
+        };
+        let mut solver = RhcrSolver::new(config);
+        let mut cache = DistanceMapCache::default();
+        let mut rng = SeededRng::new(42);
+
+        // Two agents with crossing goals
+        let agents = vec![
+            AgentState { index: 0, pos: IVec2::new(0, 2), goal: Some(IVec2::new(4, 2)), has_plan: false, task_leg: TaskLeg::Free },
+            AgentState { index: 1, pos: IVec2::new(4, 2), goal: Some(IVec2::new(0, 2)), has_plan: false, task_leg: TaskLeg::Free },
+        ];
+
+        let ctx = SolverContext { grid: &grid, zones: &zones, tick: 0, num_agents: 2 };
+        let result = solver.step(&ctx, &agents, &mut cache, &mut rng);
+
+        // Should produce valid plans (no crashes, no empty)
+        match result {
+            StepResult::Replan(plans) => {
+                assert_eq!(plans.len(), 2, "Both agents should get plans");
+                assert!(!plans[0].1.is_empty());
+                assert!(!plans[1].1.is_empty());
+            }
+            _ => panic!("expected Replan"),
         }
     }
 

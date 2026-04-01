@@ -31,6 +31,10 @@ pub struct WindowContext<'a> {
     /// Vertex constraints at t=0 for all agents' start positions.
     /// Prevents agent A from planning to be at agent B's position at t=0.
     pub start_constraints: Vec<(IVec2, u64)>,
+    /// Per-cell travel penalties (grid-aligned flat array, indexed by y*width+x).
+    /// Higher values indicate historically congested cells. Planners may use
+    /// this as an additive cost bias. Empty slice = no penalties.
+    pub travel_penalties: &'a [f32],
 }
 
 #[derive(Clone, Debug)]

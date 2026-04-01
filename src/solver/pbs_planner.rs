@@ -627,6 +627,7 @@ mod tests {
             distance_maps: dist_maps,
             initial_plans: vec![None; agents.len()],
             start_constraints: agents.iter().map(|a| (a.pos, 0u64)).collect(),
+            travel_penalties: &[],
         }
     }
 
@@ -758,6 +759,7 @@ mod tests {
             distance_maps: &dist_maps,
             initial_plans: vec![None; agents.len()],
             start_constraints: agents.iter().map(|a| (a.pos, 0u64)).collect(),
+            travel_penalties: &[],
         };
         let mut planner = PbsPlanner::new();
         let mut rng = SeededRng::new(42);
