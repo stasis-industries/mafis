@@ -36,8 +36,8 @@
     --state-idle: rgb(160, 160, 160);
     --state-moving: rgb(45, 160, 0);
     --state-delayed: rgb(230, 140, 0);
-    --state-fault: rgb(230, 44, 2);
-    --state-critical: rgb(143, 58, 222);
+    --state-fault: rgb(191, 10, 10);
+    --state-critical: rgb(56, 20, 107);
 
     /* Task-leg state colors (match 3D palette) */
     --leg-free: rgb(158, 161, 171);
@@ -5345,6 +5345,13 @@ body[data-phase="experiment"] #toolbar {
     flex-direction: column;
 }
 
+.exp-sidebar-toolbar {
+    margin-bottom: 8px;
+}
+.exp-sidebar-toolbar .exp-toolbar-select {
+    width: 100%;
+}
+
 .exp-chart-container {
     flex: 1;
     min-height: 80px;
@@ -5725,5 +5732,118 @@ body.demo-active .demo-skip-btn {
 .demo-tooltip strong {
     color: rgb(217, 158, 38);
     font-weight: 600;
+}
+
+/* Tour navigation bar */
+#tour-nav {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 160;
+    display: none;
+    gap: 0;
+    background: rgba(18, 18, 22, 0.8);
+    padding: 6px;
+}
+.tour-nav-btn {
+    width: 120px;
+    padding: 10px 0;
+    border: none;
+    background: rgb(245, 245, 245);
+    color: rgb(18, 18, 22);
+    font-family: 'Inter', sans-serif;
+    font-size: 0.85rem;
+    font-weight: 500;
+    cursor: pointer;
+    text-align: center;
+}
+.tour-nav-btn + .tour-nav-btn { margin-left: 4px; }
+.tour-nav-btn:hover { background: rgb(220, 220, 220); }
+.tour-nav-btn:disabled { opacity: 0.35; cursor: default; }
+.tour-nav-primary { font-weight: 700; }
+
+/* Metrics reference modal */
+.metrics-modal-overlay {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    z-index: 200;
+    background: rgba(0,0,0,0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.metrics-modal-content {
+    background: var(--bg-panel);
+    border: 1px solid var(--border-strong);
+    max-width: 640px;
+    max-height: 80vh;
+    overflow-y: auto;
+    padding: 24px 28px;
+    position: relative;
+    font-size: 0.85rem;
+    line-height: 1.5;
+}
+.metrics-modal-content h2 { font-size: 1.1rem; margin: 0 0 16px 0; }
+.metrics-modal-content h3 { font-size: 0.95rem; margin: 16px 0 8px 0; }
+.metrics-modal-content p { margin: 8px 0; color: var(--text-secondary); }
+.metrics-modal-close {
+    position: absolute;
+    top: 12px; right: 12px;
+    border: none;
+    background: transparent;
+    font-size: 1.4rem;
+    cursor: pointer;
+    color: var(--text-secondary);
+    line-height: 1;
+}
+.metrics-modal-close:hover { color: var(--text-primary); }
+.metrics-ref-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 8px 0;
+    font-size: 0.8rem;
+}
+.metrics-ref-table th,
+.metrics-ref-table td {
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--border);
+    text-align: left;
+    vertical-align: top;
+}
+.metrics-ref-table th {
+    font-weight: 600;
+    font-size: 0.75rem;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+}
+.metrics-ref-formula td:nth-child(2) { white-space: nowrap; }
+.metrics-ref-formula td:nth-child(3) { white-space: nowrap; text-align: center; }
+.formula {
+    font-family: 'Georgia', 'Times New Roman', serif;
+    font-style: italic;
+    letter-spacing: 0.3px;
+}
+.composite-formula {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    padding: 10px 12px;
+    margin: 8px 0;
+    background: var(--bg-inset, rgba(0,0,0,0.06));
+    border-left: 2px solid var(--border-strong);
+    font-family: 'Georgia', 'Times New Roman', serif;
+    font-style: italic;
+    font-size: 0.88rem;
+    letter-spacing: 0.3px;
+    flex-wrap: wrap;
+}
+.formula-var { font-weight: 600; }
+.formula-op { color: var(--text-secondary); }
+.composite-note {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    margin: 4px 0 0 0;
 }
 

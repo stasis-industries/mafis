@@ -150,9 +150,6 @@
         }
     </script>
 
-    <!-- Demo Skip button (visible during demo) -->
-    <button id="demo-skip" class="demo-skip-btn">Skip</button>
-
     <!-- Header -->
     <header id="header">
         <a href="https://stasis-website.vercel.app" target="_blank" rel="noopener noreferrer" class="header-title">MAFIS</a>
@@ -161,6 +158,7 @@
         <button class="btn-header btn-share" id="btn-share" title="Copy shareable URL to clipboard">SHARE</button>
         <div class="header-spacer"></div>
         <span class="header-fps" id="header-fps">60</span>
+        <button class="btn-header btn-metrics-info" id="btn-metrics-info" title="Metrics explanation">&#x2139;</button>
         <button class="btn-header" id="btn-settings" title="Graphics settings" aria-label="Graphics settings">&#9881;</button>
         <button class="btn-theme" id="btn-theme" title="Toggle dark mode" aria-label="Toggle dark mode">&#9789;</button>
     </header>
@@ -331,7 +329,7 @@
                             <button class="preset-btn" data-duration="1000">Long</button>
                         </div>
                         <div class="slider-row" style="margin-top:4px">
-                            <input type="number" class="input-field" id="input-duration" min="50" max="5000" value="500" style="width:70px">
+                            <input type="number" class="input-field" id="input-duration" min="50" max="1000000" value="500" style="width:70px">
                             <span class="input-hint">ticks</span>
                         </div>
                     </div>
@@ -606,23 +604,9 @@
                 <span class="legend-item"><span class="legend-dot" style="background:var(--leg-free)"></span>Idle</span>
                 <span class="legend-item"><span class="legend-dot" style="background:var(--leg-travel-empty)"></span>Picking</span>
                 <span class="legend-item"><span class="legend-dot" style="background:var(--leg-travel-to-queue)"></span>Delivering</span>
-                <span class="legend-item"><span class="legend-dot" style="background:rgb(230, 44, 2);box-shadow:0 0 6px rgb(255,80,10)"></span>Dead</span>
-                <span class="legend-item"><span class="legend-dot" style="background:rgb(128,89,184);box-shadow:0 0 4px rgb(150,76,204)"></span>Latency</span>
+                <span class="legend-item"><span class="legend-dot" style="background:rgb(191, 10, 10);box-shadow:0 0 6px rgb(220,30,30)"></span>Dead</span>
+                <span class="legend-item"><span class="legend-dot" style="background:rgb(56,20,107);box-shadow:0 0 4px rgb(80,35,150)"></span>Latency</span>
             </div>
-            <!-- Task state color legend — Detailed mode -->
-            <div id="state-legend-detailed" class="state-legend" style="display:none">
-                <span class="legend-item"><span class="legend-dot" style="background:var(--leg-free)"></span>Free</span>
-                <span class="legend-item"><span class="legend-dot" style="background:var(--leg-travel-empty)"></span>Travel Empty</span>
-                <span class="legend-item"><span class="legend-dot" style="background:var(--leg-loading)"></span>Loading</span>
-                <span class="legend-item"><span class="legend-dot" style="background:var(--leg-travel-to-queue)"></span>Travel to Queue</span>
-                <span class="legend-item"><span class="legend-dot" style="background:var(--leg-queuing)"></span>Queuing</span>
-                <span class="legend-item"><span class="legend-dot" style="background:var(--leg-travel-loaded)"></span>Travel Loaded</span>
-                <span class="legend-item"><span class="legend-dot" style="background:var(--leg-unloading)"></span>Unloading</span>
-                <span class="legend-item"><span class="legend-dot" style="background:var(--leg-charging)"></span>Charging</span>
-                <span class="legend-item"><span class="legend-dot" style="background:rgb(230, 44, 2);box-shadow:0 0 6px rgb(255,80,10)"></span>Dead</span>
-                <span class="legend-item"><span class="legend-dot" style="background:rgb(128,89,184);box-shadow:0 0 4px rgb(150,76,204)"></span>Latency</span>
-            </div>
-
             <div id="camera-controls">
                 <button class="btn-camera" id="btn-view-center" title="Center on grid (key: C)">FOCUS</button>
                 <button class="btn-camera" id="btn-view-top" title="Top view (key: 2)">TOP</button>
@@ -771,7 +755,7 @@
                         <div class="sc-card-value" id="sc-ft">1.00</div>
                         <div class="sc-card-bar"><div class="sc-bar-zone sc-bar-poor" style="width:50%"></div><div class="sc-bar-zone sc-bar-fair" style="width:30%"></div><div class="sc-bar-zone sc-bar-good" style="width:20%"></div><div class="sc-bar-marker" id="sc-ft-marker"></div></div>
                     </div>
-                    <div class="sc-card" title="NRR = 1 - MTTR/MTBF — Normalized Recovery Ratio (Or 2025). Higher = less time recovering.">
+                    <div class="sc-card" id="sc-nrr-card" title="NRR = 1 - MTTR/MTBF — Normalized Recovery Ratio (Or 2025). Higher = less time recovering." style="display:none">
                         <div class="sc-card-header"><span class="sc-card-label">NRR</span><span class="sc-card-zone" id="sc-nrr-zone">&mdash;</span></div>
                         <div class="sc-card-value" id="sc-nrr">&mdash;</div>
                         <div class="sc-card-bar"><div class="sc-bar-zone sc-bar-poor" style="width:40%"></div><div class="sc-bar-zone sc-bar-fair" style="width:30%"></div><div class="sc-bar-zone sc-bar-good" style="width:30%"></div><div class="sc-bar-marker" id="sc-nrr-marker"></div></div>
@@ -1150,21 +1134,6 @@
                         </div>
                         <div class="exp-results-toolbar-right">
                             <div class="exp-toolbar-group">
-                                <label class="exp-toolbar-label">Chart</label>
-                                <select class="exp-toolbar-select" id="exp-chart-metric">
-                                    <option value="fault_tolerance" selected>FT</option>
-                                    <option value="throughput">Throughput</option>
-                                    <option value="nrr">NRR</option>
-                                    <option value="critical_time">Crit. Time</option>
-                                    <option value="survival_rate">Survival</option>
-                                    <option value="mttr">MTTR</option>
-                                    <option value="propagation_rate">Prop.</option>
-                                    <option value="idle_ratio">Idle</option>
-                                    <option value="total_tasks">Tasks</option>
-                                </select>
-                            </div>
-                            <div class="exp-toolbar-divider"></div>
-                            <div class="exp-toolbar-group">
                                 <label class="exp-toolbar-label">Export</label>
                                 <button class="exp-toolbar-btn" id="btn-exp-csv">CSV</button>
                                 <button class="exp-toolbar-btn" id="btn-exp-json">JSON</button>
@@ -1185,6 +1154,19 @@
                             </table>
                         </div>
                         <div class="exp-results-sidebar">
+                            <div class="exp-sidebar-toolbar">
+                                <select class="exp-toolbar-select" id="exp-chart-metric">
+                                    <option value="fault_tolerance" selected>Fault Tolerance</option>
+                                    <option value="throughput">Throughput</option>
+                                    <option value="nrr">NRR</option>
+                                    <option value="critical_time">Critical Time</option>
+                                    <option value="survival_rate">Survival Rate</option>
+                                    <option value="mttr">MTTR</option>
+                                    <option value="propagation_rate">Propagation Rate</option>
+                                    <option value="idle_ratio">Idle Ratio</option>
+                                    <option value="total_tasks">Tasks Completed</option>
+                                </select>
+                            </div>
                             <div class="exp-chart-container" id="exp-chart"></div>
                         </div>
                     </div>
@@ -1272,14 +1254,6 @@
                         <label class="settings-label">Colorblind mode</label>
                         <label class="settings-toggle">
                             <input type="checkbox" id="setting-colorblind">
-                            <span class="toggle-track"><span class="toggle-thumb"></span></span>
-                        </label>
-                    </div>
-
-                    <div class="settings-row">
-                        <label class="settings-label">Detailed task states</label>
-                        <label class="settings-toggle">
-                            <input type="checkbox" id="setting-detailed-states">
                             <span class="toggle-track"><span class="toggle-thumb"></span></span>
                         </label>
                     </div>
@@ -1455,6 +1429,69 @@
 
         start();
     </script>
+
+    <!-- Metrics reference modal -->
+    <div id="metrics-info-modal" class="metrics-modal-overlay" style="display:none">
+        <div class="metrics-modal-content">
+            <button class="metrics-modal-close" id="btn-metrics-close">&times;</button>
+            <h2>Fault Metrics Reference</h2>
+            <h3>Scorecard</h3>
+            <table class="metrics-ref-table metrics-ref-formula">
+                <thead><tr><th>Metric</th><th>Formula</th><th>Range</th><th>Description</th></tr></thead>
+                <tbody>
+                    <tr>
+                        <td>Fault Tolerance</td>
+                        <td><span class="formula">P<sub>fault</sub>&thinsp;/&thinsp;P<sub>nominal</sub></span></td>
+                        <td>0&thinsp;&ndash;&thinsp;1+</td>
+                        <td>Fraction of baseline throughput retained under faults. Can exceed 1.0 (Braess paradox).</td>
+                    </tr>
+                    <tr>
+                        <td>NRR</td>
+                        <td><span class="formula">1 &minus; MTTR&thinsp;/&thinsp;MTBF</span></td>
+                        <td>0&thinsp;&ndash;&thinsp;1</td>
+                        <td>Normalized Recovery Ratio. Higher = less time spent recovering. Requires &ge;2 fault events.</td>
+                    </tr>
+                    <tr>
+                        <td>Fleet Utilization</td>
+                        <td><span class="formula">alive<sub>tasked</sub>&thinsp;/&thinsp;initial<sub>fleet</sub></span></td>
+                        <td>0&thinsp;&ndash;&thinsp;1</td>
+                        <td>Productive fleet capacity retained. Counts latency-affected agents as tasked.</td>
+                    </tr>
+                    <tr>
+                        <td>Critical Time</td>
+                        <td><span class="formula">ticks<sub>&lt;50%</sub>&thinsp;/&thinsp;ticks<sub>post-fault</sub></span></td>
+                        <td>0&thinsp;&ndash;&thinsp;1</td>
+                        <td>Fraction of post-fault ticks below 50% baseline throughput. Lower is better.</td>
+                    </tr>
+                </tbody>
+            </table>
+            <h3>Other Metrics</h3>
+            <table class="metrics-ref-table">
+                <thead><tr><th>Metric</th><th>Description</th></tr></thead>
+                <tbody>
+                    <tr><td>Throughput</td><td>Average tasks completed per tick (rolling window).</td></tr>
+                    <tr><td>MTTR</td><td>Mean recovery time of cascade-affected neighbors (not dead agents).</td></tr>
+                    <tr><td>MTBF</td><td>Mean interval between fault events. Requires 2+ events.</td></tr>
+                    <tr><td>Propagation Rate</td><td>Average fraction of alive fleet affected per fault event.</td></tr>
+                    <tr><td>Survival Rate</td><td>Fraction of initial fleet still alive.</td></tr>
+                    <tr><td>Idle Ratio</td><td>Fraction of agent-ticks spent waiting (not moving). Includes solver waits, collision holds, and latency.</td></tr>
+                    <tr><td>Impacted Area</td><td>Throughput deviation vs baseline: <span class="formula">(live &minus; baseline)&thinsp;/&thinsp;baseline &times; 100</span>. Negative = behind.</td></tr>
+                    <tr><td>Deficit Integral</td><td>Cumulative task deficit vs baseline over time.</td></tr>
+                </tbody>
+            </table>
+            <h3>Composite Score</h3>
+            <div class="composite-formula">
+                <span class="formula-term"><span class="formula-var">FT</span>&thinsp;&times;&thinsp;0.3</span>
+                <span class="formula-op">+</span>
+                <span class="formula-term"><span class="formula-var">NRR</span>&thinsp;&times;&thinsp;0.25</span>
+                <span class="formula-op">+</span>
+                <span class="formula-term"><span class="formula-var">FUR</span>&thinsp;&times;&thinsp;0.25</span>
+                <span class="formula-op">+</span>
+                <span class="formula-term">(1 &minus; <span class="formula-var">CritTime</span>)&thinsp;&times;&thinsp;0.2</span>
+            </div>
+            <p class="composite-note">When NRR is N/A, weights redistribute: FT&thinsp;40%, FUR&thinsp;33%, CritTime&thinsp;27%.</p>
+        </div>
+    </div>
 </body>
 
 </html>

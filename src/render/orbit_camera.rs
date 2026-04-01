@@ -314,7 +314,7 @@ fn apply_orbit_transform(
             **camera = Transform::from_translation(
                 orbit.focus + Vec3::new(0.0, height, 0.001),
             )
-            .looking_at(orbit.focus, Vec3::Z);
+            .looking_at(orbit.focus, -Vec3::Z);
         }
     }
 }

@@ -823,6 +823,9 @@ fn despawn_on_reset(
     mut manual_fault_log: ResMut<crate::fault::manual::ManualFaultLog>,
     existing_agents: Query<Entity, With<LogicalAgent>>,
     existing_obstacles: Query<Entity, With<ObstacleMarker>>,
+    grid: Res<GridMap>,
+    zone_map: Res<ZoneMap>,
+    ui_state: Res<UiState>,
 ) {
     for entity in &existing_agents {
         commands.entity(entity).despawn();
@@ -842,6 +845,15 @@ fn despawn_on_reset(
     commands.remove_resource::<LoadingObstacles>();
     commands.remove_resource::<LoadingAgents>();
     commands.remove_resource::<crate::core::live_sim::LiveSim>();
+
+    // Re-insert PreviewMap so obstacles respawn in the 3D preview
+    commands.insert_resource(PreviewMap {
+        grid: grid.clone(),
+        zones: zone_map.clone(),
+        robot_starts: Vec::new(),
+        seed: ui_state.seed,
+        name: ui_state.topology_name.clone(),
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -914,8 +926,8 @@ fn spawn_preview(
     // Spawn obstacles
     crate::render::environment::spawn_obstacles(&mut commands, &mut meshes, &mut materials, &grid);
 
-    // Spawn preview robots (static cubes at start positions)
-    let robot_mesh = meshes.add(Cuboid::new(0.7, 0.16, 0.7));
+    // Spawn preview robots (static cylinders at start positions)
+    let robot_mesh = meshes.add(Cylinder::new(0.35, 0.14));
     let robot_mat = materials.add(StandardMaterial {
         base_color: Color::srgb(0.55, 0.57, 0.60),
         perceptual_roughness: 0.4,
@@ -927,7 +939,7 @@ fn spawn_preview(
         commands.spawn((
             Mesh3d(robot_mesh.clone()),
             MeshMaterial3d(robot_mat.clone()),
-            Transform::from_xyz(world.x, 0.08, world.z),
+            Transform::from_xyz(world.x, 0.07, world.z),
             PreviewRobot,
         ));
     }

@@ -304,6 +304,7 @@ pub fn experiment_finish() -> String {
 
 #[derive(Serialize)]
 struct BridgeOutput {
+    version: &'static str,
     state: String,
     tick: u64,
     duration: u64,
@@ -565,7 +566,6 @@ struct GraphicsSnapshot {
     shadows: bool,
     msaa: bool,
     colorblind: bool,
-    detailed_states: bool,
 }
 
 #[derive(Serialize)]
@@ -837,6 +837,7 @@ fn sync_state_to_js(
     };
 
     let output = BridgeOutput {
+        version: crate::constants::VERSION,
         state: state_str.to_string(),
         tick: config.tick,
         duration: config.duration,
@@ -910,7 +911,6 @@ fn sync_state_to_js(
             shadows: phase_res.graphics.shadows,
             msaa: phase_res.graphics.msaa,
             colorblind: phase_res.graphics.colorblind,
-            detailed_states: phase_res.graphics.task_state_mode == crate::render::graphics::TaskStateMode::Detailed,
         },
         topology: phase_res.active_topology.name().to_string(),
         storage_rows: 0,
@@ -1587,14 +1587,6 @@ fn process_js_commands(
                         "shadows" => lifelong_res.graphics.shadows = value,
                         "msaa" => lifelong_res.graphics.msaa = value,
                         "colorblind" => lifelong_res.graphics.colorblind = value,
-                        "detailed_states" => {
-                            use crate::render::graphics::TaskStateMode;
-                            lifelong_res.graphics.task_state_mode = if value {
-                                TaskStateMode::Detailed
-                            } else {
-                                TaskStateMode::Simple
-                            };
-                        }
                         _ => {}
                     }
                 }

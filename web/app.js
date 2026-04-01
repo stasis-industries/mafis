@@ -7,7 +7,7 @@ const get_simulation_state = wasmGetState;
 window._getState = () => { try { return JSON.parse(wasmGetState()); } catch(e) { return null; } };
 
 const POLL_INTERVAL = 100; // ms
-const CHART_MAX_POINTS = 200;
+// No chart point cap — arrays grow unbounded (memory is negligible)
 
 // ---------------------------------------------------------------------------
 // Security: HTML escaping helper
@@ -133,6 +133,7 @@ export function initApp() {
     initResultsPhase();
     initExperimentMode();
     initShareButton();
+    initMetricsInfoModal();
 
     // Auto-play demo: show on first visit (persisted in localStorage)
     if (!localStorage.getItem('mafis-demo-seen')) {
@@ -372,58 +373,94 @@ class DemoController {
             this._tourTimers.push(t);
         });
 
-        // --- Guided tour sequence ---
+        // --- Tour navigation: Previous / Next / Skip ---
+        let _tourNav = document.getElementById('tour-nav');
+        if (!_tourNav) {
+            _tourNav = document.createElement('div');
+            _tourNav.id = 'tour-nav';
+            _tourNav.innerHTML = `<button id="tour-prev" class="tour-nav-btn">Previous</button>` +
+                `<button id="tour-next" class="tour-nav-btn tour-nav-primary">Next</button>` +
+                `<button id="tour-skip" class="tour-nav-btn">Skip</button>`;
+            document.body.appendChild(_tourNav);
+        }
+        _tourNav.style.display = 'flex';
+        this._tourNav = _tourNav;
+
+        let _navResolve = null;
+        const waitForNav = () => new Promise(resolve => { _navResolve = resolve; });
+        _tourNav.querySelector('#tour-prev').onclick = () => _navResolve?.('prev');
+        _tourNav.querySelector('#tour-next').onclick = () => _navResolve?.('next');
+        _tourNav.querySelector('#tour-skip').onclick = () => {
+            _navResolve?.('skip');
+            // On skip: stop sim, reset, go to setup
+            sendCommand({ type: 'set_state', value: 'reset' });
+            setPhase('configure');
+        };
+
+        const updateNavState = (idx) => {
+            const prevBtn = _tourNav.querySelector('#tour-prev');
+            if (prevBtn) prevBtn.disabled = idx <= 0;
+        };
+
+        // Scroll left panel to show an element
+        const scrollPanelTo = (elId) => {
+            const el = document.getElementById(elId);
+            if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        };
+
+        // --- Guided tour steps ---
+        const configSteps = [
+            { action: () => {
+                expandSection('sim-content');
+                const topo = loadedTopologies.find(t => t.id === DEMO_CONFIG.topology);
+                if (topo) { sendCommand({ type: 'load_custom_map', ...topo.data }); }
+                else { sendCommand({ type: 'set_topology', value: DEMO_CONFIG.topology }); }
+                return spotlight('topology-presets', '<strong>Topology</strong> \u2014 Choose a warehouse layout. Selecting <strong>Compact Grid</strong>.');
+            }},
+            { action: () => {
+                expandSection('solver-sched-content');
+                sendCommand({ type: 'set_solver', value: DEMO_CONFIG.solver });
+                const sel = document.getElementById('input-solver');
+                if (sel) sel.value = DEMO_CONFIG.solver;
+                return spotlight('input-solver', '<strong>Algorithm</strong> \u2014 PIBT: reactive priority inheritance. Replans every tick.');
+            }},
+            { action: () => {
+                sendCommand({ type: 'set_scheduler', value: DEMO_CONFIG.scheduler });
+                const sel = document.getElementById('input-scheduler');
+                if (sel) sel.value = DEMO_CONFIG.scheduler;
+                return spotlight('input-scheduler', '<strong>Scheduler</strong> \u2014 Random: assigns pickups and deliveries randomly.');
+            }},
+            { action: () => {
+                sendCommand({ type: 'set_seed', value: DEMO_CONFIG.seed });
+                sendCommand({ type: 'set_tick_hz', value: DEMO_CONFIG.tickHz });
+                sendCommand({ type: 'set_duration', value: DEMO_CONFIG.duration });
+                const el = document.getElementById('input-duration');
+                if (el) el.value = DEMO_CONFIG.duration;
+                return spotlight('input-duration', '<strong>Duration</strong> \u2014 300 ticks. Enough time to observe fault recovery.');
+            }},
+            { action: async () => {
+                expandSection('fault-content');
+                faultList = [{ id: 'f_demo', type: 'burst_failure', kill_percent: 20, at_tick: 100 }];
+                renderFaultList();
+                syncFaultListToRust();
+                scrollPanelTo('fault-config-panel');
+                await delay(500);
+                return spotlight('fault-config-panel', '<strong>Fault Injection</strong> \u2014 Burst failure: 20% of agents die at tick 100.');
+            }},
+        ];
+
         const runTour = async () => {
-            const STEP = 3000;
-
-            // 1. Topology
-            expandSection('sim-content');
-            const topo = loadedTopologies.find(t => t.id === DEMO_CONFIG.topology);
-            if (topo) {
-                sendCommand({ type: 'load_custom_map', ...topo.data });
-            } else {
-                sendCommand({ type: 'set_topology', value: DEMO_CONFIG.topology });
+            let idx = 0;
+            while (idx < configSteps.length) {
+                updateNavState(idx);
+                await configSteps[idx].action();
+                const nav = await waitForNav();
+                if (nav === 'skip') { clearSpotlight(); this._finishTour(); return; }
+                if (nav === 'prev' && idx > 0) { idx--; continue; }
+                idx++;
             }
-            const presetBtns = document.querySelectorAll('#topology-presets .topo-preset-btn');
-            presetBtns.forEach(b => {
-                if (b.dataset.id === DEMO_CONFIG.topology) b.classList.add('active');
-            });
-            await spotlight('topology-presets', '<strong>Topology</strong> \u2014 Choose a warehouse layout. Selecting <strong>Compact Grid</strong>.');
-            await delay(STEP);
 
-            // 2. Algorithm
-            expandSection('solver-sched-content');
-            sendCommand({ type: 'set_solver', value: DEMO_CONFIG.solver });
-            const solverSel = document.getElementById('input-solver');
-            if (solverSel) solverSel.value = DEMO_CONFIG.solver;
-            await spotlight('input-solver', '<strong>Algorithm</strong> \u2014 PIBT: reactive priority inheritance. Replans every tick.');
-            await delay(STEP);
-
-            // 3. Scheduler
-            sendCommand({ type: 'set_scheduler', value: DEMO_CONFIG.scheduler });
-            const schedSel = document.getElementById('input-scheduler');
-            if (schedSel) schedSel.value = DEMO_CONFIG.scheduler;
-            await spotlight('input-scheduler', '<strong>Scheduler</strong> \u2014 Random: assigns pickups and deliveries randomly.');
-            await delay(STEP);
-
-            // 4. Duration
-            sendCommand({ type: 'set_seed', value: DEMO_CONFIG.seed });
-            sendCommand({ type: 'set_tick_hz', value: DEMO_CONFIG.tickHz });
-            sendCommand({ type: 'set_duration', value: DEMO_CONFIG.duration });
-            const durInput = document.getElementById('input-duration');
-            if (durInput) durInput.value = DEMO_CONFIG.duration;
-            await spotlight('input-duration', '<strong>Duration</strong> \u2014 300 ticks. Enough time to observe fault recovery.');
-            await delay(STEP);
-
-            // 5. Fault Injection — add a burst fault via the list
-            expandSection('fault-content');
-            faultList = [{ id: 'f_demo', type: 'burst_failure', kill_percent: 20, at_tick: 100 }];
-            renderFaultList();
-            syncFaultListToRust();
-            await spotlight('fault-config-panel', '<strong>Fault Injection</strong> \u2014 Burst failure: 20% of agents die at tick 100.');
-            await delay(STEP);
-
-            // 6. Launch
+            // Launch simulation — keep nav visible during run
             clearSpotlight();
             const overlay = document.getElementById('demo-overlay');
             if (overlay) {
@@ -449,6 +486,7 @@ class DemoController {
         const tip = document.querySelector('.demo-tooltip');
         if (hole) hole.style.display = 'none';
         if (tip) tip.classList.remove('visible');
+        if (this._tourNav) this._tourNav.style.display = 'none';
     }
 
     onPoll(s) {
@@ -617,68 +655,59 @@ class DemoController {
 
         const panel = document.getElementById('panel-right');
 
+        // Show tour navigation bar
+        let _tourNav = this._tourNav || document.getElementById('tour-nav');
+        if (!_tourNav) {
+            _tourNav = document.createElement('div');
+            _tourNav.id = 'tour-nav';
+            _tourNav.innerHTML = `<button id="tour-prev" class="tour-nav-btn">Previous</button>` +
+                `<button id="tour-next" class="tour-nav-btn tour-nav-primary">Next</button>` +
+                `<button id="tour-skip" class="tour-nav-btn">Skip</button>`;
+            document.body.appendChild(_tourNav);
+        }
+        _tourNav.style.display = 'flex';
+        this._tourNav = _tourNav;
+
+        let _navResolve = null;
+        const waitForNav = () => new Promise(resolve => { _navResolve = resolve; });
+        _tourNav.querySelector('#tour-prev').onclick = () => _navResolve?.('prev');
+        _tourNav.querySelector('#tour-next').onclick = () => _navResolve?.('next');
+        _tourNav.querySelector('#tour-skip').onclick = () => {
+            _navResolve?.('skip');
+            sendCommand({ type: 'set_state', value: 'reset' });
+            setPhase('configure');
+        };
+
+        const updateNavState = (idx) => {
+            const prevBtn = _tourNav.querySelector('#tour-prev');
+            if (prevBtn) prevBtn.disabled = idx <= 0;
+        };
+
+        const rpSteps = [
+            { action: () => { if (panel) panel.scrollTo({ top: 0, behavior: 'smooth' }); expandSection('status-content'); return spotlight('status-content', '<strong>Status</strong> \u2014 Current tick, simulation state, and fleet composition.', 'left'); }},
+            { action: () => { const b = document.getElementById('task-leg-bar-row'); return b ? spotlight(b, '<strong>Fleet Bar</strong> \u2014 Real-time breakdown: Delivering, Loading, Idle, and Dead agents.', 'left') : Promise.resolve(); }},
+            { action: () => { expandSection('scorecard-content'); return spotlight('scorecard-content', '<strong>Resilience Scorecard</strong> \u2014 Four metrics that grade how well the system handles faults.', 'left'); }, after: () => collapseSection('scorecard-content') },
+            { action: async () => { expandSection('system-perf-content'); const c = document.getElementById('chart-throughput'); if (!c) return; c.scrollIntoView({ behavior: 'smooth', block: 'end' }); await delay(500); return spotlight(c, '<strong>Throughput Chart</strong> \u2014 Tasks completed per tick. Watch for the dip at tick 100.', 'left'); }},
+            { action: () => { const mt = document.getElementById('metric-throughput'); const row = mt?.closest('.metric-row') || mt?.parentElement; return row ? spotlight(row, '<strong>Metrics</strong> \u2014 Throughput, completed tasks, and idle ratio with delta indicators.', 'left') : Promise.resolve(); }, after: () => collapseSection('system-perf-content') },
+            { action: () => { expandSection('fault-response-content'); return spotlight('fault-response-content', '<strong>Fault Response</strong> \u2014 Live verdict, MTTR/MTBF, survival rate, and fault event timeline.', 'left'); }, after: () => collapseSection('fault-response-content') },
+            { action: () => { expandSection('fault-events-content'); return spotlight('fault-events-content', '<strong>Fault Timeline</strong> \u2014 Every fault event logged with tick, agent ID, and type.', 'left'); }, after: () => collapseSection('fault-events-content') },
+            { action: () => { const btn = document.getElementById('btn-view-results'); if (btn) btn.classList.add('demo-pulse'); return btn ? spotlight(btn, '<strong>View Results</strong> \u2014 Full analysis dashboard with exportable charts and data.', 'left') : Promise.resolve(); }},
+        ];
+
         try {
-            // 1. Status section — tick & task bar
-            if (panel) panel.scrollTo({ top: 0, behavior: 'smooth' });
-            expandSection('status-content');
-            await spotlight('status-content', '<strong>Status</strong> \u2014 Current tick, simulation state, and fleet composition at a glance.', 'left');
-            await delay(STEP);
-
-            // 2. Task leg bar
-            const taskBar = document.getElementById('task-leg-bar-row');
-            if (taskBar) {
-                await spotlight(taskBar, '<strong>Fleet Bar</strong> \u2014 Real-time breakdown: Delivering, Loading, Idle, and Dead agents.', 'left');
-                await delay(STEP);
+            let idx = 0;
+            while (idx < rpSteps.length) {
+                updateNavState(idx);
+                await rpSteps[idx].action();
+                const nav = await waitForNav();
+                if (rpSteps[idx].after) rpSteps[idx].after();
+                if (nav === 'skip') { clearSpotlight(); this._finishTour(); return; }
+                if (nav === 'prev' && idx > 0) { idx--; continue; }
+                idx++;
             }
-
-            // 3. Resilience Scorecard
-            expandSection('scorecard-content');
-            await spotlight('scorecard-content', '<strong>Resilience Scorecard</strong> \u2014 Four metrics that grade how well the system handles faults: tolerance, recovery, utilization, critical time.', 'left');
-            await delay(STEP);
-            collapseSection('scorecard-content');
-
-            // 4. System Performance — charts
-            expandSection('system-perf-content');
-            const throughputChart = document.getElementById('chart-throughput');
-            if (throughputChart) {
-                await spotlight(throughputChart, '<strong>Throughput Chart</strong> \u2014 Tasks completed per tick. Watch for the dip at tick 100 when agents die.', 'left');
-                await delay(STEP);
-            }
-
-            // 5. Metrics cards
-            const metricThroughput = document.getElementById('metric-throughput');
-            if (metricThroughput) {
-                const metricsRow = metricThroughput.closest('.metric-row') || metricThroughput.parentElement;
-                await spotlight(metricsRow, '<strong>Metrics</strong> \u2014 Throughput, completed tasks, and idle ratio. Delta indicators show change from baseline.', 'left');
-                await delay(STEP);
-            }
-            collapseSection('system-perf-content');
-
-            // 6. Fault Response
-            expandSection('fault-response-content');
-            await spotlight('fault-response-content', '<strong>Fault Response</strong> \u2014 Live verdict, MTTR/MTBF, survival rate, and a timeline of every fault event.', 'left');
-            await delay(STEP);
-            collapseSection('fault-response-content');
-
-            // 7. Fault Timeline
-            expandSection('fault-events-content');
-            await spotlight('fault-events-content', '<strong>Fault Timeline</strong> \u2014 Every fault event logged with tick, agent ID, and type.', 'left');
-            await delay(STEP);
-            collapseSection('fault-events-content');
-
-            // 8. VIEW RESULTS button
-            const resultsBtn = document.getElementById('btn-view-results');
-            if (resultsBtn) {
-                resultsBtn.classList.add('demo-pulse');
-                await spotlight(resultsBtn, '<strong>View Results</strong> \u2014 Full analysis dashboard with exportable charts and data.', 'left');
-                await delay(STEP);
-            }
-
-            // Done — end demo, let user interact
             clearSpotlight();
             this._finishTour();
         } catch (e) {
-            // Tour was interrupted (skip pressed)
             clearSpotlight();
         }
     }
@@ -1435,17 +1464,16 @@ function updateUI(s) {
             document.getElementById('sc-ft').textContent = sc.fault_tolerance.toFixed(2);
             updateScZone('sc-ft', sc.fault_tolerance, [0.5, 0.8], false);
 
-            // NRR: 0-1, higher=better. Poor <0.4, Fair 0.4-0.7, Good >0.7.
-            // Null when < 2 fault events (MTBF undefined).
+            // NRR: 0-1, higher=better. Hidden entirely when < 2 fault events.
+            const nrrCard = document.getElementById('sc-nrr-card');
             const nrrEl = document.getElementById('sc-nrr');
-            if (nrrEl) {
+            if (nrrCard) {
                 if (sc.nrr != null) {
-                    nrrEl.textContent = sc.nrr.toFixed(2);
+                    nrrCard.style.display = '';
+                    if (nrrEl) nrrEl.textContent = sc.nrr.toFixed(2);
                     updateScZone('sc-nrr', sc.nrr, [0.4, 0.7], false);
                 } else {
-                    nrrEl.textContent = 'N/A';
-                    const zoneEl = document.getElementById('sc-nrr-zone');
-                    if (zoneEl) { zoneEl.textContent = 'No cascade recovery events'; zoneEl.dataset.zone = ''; }
+                    nrrCard.style.display = 'none';
                 }
             }
 
@@ -1904,13 +1932,6 @@ function animateMetric(id, value) {
 
 let lastFaultState = null;
 
-/** Returns the display label for a task leg, respecting simple/detailed mode. */
-function taskLegDisplayLabel(leg) {
-    const detailed = document.getElementById('setting-detailed-states');
-    if (detailed && detailed.checked) return leg || 'free';
-    return simplifyTaskLeg(leg);
-}
-
 function taskLegBadgeClass(leg) {
     if (!leg) return 'badge-free';
     const l = leg.toLowerCase();
@@ -1949,7 +1970,7 @@ function updateAgentList(agents, faultEnabled) {
                 html += '<div class="agent-heat-bar"><div class="agent-heat-fill" style="width:' + (a.heat_normalized * 100) + '%"></div></div>';
             }
             const badgeClass = taskLegBadgeClass(a.task_leg);
-            html += '<span class="agent-task-badge ' + badgeClass + '">' + taskLegDisplayLabel(a.task_leg) + '</span>';
+            html += '<span class="agent-task-badge ' + badgeClass + '">' + simplifyTaskLeg(a.task_leg) + '</span>';
             row.innerHTML = html;
             row.addEventListener('click', () => selectAgent(a.id));
             container.appendChild(row);
@@ -1969,7 +1990,7 @@ function updateAgentList(agents, faultEnabled) {
             const badge = row.querySelector('.agent-task-badge');
             if (badge) {
                 const leg = a.task_leg || 'free';
-                badge.textContent = taskLegDisplayLabel(leg);
+                badge.textContent = simplifyTaskLeg(leg);
                 badge.className = 'agent-task-badge ' + taskLegBadgeClass(leg);
             }
         });
@@ -2495,7 +2516,7 @@ function populateResultsFromState(s) {
                 { name: 'Surplus', baseline: null, current: bd.surplus_integral || 0, integer: true, noCompare: true },
                 { name: 'MTTR', baseline: null, current: m.fault_mttr, noCompare: true },
                 { name: 'MTBF', baseline: null, current: m.fault_mtbf, noCompare: true },
-                { name: 'NRR', baseline: null, current: s.scorecard ? s.scorecard.nrr : null, noCompare: true },
+                ...(s.scorecard && s.scorecard.nrr != null ? [{ name: 'NRR', baseline: null, current: s.scorecard.nrr, noCompare: true }] : []),
                 { name: 'Propagation Rate', baseline: null, current: m.propagation_rate, noCompare: true },
                 { name: 'Survival Rate', baseline: null, current: survivalRate, noCompare: true },
             ];
@@ -2552,21 +2573,18 @@ function populateResultsFromState(s) {
         }).join('');
     }
 
-    // Config summary — fix NaN% for fault label
+    // Config summary — show all configured faults
     const configDl = document.getElementById('results-config');
     if (configDl) {
         const agentCount = s.total_agents || s.num_agents || (s.agents ? s.agents.length : 0) || '\u2014';
         const scheduler = (s.lifelong && s.lifelong.scheduler) || '\u2014';
-        const sc = s.fault_scenario;
-        const faultIsEnabled = s.fault_config && s.fault_config.enabled;
         let faultLabel = 'None';
-        if (faultIsEnabled && sc && sc.scenario_type && sc.scenario_type !== 'none') {
-            const intensity = sc.intensity;
-            faultLabel = (intensity != null && !isNaN(intensity))
-                ? `${sc.label} (${(intensity * 100).toFixed(0)}%)`
-                : sc.label || 'Custom';
-        } else if (faultIsEnabled) {
-            faultLabel = 'Custom';
+        if (faultList.length > 0) {
+            faultLabel = faultList.map(f => {
+                const badge = faultBadgeLabel(f.type);
+                const detail = faultSummary(f);
+                return detail ? `${badge} ${detail}` : badge;
+            }).join(', ');
         }
         const items = [
             ['Topology', s.topology || '\u2014'],
@@ -3149,18 +3167,14 @@ function updateChartData(s) {
     chartData.baselineIdleRatio.push(bd && bd.has_baseline ? bd.baseline_wait_ratio_at_tick : null);
     chartData.cascadeSpread.push(s.metrics ? s.metrics.avg_cascade_spread : null);
 
-    // Sliding window
-    if (chartData.ticks.length > CHART_MAX_POINTS) {
-        Object.values(chartData).forEach(arr => arr.shift());
-    }
+    // No sliding window — keep all ticks from start to end
 
     // Incrementally append moving-average values for throughput
     const MA_WINDOW = 10;
     if (!chartData._tpMA) { chartData._tpMA = []; chartData._blTpMA = []; }
     appendMA(chartData.throughput, chartData._tpMA, MA_WINDOW);
     appendMA(chartData.baselineThroughput, chartData._blTpMA, MA_WINDOW);
-    // Trim MA arrays to match data after sliding-window shift
-    while (chartData._tpMA.length > chartData.ticks.length) { chartData._tpMA.shift(); chartData._blTpMA.shift(); }
+    // MA arrays always match ticks length (no sliding window)
     const tpMA = chartData._tpMA;
     const blTpMA = chartData._blTpMA;
 
@@ -3385,12 +3399,6 @@ function initSettingsModal() {
         updateRobotPreview();
         saveGraphicsSettings();
     });
-    document.getElementById('setting-detailed-states').addEventListener('change', (e) => {
-        sendCommand({ type: 'set_graphics', key: 'detailed_states', value: e.target.checked });
-        updateStateLegend(e.target.checked);
-        saveGraphicsSettings();
-    });
-
     // Keyboard layout override
     const kbSelect = document.getElementById('setting-keyboard');
     if (kbSelect) {
@@ -3423,17 +3431,10 @@ function saveGraphicsSettings() {
         shadows: document.getElementById('setting-shadows').checked,
         msaa: document.getElementById('setting-msaa').checked,
         colorblind: document.getElementById('setting-colorblind').checked,
-        detailed_states: document.getElementById('setting-detailed-states').checked,
     };
     localStorage.setItem('mafis-graphics', JSON.stringify(settings));
 }
 
-function updateStateLegend(detailed) {
-    const simple = document.getElementById('state-legend-simple');
-    const det = document.getElementById('state-legend-detailed');
-    if (simple) simple.style.display = detailed ? 'none' : '';
-    if (det) det.style.display = detailed ? '' : 'none';
-}
 
 function loadGraphicsSettings() {
     const raw = localStorage.getItem('mafis-graphics');
@@ -3443,14 +3444,10 @@ function loadGraphicsSettings() {
         document.getElementById('setting-shadows').checked = !!settings.shadows;
         document.getElementById('setting-msaa').checked = settings.msaa !== false;
         document.getElementById('setting-colorblind').checked = !!settings.colorblind;
-        document.getElementById('setting-detailed-states').checked = !!settings.detailed_states;
-
         sendCommand({ type: 'set_graphics', key: 'shadows', value: !!settings.shadows });
         sendCommand({ type: 'set_graphics', key: 'msaa', value: settings.msaa !== false });
         sendCommand({ type: 'set_graphics', key: 'colorblind', value: !!settings.colorblind });
-        sendCommand({ type: 'set_graphics', key: 'detailed_states', value: !!settings.detailed_states });
 
-        updateStateLegend(!!settings.detailed_states);
         updatePresetHighlight();
         updateRobotPreview();
     } catch (_) {}
@@ -3791,6 +3788,7 @@ async function loadTopologyManifest() {
 
     populateTopologyUI();
     populateExpTopologyUI();
+    updateExpRunCount();
 }
 
 function populateTopologyUI() {
@@ -4689,20 +4687,38 @@ let experimentLastExpStage = 'config'; // remember last stage for toggling back
 let experimentTopoData = {};  // topology_name → topo.data (preserved from experiment configs)
 
 const EXPERIMENT_METRICS = [
-    { key: 'fault_tolerance', label: 'FT', decimals: 2 },
-    { key: 'throughput', label: 'TP', decimals: 2 },
+    { key: 'fault_tolerance', label: 'Fault Tolerance', decimals: 2 },
+    { key: 'throughput', label: 'Throughput', decimals: 2 },
     { key: 'nrr', label: 'NRR', decimals: 2 },
-    { key: 'critical_time', label: 'CT', decimals: 2 },
-    { key: 'survival_rate', label: 'Surv', decimals: 2 },
+    { key: 'critical_time', label: 'Critical Time', decimals: 2 },
+    { key: 'survival_rate', label: 'Survival Rate', decimals: 2 },
     { key: 'mttr', label: 'MTTR', decimals: 1 },
-    { key: 'propagation_rate', label: 'Prop', decimals: 2 },
-    { key: 'idle_ratio', label: 'Idle', decimals: 2 },
-    { key: 'impacted_area', label: 'Impact', decimals: 2 },
-    { key: 'total_tasks', label: 'Tasks', decimals: 0 },
-    { key: 'deficit_integral', label: 'Deficit', decimals: 0 },
-    { key: 'solver_step_us', label: '\u00b5s', decimals: 1 },
-    { key: 'wall_time_ms', label: 'ms', decimals: 0 },
+    { key: 'propagation_rate', label: 'Propagation Rate', decimals: 2 },
+    { key: 'idle_ratio', label: 'Idle Ratio', decimals: 2 },
+    { key: 'impacted_area', label: 'Impacted Area', decimals: 2 },
+    { key: 'total_tasks', label: 'Tasks Completed', decimals: 0 },
+    { key: 'deficit_integral', label: 'Deficit Integral', decimals: 0 },
+    { key: 'solver_step_us', label: 'Solver Time (\u00b5s)', decimals: 1 },
+    { key: 'wall_time_ms', label: 'Wall Time (ms)', decimals: 0 },
 ];
+
+// ---------------------------------------------------------------------------
+/** Metrics applicable per scenario type. Returns null = show all. */
+function getApplicableMetrics(scenario) {
+    if (!scenario || scenario === 'none') {
+        return new Set([
+            'fault_tolerance', 'throughput', 'idle_ratio',
+            'total_tasks', 'deficit_integral',
+            'solver_step_us', 'wall_time_ms'
+        ]);
+    }
+    return null;
+}
+
+function isMetricApplicable(metricKey, scenario) {
+    const applicable = getApplicableMetrics(scenario);
+    return applicable == null || applicable.has(metricKey);
+}
 
 // ---------------------------------------------------------------------------
 // Statistical summary computation (mirrors Rust compute_stat_summary exactly)
@@ -5722,8 +5738,8 @@ function renderExpTable() {
 
         for (const m of EXPERIMENT_METRICS) {
             const stat = getStat(s, m.key);
-            if (m.key === 'nrr' && stat.n === 0) {
-                bodyHtml += `<td class="zone-neutral" title="NRR: N/A — requires ≥2 fault events per seed">—</td>`;
+            if (!isMetricApplicable(m.key, s.scenario) || (m.key === 'nrr' && stat.n === 0)) {
+                bodyHtml += `<td class="zone-neutral">—</td>`;
             } else {
                 const cls = metricZoneClass(m.key, stat.mean);
                 const val = stat.mean.toFixed(m.decimals);
@@ -5762,7 +5778,7 @@ function renderExpChart() {
     const chartW = 150;
     const valueW = 42;
     const totalW = labelW + chartW + valueW;
-    const totalH = (barH + gap) * sortedIndices.length + 20;
+    const totalH = (barH + gap) * sortedIndices.length + 8;
 
     let maxVal = 0;
     for (const idx of sortedIndices) {
@@ -5777,10 +5793,7 @@ function renderExpChart() {
     let svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${totalW} ${totalH}" ` +
         `font-family="'DM Mono', monospace" font-size="8">`;
 
-    svg += `<text x="${labelW}" y="12" font-size="9" font-weight="500" fill="currentColor" ` +
-        `letter-spacing="0.5">${metricDef.label.toUpperCase()}</text>`;
-
-    const yStart = 18;
+    const yStart = 4;
     for (let row = 0; row < sortedIndices.length; row++) {
         const idx = sortedIndices[row];
         const s = summaries[idx];
@@ -5868,15 +5881,10 @@ function showExpDrilldown(idx) {
     let meanHtml = '<div class="drilldown-tab-panel" data-panel="mean">';
     meanHtml += '<table><thead><tr><th>Metric</th><th>Mean</th><th>Std</th><th>CI 95%</th><th>Min</th><th>Max</th></tr></thead><tbody>';
     for (const m of EXPERIMENT_METRICS) {
+        if (!isMetricApplicable(m.key, s.scenario)) continue;
         const stat = getStat(s, m.key);
-        if (m.key === 'nrr' && stat.n === 0) {
-            // Intentional: spec allows "a small inline note" — colspan merges data columns
-            // with the N/A explanation, avoiding separate sub-row visual noise.
-            meanHtml += `<tr>`;
-            meanHtml += `<td>${m.label}</td>`;
-            meanHtml += `<td colspan="5" style="color:var(--text-muted);font-style:italic;">N/A — requires ≥2 fault events</td>`;
-            meanHtml += '</tr>';
-        } else {
+        if (m.key === 'nrr' && stat.n === 0) continue;
+        {
             const cls = metricZoneClass(m.key, stat.mean);
             meanHtml += `<tr>`;
             meanHtml += `<td>${m.label}</td>`;
@@ -5897,9 +5905,11 @@ function showExpDrilldown(idx) {
         seedPanelsHtml += `<div class="drilldown-tab-panel" data-panel="seed-${r.config.seed}" style="display:none">`;
         seedPanelsHtml += '<table><thead><tr><th>Metric</th><th>Value</th></tr></thead><tbody>';
         for (const m of EXPERIMENT_METRICS) {
+            if (!isMetricApplicable(m.key, s.scenario)) continue;
             const runKey = runKeyForMetric(m.key);
             // runKey is null when no METRIC_MAP entry exists — treat as N/A
             const rawVal = runKey != null ? r.faulted[runKey] : null;
+            if (m.key === 'nrr' && rawVal == null) continue;
             let display;
             if (rawVal == null) {
                 display = '<span style="color:var(--text-muted);font-style:italic;">N/A</span>';
@@ -6384,6 +6394,21 @@ async function applySharedState(hash) {
     }, 200);
 
     return true;
+}
+
+function initMetricsInfoModal() {
+    document.getElementById('btn-metrics-info')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const modal = document.getElementById('metrics-info-modal');
+        if (modal) modal.style.display = '';
+    });
+    document.getElementById('btn-metrics-close')?.addEventListener('click', () => {
+        const modal = document.getElementById('metrics-info-modal');
+        if (modal) modal.style.display = 'none';
+    });
+    document.getElementById('metrics-info-modal')?.addEventListener('click', (e) => {
+        if (e.target.id === 'metrics-info-modal') e.target.style.display = 'none';
+    });
 }
 
 function initShareButton() {

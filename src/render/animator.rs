@@ -104,16 +104,16 @@ fn setup_material_palette(
     });
 
     let dead = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.90, 0.17, 0.01),
-        emissive: LinearRgba::new(3.0, 0.3, 0.0, 1.0),
+        base_color: Color::srgb(0.75, 0.04, 0.04),
+        emissive: LinearRgba::new(1.5, 0.0, 0.0, 1.0),
         perceptual_roughness: 0.35,
         metallic: 0.25,
         ..default()
     });
 
     let latency_robot = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.50, 0.35, 0.72),
-        emissive: LinearRgba::new(1.5, 0.3, 2.0, 1.0),
+        base_color: Color::srgb(0.22, 0.08, 0.42),
+        emissive: LinearRgba::new(0.4, 0.05, 0.8, 1.0),
         perceptual_roughness: 0.35,
         metallic: 0.25,
         ..default()
@@ -156,17 +156,26 @@ fn spawn_robot_visuals(
         return;
     }
 
-    // Simple flat cube — same for every grid size
-    let base_mesh = meshes.add(Cuboid::new(0.7, 0.16, 0.7));
+    // Flat cylinder body + thin antenna — convention for multi-agent simulators
+    let body_mesh = meshes.add(Cylinder::new(0.35, 0.14));
+    let antenna_mesh = meshes.add(Cylinder::new(0.02, 0.15));
 
     for (entity, agent) in &agents {
         let world_pos = grid_to_world(agent.current_pos);
 
         commands.entity(entity).with_children(|parent| {
+            // Robot body (flat cylinder)
             parent.spawn((
-                Mesh3d(base_mesh.clone()),
+                Mesh3d(body_mesh.clone()),
                 MeshMaterial3d(palette.task_heat[0][0].clone()),
-                Transform::from_xyz(0.0, 0.08, 0.0),
+                Transform::from_xyz(0.0, 0.07, 0.0),
+                RobotVisual,
+            ));
+            // Antenna (thin tall cylinder on top)
+            parent.spawn((
+                Mesh3d(antenna_mesh.clone()),
+                MeshMaterial3d(palette.task_heat[0][0].clone()),
+                Transform::from_xyz(0.0, 0.22, 0.0),
                 RobotVisual,
             ));
         });

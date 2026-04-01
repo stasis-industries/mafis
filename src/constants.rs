@@ -3,6 +3,10 @@
 //! **Change values here to tune the simulator.**
 //! Every limit is documented with the maximum safe value for typical hardware.
 
+// ── Version ─────────────────────────────────────────────────────────
+
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
 // ── Simulation limits ────────────────────────────────────────────────
 
 /// Maximum number of agents the UI slider allows.
@@ -105,7 +109,7 @@ pub const DURATION_MEDIUM: u64 = 500;
 pub const DURATION_LONG: u64 = 1000;
 pub const DEFAULT_DURATION: u64 = 500;
 pub const MIN_DURATION: u64 = 50;
-pub const MAX_DURATION: u64 = 5000;
+pub const MAX_DURATION: u64 = 1_000_000;
 
 // ── Bridge / serialization ───────────────────────────────────────────
 

@@ -139,12 +139,8 @@ pub fn compute_run_metrics(
             }
         }
         None => {
-            // No faults occurred → faulted run is identical to baseline → FT = 1.0
-            if baseline.avg_throughput > 0.0 {
-                avg_throughput / baseline.avg_throughput
-            } else {
-                f64::NAN
-            }
+            // No faults occurred → system retained full capability → FT = 1.0
+            1.0
         }
     };
 
