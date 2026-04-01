@@ -18,7 +18,7 @@
 
 ---
 
-Most MAPF tools measure how fast solvers find paths. MAFIS measures what happens when things go *wrong* — pairing every faulted run with a fault-free baseline so every metric is a deviation, not an absolute number. It is not a solver benchmark.
+Most MAPF tools measure how fast solvers find paths. **MAFIS** (Multi-Agent Fault Injection Simulator) measures what happens when things go *wrong* — pairing every faulted run with a fault-free baseline so every metric is a deviation, not an absolute number. It is not a solver benchmark.
 
 ---
 
