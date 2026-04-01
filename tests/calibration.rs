@@ -127,11 +127,18 @@ fn property_pibt_liveness_at_high_density() {
 
     for &n in &[30, 50, 70] {
         let avg = run_multi_seed("pibt", topology, n, ticks, SEEDS);
+        // Minimum throughput threshold: priority inheritance must keep agents
+        // moving on dense grids. A correct PIBT implementation achieves 300+
+        // tasks at n=30 on compact_grid (26×26). If throughput drops below
+        // 100, priority inheritance is broken (e.g., agents can't push blockers).
+        let min_tasks = 100.0;
         assert!(
-            avg > 0.0,
-            "PIBT produced 0 tasks at n={n} on {topology}: liveness failure"
+            avg > min_tasks,
+            "PIBT produced only {avg:.1} tasks at n={n} on {topology}: \
+             expected >{min_tasks} — possible priority inheritance bug"
         );
-        eprintln!("[OK] PIBT n={n} on {topology}: {avg:.1} tasks (no deadlock)");
+        let per_agent = avg / n as f64;
+        eprintln!("[OK] PIBT n={n} on {topology}: {avg:.1} tasks ({per_agent:.2}/agent)");
     }
 }
 

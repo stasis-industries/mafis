@@ -251,7 +251,9 @@ impl PibtSolver {
             }
 
             for i in 0..n {
-                if positions[i] != goals[i] {
+                if positions[i] == goals[i] {
+                    priorities[i] = 0.0;
+                } else {
                     priorities[i] += 1.0;
                 }
             }

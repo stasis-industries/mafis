@@ -1471,6 +1471,7 @@
                 <thead><tr><th>Metric</th><th>Description</th></tr></thead>
                 <tbody>
                     <tr><td>Throughput</td><td>Average tasks completed per tick (rolling window).</td></tr>
+                    <tr><td>MVA</td><td>Chart display only — a 10-sample moving average applied to the throughput series for visual smoothness. Not a metric definition. The underlying throughput values are already a 100-tick rolling mean computed by the simulation (the actual reported metric).</td></tr>
                     <tr><td>MTTR</td><td>Mean recovery time of cascade-affected neighbors (not dead agents).</td></tr>
                     <tr><td>MTBF</td><td>Mean interval between fault events. Requires 2+ events.</td></tr>
                     <tr><td>Propagation Rate</td><td>Average fraction of alive fleet affected per fault event.</td></tr>

@@ -320,7 +320,7 @@ impl PibtCore {
                 goals,
                 grid,
                 dist_maps,
-                &mut self.priorities,
+                &self.priorities,
                 0,
                 &self.current_occ,
                 &mut self.next_occ,
@@ -343,9 +343,11 @@ impl PibtCore {
             self.actions_buf.push(delta_to_action(*pos, *next));
         }
 
-        // Update priorities
+        // Update priorities (match reference: reset to 0 on goal arrival)
         for (i, goal) in goals.iter().enumerate().take(n) {
-            if self.next_pos_buf[i] != *goal {
+            if self.next_pos_buf[i] == *goal {
+                self.priorities[i] = 0.0;
+            } else {
                 self.priorities[i] += 1.0;
             }
         }
@@ -465,7 +467,7 @@ impl PibtCore {
                 goals,
                 grid,
                 dist_maps,
-                &mut self.priorities,
+                &self.priorities,
                 0,
                 &self.current_occ,
                 &mut self.next_occ,
@@ -480,18 +482,18 @@ impl PibtCore {
             self.actions_buf.push(delta_to_action(*pos, *next));
         }
 
-        // Update priorities: bump for agents not at goal.
-        // Agents that reached their goal keep their current priority — don't
-        // reset to 0.  When a new goal is assigned (same agent count), the
-        // priority stays at its accumulated value which is correct: the agent
-        // will start accumulating again from wherever it left off.  Resetting
-        // to 0 would cause the agent to lose all priority for its next goal,
-        // making it vulnerable to being pushed around by higher-priority agents.
+        // Update priorities: match reference PIBT_MAPD behavior.
+        // Reference (pibt_mapd.cpp:137):
+        //   elapsed = (v_next == g) ? 0 : elapsed + 1
+        // Resetting to 0 on goal arrival is essential: it makes the agent
+        // low-priority and easily pushable, preventing "goal squatting" where
+        // idle agents with accumulated priority block corridors.
         for (i, goal) in goals.iter().enumerate().take(n) {
-            if self.next_pos_buf[i] != *goal {
+            if self.next_pos_buf[i] == *goal {
+                self.priorities[i] = 0.0;
+            } else {
                 self.priorities[i] += 1.0;
             }
-            // else: keep current priority (no reset)
         }
 
         // Advance shuffle seed for next step
@@ -596,7 +598,7 @@ fn pibt_assign_grid(
     goals: &[IVec2],
     grid: &GridMap,
     dist_maps: &[&DistanceMap],
-    priorities: &mut [f32],
+    priorities: &[f32],
     depth: usize,
     current_occ: &OccGrid,
     next_occ: &mut OccGrid,
@@ -677,28 +679,25 @@ fn pibt_assign_grid(
             .filter(|&j| j != agent && !decided[j]);
 
         if let Some(blocker_id) = blocker {
-            if priorities[blocker_id] < priorities[agent] {
-                next_pos[agent] = candidate;
-                decided[agent] = true;
-                next_occ.set(candidate, agent);
+            // Reference behavior (pibt_mapd.cpp:230-232): push ANY undecided
+            // agent at the target cell. No priority check — the processing
+            // order (highest priority first) provides implicit inheritance.
+            // The pushed agent cooperatively tries to find another cell.
+            next_pos[agent] = candidate;
+            decided[agent] = true;
+            next_occ.set(candidate, agent);
 
-                let old_priority = priorities[blocker_id];
-                priorities[blocker_id] = priorities[agent];
-
-                if pibt_assign_grid(
-                    blocker_id, next_pos, decided, current, goals, grid, dist_maps,
-                    priorities, depth + 1, current_occ, next_occ, shuffle_seed, bias_fn,
-                ) {
-                    return true;
-                }
-
-                priorities[blocker_id] = old_priority;
-                decided[agent] = false;
-                next_occ.remove_if_eq(candidate, agent);
-                continue;
-            } else {
-                continue;
+            if pibt_assign_grid(
+                blocker_id, next_pos, decided, current, goals, grid, dist_maps,
+                priorities, depth + 1, current_occ, next_occ, shuffle_seed, bias_fn,
+            ) {
+                return true;
             }
+
+            // Backtrack: blocker couldn't find a valid position
+            decided[agent] = false;
+            next_occ.remove_if_eq(candidate, agent);
+            continue;
         }
 
         next_pos[agent] = candidate;
