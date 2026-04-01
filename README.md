@@ -33,7 +33,6 @@ Eight lifelong solvers spanning five paradigms, implemented from the literature.
 | Token Passing | Ma et al. 2017 | Decentralized |
 | RT-LaCAM | Liang et al. 2025 | Config-space |
 | TPTS | Ma et al. 2017 | Decentralized |
-| PIBT+APF | Pertzovsky et al. 2025 | Meta + Reactive |
 
 ### Fault taxonomy
 
