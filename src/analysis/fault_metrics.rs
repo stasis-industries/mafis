@@ -286,28 +286,31 @@ pub fn register_fault_recovery(
         }
     }
 
+    // Only recompute derived metrics when new fault events were processed.
+    // Avoids O(events) Vec allocation + iteration on ticks with no new faults.
+    let new_events = fault_log.len() > already_processed;
     fault_metrics.last_fault_log_len = fault_log.len();
 
-    if !fault_metrics.cascade_spreads.is_empty() {
-        let sum: u32 = fault_metrics.cascade_spreads.iter().sum();
-        fault_metrics.avg_cascade_spread =
-            sum as f32 / fault_metrics.cascade_spreads.len() as f32;
-    }
+    if new_events {
+        if !fault_metrics.cascade_spreads.is_empty() {
+            let sum: u32 = fault_metrics.cascade_spreads.iter().sum();
+            fault_metrics.avg_cascade_spread =
+                sum as f32 / fault_metrics.cascade_spreads.len() as f32;
+        }
 
-    // --- MTBF: mean time between fault events (Or 2025) ---
-    let event_ticks: Vec<u64> = fault_metrics.event_records.iter().map(|r| r.tick).collect();
-    fault_metrics.mtbf = FaultMetrics::compute_mtbf(&event_ticks);
+        // --- MTBF: mean time between fault events (Or 2025) ---
+        let event_ticks: Vec<u64> = fault_metrics.event_records.iter().map(|r| r.tick).collect();
+        fault_metrics.mtbf = FaultMetrics::compute_mtbf(&event_ticks);
 
-    // --- Propagation Rate: use alive-at-event as denominator (not initial fleet) ---
-    // After burst kills half the fleet, subsequent deaths affect a smaller population.
-    // Using initial_agent_count would systematically underestimate propagation severity.
-    if !fault_metrics.event_records.is_empty() {
-        let events: Vec<(u32, u32)> = fault_metrics
-            .event_records
-            .iter()
-            .map(|r| (r.agents_affected, r.alive_at_event))
-            .collect();
-        fault_metrics.propagation_rate = FaultMetrics::compute_propagation_rate(&events);
+        // --- Propagation Rate: use alive-at-event as denominator (not initial fleet) ---
+        if !fault_metrics.event_records.is_empty() {
+            let events: Vec<(u32, u32)> = fault_metrics
+                .event_records
+                .iter()
+                .map(|r| (r.agents_affected, r.alive_at_event))
+                .collect();
+            fault_metrics.propagation_rate = FaultMetrics::compute_propagation_rate(&events);
+        }
     }
 }
 

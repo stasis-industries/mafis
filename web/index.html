@@ -13,7 +13,7 @@
     <!-- Primary Meta Tags -->
     <title>MAFIS — Multi-Agent Fault Injection Simulator</title>
     <meta name="title" content="MAFIS — Multi-Agent Fault Injection Simulator">
-    <meta name="description" content="Fault resilience observatory for lifelong multi-agent path finding (MAPF). Real-time 3D WebAssembly simulation measuring how warehouse robotics systems degrade, recover, and adapt under fault conditions. 8 solvers, up to 500 agents.">
+    <meta name="description" content="Fault resilience observatory for lifelong multi-agent path finding (MAPF). Real-time 3D WebAssembly simulation measuring how warehouse robotics systems degrade, recover, and adapt under fault conditions. 7 solvers, up to 500 agents.">
     <meta name="keywords" content="MAPF, multi-agent path finding, fault injection, warehouse robotics, simulation, PIBT, RHCR, fault resilience, WebAssembly, Bevy, lifelong MAPF, Token Passing">
     <meta name="author" content="Teddy Truong">
     <meta name="robots" content="index, follow">
@@ -31,7 +31,7 @@
     <meta property="og:type" content="website">
     <meta property="og:url" content="https://stasis-website.vercel.app/">
     <meta property="og:title" content="MAFIS — Multi-Agent Fault Injection Simulator">
-    <meta property="og:description" content="Fault resilience observatory for lifelong MAPF. Real-time 3D WebAssembly simulation of warehouse robotics under fault conditions. 8 solvers, up to 500 agents.">
+    <meta property="og:description" content="Fault resilience observatory for lifelong MAPF. Real-time 3D WebAssembly simulation of warehouse robotics under fault conditions. 7 solvers, up to 500 agents.">
     <meta property="og:image" content="https://stasis-website.vercel.app/og-image.png">
     <meta property="og:image:width" content="1200">
     <meta property="og:image:height" content="630">
@@ -64,7 +64,7 @@
         "runtimePlatform": "WebAssembly (wasm32-unknown-unknown)",
         "featureList": [
             "Real-time 3D multi-agent simulation (up to 500 agents)",
-            "8 lifelong MAPF solvers: PIBT, 3 RHCR variants, Token Passing, RT-LaCAM, TPTS, PIBT+APF",
+            "7 lifelong MAPF solvers: PIBT, 3 RHCR variants, Token Passing, RT-LaCAM, TPTS",
             "Fault injection with heat accumulation and Weibull wear modeling",
             "Action Dependency Graph (ADG) analysis",
             "Cascade failure propagation via bounded BFS",
@@ -113,7 +113,7 @@
             <li>Cascade failure propagation across agent networks via Action Dependency Graphs</li>
             <li>Recovery time and throughput degradation under configurable fault injection</li>
             <li>Heat accumulation and Weibull wear patterns on warehouse grid cells</li>
-            <li>Comparative resilience across 8 lifelong MAPF solvers (PIBT, 3 RHCR variants, Token Passing, RT-LaCAM, TPTS, PIBT+APF)</li>
+            <li>Comparative resilience across 7 lifelong MAPF solvers (PIBT, 3 RHCR variants, Token Passing, RT-LaCAM, TPTS)</li>
         </ul>
         <h2 style="font-size:1.1rem;margin-top:1rem">Key Features</h2>
         <ul>
@@ -261,7 +261,6 @@
                         <select class="input-select" id="input-solver" aria-label="Solver algorithm">
                             <optgroup label="Reactive (suboptimal, fast)">
                                 <option value="pibt">PIBT — Priority Inheritance</option>
-                                <option value="pibt+apf">PIBT+APF — Potential Fields</option>
                             </optgroup>
                             <optgroup label="Windowed (suboptimal, planned)">
                                 <option value="rhcr_pbs">RHCR (PBS)</option>
@@ -1002,7 +1001,6 @@
                                     <label class="checkbox-label"><input type="checkbox" value="token_passing"><span>Token Passing</span></label>
                                     <label class="checkbox-label"><input type="checkbox" value="rt_lacam"><span>RT-LaCAM</span></label>
                                     <label class="checkbox-label"><input type="checkbox" value="tpts"><span>TPTS</span></label>
-                                    <label class="checkbox-label"><input type="checkbox" value="pibt+apf"><span>PIBT+APF</span></label>
                                 </div>
                             </div>
                             <div class="exp-check-group">
@@ -1471,13 +1469,16 @@
                 <thead><tr><th>Metric</th><th>Description</th></tr></thead>
                 <tbody>
                     <tr><td>Throughput</td><td>Average tasks completed per tick (rolling window).</td></tr>
+                    <tr><td>MVA</td><td>Chart display only — a 10-sample moving average applied to the throughput series for visual smoothness. Not a metric definition. The underlying throughput values are already a 100-tick rolling mean computed by the simulation (the actual reported metric).</td></tr>
                     <tr><td>MTTR</td><td>Mean recovery time of cascade-affected neighbors (not dead agents).</td></tr>
                     <tr><td>MTBF</td><td>Mean interval between fault events. Requires 2+ events.</td></tr>
                     <tr><td>Propagation Rate</td><td>Average fraction of alive fleet affected per fault event.</td></tr>
                     <tr><td>Survival Rate</td><td>Fraction of initial fleet still alive.</td></tr>
                     <tr><td>Idle Ratio</td><td>Fraction of agent-ticks spent waiting (not moving). Includes solver waits, collision holds, and latency.</td></tr>
+                    <tr><td>Tasks Completed</td><td>Total pickup-to-delivery tasks completed since simulation start. Compared against the fault-free baseline to show cumulative productivity loss.</td></tr>
                     <tr><td>Impacted Area</td><td>Throughput deviation vs baseline: <span class="formula">(live &minus; baseline)&thinsp;/&thinsp;baseline &times; 100</span>. Negative = behind.</td></tr>
-                    <tr><td>Deficit Integral</td><td>Cumulative task deficit vs baseline over time.</td></tr>
+                    <tr><td>Deficit Integral</td><td>Cumulative sum of ticks where live tasks fell behind the baseline. Higher = more total productivity lost to faults.</td></tr>
+                    <tr><td>Surplus Integral</td><td>Cumulative sum of ticks where live tasks exceeded the baseline (Braess paradox — faults freed congestion). <span class="formula">Net = Deficit &minus; Surplus</span>.</td></tr>
                 </tbody>
             </table>
             <h3>Composite Score</h3>

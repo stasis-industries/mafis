@@ -8,11 +8,31 @@ pub enum FaultType {
     Latency,
 }
 
+impl FaultType {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Overheat => "Overheat",
+            Self::Breakdown => "Breakdown",
+            Self::Latency => "Latency",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 pub enum FaultSource {
     Automatic,
     Manual,
     Scheduled,
+}
+
+impl FaultSource {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Automatic => "Automatic",
+            Self::Manual => "Manual",
+            Self::Scheduled => "Scheduled",
+        }
+    }
 }
 
 /// Fault configuration for the continuous automatic fault model.

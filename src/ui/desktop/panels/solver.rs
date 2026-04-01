@@ -23,13 +23,6 @@ fn solver_info(id: &str) -> SolverInfo {
             source: "Okumura et al., AAAI 2019",
             warning: None,
         },
-        "pibt+apf" => SolverInfo {
-            optimality: "Suboptimal",
-            scalability: "Excellent",
-            description: "PIBT with sequential artificial potential fields. APF updated after each agent commits.",
-            source: "Pertzovsky et al., arXiv:2505.22753v1",
-            warning: None,
-        },
         "rhcr_pbs" => SolverInfo {
             optimality: "Bounded",
             scalability: "Good",

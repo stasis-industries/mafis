@@ -384,8 +384,8 @@ struct ReplaySnapshot {
 struct FaultEventSnapshot {
     id: usize,
     tick: u64,
-    fault_type: String,
-    source: String,
+    fault_type: &'static str,
+    source: &'static str,
     position: [i32; 2],
     agents_affected: u32,
     cascade_depth: u32,
@@ -963,8 +963,8 @@ fn sync_state_to_js(
             FaultEventSnapshot {
                 id: r.id,
                 tick: r.tick,
-                fault_type: format!("{:?}", r.fault_type),
-                source: format!("{:?}", r.source),
+                fault_type: r.fault_type.label(),
+                source: r.source.label(),
                 position: [r.position.x, r.position.y],
                 agents_affected: r.agents_affected,
                 cascade_depth: r.cascade_depth,

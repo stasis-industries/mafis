@@ -265,11 +265,17 @@ fn update_robot_colors(
         };
 
         for child in children.iter() {
-            let Ok(mut mat_handle) = robot_visuals.get_mut(child) else {
+            // Read-only check first to avoid marking the component dirty in
+            // Bevy's change detection when no material change is needed.
+            // get_mut() unconditionally marks changed — skip it for the ~90%
+            // of agents whose material stays the same frame-to-frame.
+            let Ok(mat_handle) = robot_visuals.get(child) else {
                 continue;
             };
             if mat_handle.0 != *target_handle {
-                mat_handle.0 = target_handle.clone();
+                if let Ok(mut mat_handle) = robot_visuals.get_mut(child) {
+                    mat_handle.0 = target_handle.clone();
+                }
             }
         }
     }

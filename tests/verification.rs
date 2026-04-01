@@ -55,7 +55,6 @@ const SOLVERS: &[&str] = &[
     "token_passing",
     "rt_lacam",
     "tpts",
-    "pibt+apf",
 ];
 
 const TOPOLOGIES: &[(&str, usize)] = &[
@@ -407,7 +406,6 @@ fn all_solvers_no_collisions_500_ticks() {
         "token_passing",
         "rt_lacam",
         "tpts",
-        "pibt+apf",
     ];
 
     for solver_name in &solvers {
@@ -654,7 +652,6 @@ fn determinism_all_solvers_all_schedulers() {
         "token_passing",
         "rt_lacam",
         "tpts",
-        "pibt+apf",
     ];
     let schedulers = ["random", "closest"];
 
@@ -1685,7 +1682,7 @@ fn restore_runner_from_snapshot(
 ///
 /// On warehouse_large with 20 agents, empirical ordering (200 ticks, seed=42):
 ///   Token Passing > RHCR-Priority-A* ≈ TPTS > PIBT > RHCR-PBS > RHCR-PIBT
-///   > PIBT+APF > RT-LaCAM
+///   > RT-LaCAM
 /// This ordering is topology- and density-dependent and should not be asserted
 /// as a fixed invariant; the 5%-of-best floor is the meaningful regression guard.
 ///
@@ -1708,7 +1705,6 @@ fn solver_throughput_ordering_sanity() {
         "token_passing",
         "rt_lacam",
         "tpts",
-        "pibt+apf",
     ];
 
     for &solver in &all_8_solvers {
@@ -1787,7 +1783,6 @@ fn rewind_determinism_reset_matches_fresh() {
         "token_passing",
         "rt_lacam",
         "tpts",
-        "pibt+apf",
     ];
 
     let topo = ActiveTopology::from_name("warehouse_large");

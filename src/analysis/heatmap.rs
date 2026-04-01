@@ -457,11 +457,15 @@ pub fn update_heatmap_visuals(
         }
     }
 
-    // Create a brand-new Image asset (emits AssetEvent::Added → GPU processes it)
+    // Create a brand-new Image asset (emits AssetEvent::Added → GPU processes it).
+    // Move pixel_buf's allocation into Image instead of cloning — eliminates
+    // a 64 KB alloc+copy per dirty frame. pixel_buf is re-initialized with
+    // capacity for the next frame via resize() at line 407.
+    let pixel_data = std::mem::take(&mut *pixel_buf);
     let mut new_image = Image::new(
         Extent3d { width: w, height: h, depth_or_array_layers: 1 },
         TextureDimension::D2,
-        pixel_buf.clone(),
+        pixel_data,
         TextureFormat::Rgba8Unorm,
         RenderAssetUsages::default(),
     );

@@ -83,13 +83,6 @@ fn scale_rhcr_pibt_150_agents_warehouse_large() {
 }
 
 #[test]
-fn scale_pibt_apf_200_agents_kiva_warehouse() {
-    let (tasks, alive) = run_ticks("pibt+apf", "kiva_warehouse", 200, 300, 42);
-    assert!(alive > 0, "all agents dead with no faults");
-    eprintln!("  pibt+apf/kiva_warehouse/200 agents: {tasks} tasks, {alive} alive");
-}
-
-#[test]
 fn scale_pibt_80_agents_kiva_warehouse() {
     let (tasks, alive) = run_ticks("pibt", "kiva_warehouse", 80, 300, 42);
     assert!(alive > 0, "all agents dead with no faults");

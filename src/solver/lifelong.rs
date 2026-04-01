@@ -84,9 +84,6 @@ pub trait LifelongSolver: Send + Sync + 'static {
     /// Default: no-op (solver reinitializes on next step).
     fn restore_priorities(&mut self, _priorities: &[f32]) {}
 
-    /// Set a cell-level heuristic bias function for guided planning.
-    /// Solvers that support guidance override this. Default: no-op.
-    fn set_cell_bias(&mut self, _bias: Option<Box<dyn Fn(IVec2, usize) -> f64 + Send + Sync>>) {}
 
     /// Drain pending goal overrides produced by the last `step()`.
     /// Solvers that swap goals (e.g. TPTS) return `(agent_index, new_goal)` pairs.

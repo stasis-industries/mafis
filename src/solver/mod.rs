@@ -14,7 +14,6 @@ pub mod windowed;
 pub mod guidance;
 pub mod rt_lacam;
 pub mod tpts;
-pub mod apf_guidance;
 
 use bevy::prelude::*;
 
@@ -23,7 +22,6 @@ use self::rhcr::{RhcrConfig, RhcrMode, RhcrSolver};
 use self::token_passing::TokenPassingSolver;
 use self::rt_lacam::RtLaCAMSolver;
 use self::tpts::TptsSolver;
-use self::apf_guidance::PibtApfSolver;
 use self::lifelong::LifelongSolver;
 
 // ---------------------------------------------------------------------------
@@ -39,7 +37,6 @@ pub const SOLVER_NAMES: &[(&str, &str)] = &[
     ("token_passing", "Token Passing — Decentralized Sequential Planning"),
     ("rt_lacam", "RT-LaCAM — Real-Time Configuration-Space Search"),
     ("tpts", "TPTS — Token Passing with Task Swaps"),
-    ("pibt+apf", "PIBT+APF — Priority Inheritance with Potential Fields"),
 ];
 
 /// Create a LifelongSolver by name with auto-computed defaults.
@@ -49,12 +46,6 @@ pub fn lifelong_solver_from_name(
     grid_area: usize,
     num_agents: usize,
 ) -> Option<Box<dyn LifelongSolver>> {
-    // PIBT+APF is a dedicated solver (not a GuidanceLayer wrapper) because
-    // the paper requires APF to be updated sequentially inside the PIBT recursion.
-    if name == "pibt+apf" {
-        return Some(Box::new(PibtApfSolver::new()));
-    }
-
     match name {
         "pibt" => Some(Box::new(PibtLifelongSolver::new())),
         "rhcr_pbs" => {
@@ -114,20 +105,8 @@ mod factory_tests {
     }
 
     #[test]
-    fn factory_creates_pibt_apf() {
-        let solver = lifelong_solver_from_name("pibt+apf", 100, 10);
-        assert!(solver.is_some());
-        assert_eq!(solver.unwrap().name(), "pibt+apf");
-    }
-
-    #[test]
-    fn factory_unknown_base_returns_none() {
-        assert!(lifelong_solver_from_name("unknown+apf", 100, 10).is_none());
-    }
-
-    #[test]
-    fn factory_unknown_layer_returns_none() {
-        assert!(lifelong_solver_from_name("pibt+unknown", 100, 10).is_none());
+    fn factory_unknown_returns_none() {
+        assert!(lifelong_solver_from_name("unknown", 100, 10).is_none());
     }
 
     #[test]
@@ -141,7 +120,7 @@ mod factory_tests {
     }
 
     #[test]
-    fn solver_names_has_eight_entries() {
-        assert_eq!(SOLVER_NAMES.len(), 8);
+    fn solver_names_has_seven_entries() {
+        assert_eq!(SOLVER_NAMES.len(), 7);
     }
 }

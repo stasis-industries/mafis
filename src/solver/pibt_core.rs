@@ -176,184 +176,6 @@ impl PibtCore {
         self.one_step_impl(positions, goals, grid, dist_maps, &[], has_task, None)
     }
 
-    /// Run one PIBT step with task-awareness and a cell-level guidance bias.
-    ///
-    /// `bias_fn(pos, agent_index) -> f64` is added to the raw distance when
-    /// sorting candidates. Lower total = preferred. Pass `None` for normal behavior.
-    pub fn one_step_with_bias(
-        &mut self,
-        positions: &[IVec2],
-        goals: &[IVec2],
-        grid: &GridMap,
-        dist_maps: &[&DistanceMap],
-        has_task: &[bool],
-        bias_fn: &dyn Fn(IVec2, usize) -> f64,
-    ) -> &[Action] {
-        self.one_step_impl(positions, goals, grid, dist_maps, &[], has_task, Some(bias_fn))
-    }
-
-    /// Run one PIBT step with sequential APF (paper-accurate PIBT+APF).
-    ///
-    /// After each agent commits its next position, its future path is projected
-    /// and an APF field is added to `apf_field`. Subsequent agents see the
-    /// accumulated field when sorting candidates.
-    ///
-    /// Reference: Pertzovsky et al., arXiv:2505.22753v1, Equations 11-12.
-    pub fn one_step_with_apf(
-        &mut self,
-        positions: &[IVec2],
-        goals: &[IVec2],
-        grid: &GridMap,
-        dist_maps: &[&DistanceMap],
-        has_task: &[bool],
-        apf_field: &mut Vec<f64>,
-        apf_w: f64,
-        apf_gamma: f64,
-        apf_d_max: i32,
-        apf_t_max: usize,
-    ) -> &[Action] {
-        let n = positions.len();
-        let grid_w = grid.width;
-        let grid_h = grid.height;
-        let cells = (grid_w * grid_h) as usize;
-
-        // Ensure APF field is sized and cleared
-        if apf_field.len() != cells {
-            *apf_field = vec![0.0; cells];
-        } else {
-            apf_field.fill(0.0);
-        }
-
-        // Initialize priorities (same as one_step_impl)
-        if self.priorities.len() != n {
-            self.priorities.clear();
-            self.priorities.resize(n, 0.0);
-            for i in 0..n {
-                self.priorities[i] = dist_maps[i].get(positions[i]) as f32;
-            }
-        }
-
-        self.next_pos_buf.clear();
-        self.next_pos_buf.extend_from_slice(positions);
-        self.decided_buf.clear();
-        self.decided_buf.resize(n, false);
-
-        self.current_occ.reset(grid_w, grid_h);
-        for (i, &pos) in positions.iter().enumerate() {
-            self.current_occ.set(pos, i);
-        }
-        self.next_occ.reset(grid_w, grid_h);
-
-        // Pre-decide idle agents and add their APF contribution.
-        // Paper assumes all agents contribute to the field, not just tasked ones.
-        // Under fault conditions (many immobile agents), this repels tasked agents
-        // away from occupied idle positions.
-        if !has_task.is_empty() {
-            for i in 0..n {
-                if !has_task[i] && !self.decided_buf[i] {
-                    self.next_pos_buf[i] = positions[i];
-                    self.decided_buf[i] = true;
-                    self.next_occ.set(positions[i], i);
-                    // Idle agent stays in place — add APF at its position
-                    add_apf_for_agent(
-                        positions[i], goals[i], grid, dist_maps[i],
-                        apf_field, grid_w, grid_h, apf_w, apf_gamma, apf_d_max, apf_t_max,
-                    );
-                }
-            }
-        }
-
-        // Sort by priority (same as one_step_impl)
-        self.order_buf.clear();
-        for i in 0..n {
-            if !self.decided_buf[i] {
-                self.order_buf.push(i);
-            }
-        }
-        let priorities = &self.priorities;
-        let task_aware = !has_task.is_empty();
-        self.order_buf.sort_unstable_by(|&a, &b| {
-            if task_aware {
-                let ta = has_task.get(a).copied().unwrap_or(false);
-                let tb = has_task.get(b).copied().unwrap_or(false);
-                tb.cmp(&ta).then_with(|| {
-                    priorities[b]
-                        .partial_cmp(&priorities[a])
-                        .unwrap_or(std::cmp::Ordering::Equal)
-                })
-            } else {
-                priorities[b]
-                    .partial_cmp(&priorities[a])
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            }
-        });
-
-        // Process each agent in priority order.
-        // KEY DIFFERENCE from one_step_impl: after each agent commits,
-        // project its path and update apf_field so the next agent sees it.
-        let order_len = self.order_buf.len();
-        for oi in 0..order_len {
-            let i = self.order_buf[oi];
-            if self.decided_buf[i] {
-                continue;
-            }
-
-            // Build bias_fn closure that reads from the current apf_field.
-            // The field is mutated between iterations, so each agent sees
-            // the accumulated APF from all previously-decided agents.
-            let apf_ref = &*apf_field;
-            let goal_i = goals[i];
-            let bias_fn = |pos: IVec2, _agent: usize| -> f64 {
-                // Paper: goal cell always has cost 0
-                if pos == goal_i {
-                    return 0.0;
-                }
-                let idx = (pos.y * grid_w + pos.x) as usize;
-                if idx < apf_ref.len() { apf_ref[idx] } else { 0.0 }
-            };
-
-            pibt_assign_grid(
-                i,
-                &mut self.next_pos_buf,
-                &mut self.decided_buf,
-                positions,
-                goals,
-                grid,
-                dist_maps,
-                &mut self.priorities,
-                0,
-                &self.current_occ,
-                &mut self.next_occ,
-                self.shuffle_seed,
-                Some(&bias_fn),
-            );
-
-            // After agent i committed: project its future path and add APF.
-            // Paper Eq. 11: PIBT_APF_i(v) = sum over t in {0..t_max} of APF_i(v,t)
-            let next_pos_i = self.next_pos_buf[i];
-            add_apf_for_agent(
-                next_pos_i, goals[i], grid, dist_maps[i],
-                apf_field, grid_w, grid_h, apf_w, apf_gamma, apf_d_max, apf_t_max,
-            );
-        }
-
-        // Convert to actions
-        self.actions_buf.clear();
-        for (pos, next) in positions.iter().zip(self.next_pos_buf.iter()).take(n) {
-            self.actions_buf.push(delta_to_action(*pos, *next));
-        }
-
-        // Update priorities
-        for (i, goal) in goals.iter().enumerate().take(n) {
-            if self.next_pos_buf[i] != *goal {
-                self.priorities[i] += 1.0;
-            }
-        }
-
-        self.shuffle_seed = self.shuffle_seed.wrapping_add(1);
-        &self.actions_buf
-    }
-
     /// Run one PIBT step with pre-decided constraints.
     ///
     /// `constraints` — list of `(agent_index, target_vertex)` pairs.
@@ -465,7 +287,7 @@ impl PibtCore {
                 goals,
                 grid,
                 dist_maps,
-                &mut self.priorities,
+                &self.priorities,
                 0,
                 &self.current_occ,
                 &mut self.next_occ,
@@ -480,18 +302,18 @@ impl PibtCore {
             self.actions_buf.push(delta_to_action(*pos, *next));
         }
 
-        // Update priorities: bump for agents not at goal.
-        // Agents that reached their goal keep their current priority — don't
-        // reset to 0.  When a new goal is assigned (same agent count), the
-        // priority stays at its accumulated value which is correct: the agent
-        // will start accumulating again from wherever it left off.  Resetting
-        // to 0 would cause the agent to lose all priority for its next goal,
-        // making it vulnerable to being pushed around by higher-priority agents.
+        // Update priorities: match reference PIBT_MAPD behavior.
+        // Reference (pibt_mapd.cpp:137):
+        //   elapsed = (v_next == g) ? 0 : elapsed + 1
+        // Resetting to 0 on goal arrival is essential: it makes the agent
+        // low-priority and easily pushable, preventing "goal squatting" where
+        // idle agents with accumulated priority block corridors.
         for (i, goal) in goals.iter().enumerate().take(n) {
-            if self.next_pos_buf[i] != *goal {
+            if self.next_pos_buf[i] == *goal {
+                self.priorities[i] = 0.0;
+            } else {
                 self.priorities[i] += 1.0;
             }
-            // else: keep current priority (no reset)
         }
 
         // Advance shuffle seed for next step
@@ -596,7 +418,7 @@ fn pibt_assign_grid(
     goals: &[IVec2],
     grid: &GridMap,
     dist_maps: &[&DistanceMap],
-    priorities: &mut [f32],
+    priorities: &[f32],
     depth: usize,
     current_occ: &OccGrid,
     next_occ: &mut OccGrid,
@@ -677,28 +499,25 @@ fn pibt_assign_grid(
             .filter(|&j| j != agent && !decided[j]);
 
         if let Some(blocker_id) = blocker {
-            if priorities[blocker_id] < priorities[agent] {
-                next_pos[agent] = candidate;
-                decided[agent] = true;
-                next_occ.set(candidate, agent);
+            // Reference behavior (pibt_mapd.cpp:230-232): push ANY undecided
+            // agent at the target cell. No priority check — the processing
+            // order (highest priority first) provides implicit inheritance.
+            // The pushed agent cooperatively tries to find another cell.
+            next_pos[agent] = candidate;
+            decided[agent] = true;
+            next_occ.set(candidate, agent);
 
-                let old_priority = priorities[blocker_id];
-                priorities[blocker_id] = priorities[agent];
-
-                if pibt_assign_grid(
-                    blocker_id, next_pos, decided, current, goals, grid, dist_maps,
-                    priorities, depth + 1, current_occ, next_occ, shuffle_seed, bias_fn,
-                ) {
-                    return true;
-                }
-
-                priorities[blocker_id] = old_priority;
-                decided[agent] = false;
-                next_occ.remove_if_eq(candidate, agent);
-                continue;
-            } else {
-                continue;
+            if pibt_assign_grid(
+                blocker_id, next_pos, decided, current, goals, grid, dist_maps,
+                priorities, depth + 1, current_occ, next_occ, shuffle_seed, bias_fn,
+            ) {
+                return true;
             }
+
+            // Backtrack: blocker couldn't find a valid position
+            decided[agent] = false;
+            next_occ.remove_if_eq(candidate, agent);
+            continue;
         }
 
         next_pos[agent] = candidate;
@@ -713,74 +532,3 @@ fn pibt_assign_grid(
     false
 }
 
-// ---------------------------------------------------------------------------
-// APF field construction (paper-accurate, arXiv:2505.22753v1)
-// ---------------------------------------------------------------------------
-
-/// Project agent's path forward from `start` toward `goal` for `t_max` steps,
-/// then add exponential APF around each cell on that path.
-///
-/// Formula (Eq. 4): APF_i(v, t) = w * gamma^(-dist) for dist <= d_max.
-/// Summed over all projected timesteps (Eq. 11).
-fn add_apf_for_agent(
-    start: IVec2,
-    goal: IVec2,
-    grid: &GridMap,
-    dist_map: &DistanceMap,
-    apf_field: &mut [f64],
-    grid_w: i32,
-    grid_h: i32,
-    w: f64,
-    gamma: f64,
-    d_max: i32,
-    t_max: usize,
-) {
-    // 1. Project greedy path forward for t_max steps
-    let mut path = Vec::with_capacity(t_max + 1);
-    path.push(start);
-    let mut pos = start;
-    for _ in 0..t_max {
-        if pos == goal {
-            break;
-        }
-        let mut best = pos;
-        let mut best_d = dist_map.get(pos);
-        for dir in Direction::ALL {
-            let next = pos + dir.offset();
-            if grid.is_walkable(next) {
-                let d = dist_map.get(next);
-                if d < best_d {
-                    best_d = d;
-                    best = next;
-                }
-            }
-        }
-        if best == pos {
-            break;
-        }
-        pos = best;
-        path.push(pos);
-    }
-
-    // 2. For each cell on the projected path, add APF within d_max radius.
-    //    Formula: w * gamma^(-dist) where dist = Manhattan distance.
-    for &path_pos in &path {
-        for dy in -d_max..=d_max {
-            for dx in -d_max..=d_max {
-                let p = path_pos + IVec2::new(dx, dy);
-                if p.x < 0 || p.x >= grid_w || p.y < 0 || p.y >= grid_h {
-                    continue;
-                }
-                let dist = (dx.abs() + dy.abs()) as i32;
-                if dist > d_max {
-                    continue;
-                }
-                let idx = (p.y * grid_w + p.x) as usize;
-                if idx < apf_field.len() {
-                    // w * gamma^(-dist) = w / gamma^dist
-                    apf_field[idx] += w * gamma.powi(-dist);
-                }
-            }
-        }
-    }
-}

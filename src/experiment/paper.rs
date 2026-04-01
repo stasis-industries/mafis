@@ -162,7 +162,6 @@ pub fn solver_resilience() -> ExperimentMatrix {
             "token_passing".into(),
             "rt_lacam".into(),
             "tpts".into(),
-            "pibt+apf".into(),
         ],
         topologies: vec!["warehouse_large".into()],
         scenarios: paper_scenarios(),
@@ -316,7 +315,6 @@ pub fn braess_resilience() -> ExperimentMatrix {
             "token_passing".into(),
             "rt_lacam".into(),
             "tpts".into(),
-            "pibt+apf".into(),
         ],
         topologies: vec!["warehouse_large".into()],
         scenarios: paper_scenarios(),
@@ -389,7 +387,6 @@ pub fn solver_benchmark() -> ExperimentMatrix {
             "token_passing".into(),
             "rt_lacam".into(),
             "tpts".into(),
-            "pibt+apf".into(),
         ],
         topologies: vec!["warehouse_large".into()],
         scenarios: vec![None, Some(burst_20())],
@@ -407,7 +404,7 @@ mod tests {
     #[test]
     fn solver_resilience_count() {
         let m = solver_resilience();
-        assert_eq!(m.total_runs(), 1470); // 7 x 7 x 30
+        assert_eq!(m.total_runs(), 1260); // 6 x 7 x 30
     }
 
     #[test]
@@ -433,13 +430,13 @@ mod tests {
     fn all_paper_total() {
         let all = all_paper_experiments();
         let total: usize = all.iter().map(|(_, m)| m.total_runs()).sum();
-        assert_eq!(total, 3780); // 1470+1050+840+420
+        assert_eq!(total, 3570); // 1260+1050+840+420
     }
 
     #[test]
     fn braess_resilience_count() {
         let m = braess_resilience();
-        assert_eq!(m.total_runs(), 11200); // 8 x 4 x 7 x 50
+        assert_eq!(m.total_runs(), 9800); // 7 x 4 x 7 x 50
     }
 
     /// Run the Category 3 (permanent zone outage) slice of the Braess experiment.
@@ -560,8 +557,7 @@ mod tests {
                 "token_passing".into(),
                 "rt_lacam".into(),
                 "tpts".into(),
-                "pibt+apf".into(),
-            ],
+                ],
             topologies: vec!["warehouse_large".into()],
             scenarios: vec![None, Some(burst_20()), Some(burst_50())],
             schedulers: vec!["closest".into()],
@@ -640,8 +636,7 @@ mod tests {
                 "token_passing".into(),
                 "rt_lacam".into(),
                 "tpts".into(),
-                "pibt+apf".into(),
-            ],
+                ],
             topologies: vec!["warehouse_large".into()],
             scenarios: vec![None],
             schedulers: vec!["random".into()],

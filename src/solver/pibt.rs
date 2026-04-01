@@ -30,8 +30,6 @@ pub struct PibtLifelongSolver {
     positions_buf: Vec<IVec2>,
     goals_buf: Vec<IVec2>,
     has_task_buf: Vec<bool>,
-    /// Optional cell-level guidance bias. When set, overrides pure distance sorting.
-    cell_bias: Option<Box<dyn Fn(IVec2, usize) -> f64 + Send + Sync>>,
 }
 
 impl PibtLifelongSolver {
@@ -43,7 +41,6 @@ impl PibtLifelongSolver {
             positions_buf: Vec::new(),
             goals_buf: Vec::new(),
             has_task_buf: Vec::new(),
-            cell_bias: None,
         }
     }
 }
@@ -73,10 +70,6 @@ impl LifelongSolver for PibtLifelongSolver {
     fn reset(&mut self) {
         self.core.reset();
         self.plan_buffer.clear();
-    }
-
-    fn set_cell_bias(&mut self, bias: Option<Box<dyn Fn(IVec2, usize) -> f64 + Send + Sync>>) {
-        self.cell_bias = bias;
     }
 
     fn step<'a>(
@@ -120,20 +113,9 @@ impl LifelongSolver for PibtLifelongSolver {
             goal != a.pos
         }));
 
-        let actions = if let Some(ref bias) = self.cell_bias {
-            self.core.one_step_with_bias(
-                &self.positions_buf,
-                &self.goals_buf,
-                ctx.grid,
-                &dist_maps,
-                &self.has_task_buf,
-                bias.as_ref(),
-            )
-        } else {
-            self.core.one_step_with_tasks(
-                &self.positions_buf, &self.goals_buf, ctx.grid, &dist_maps, &self.has_task_buf,
-            )
-        };
+        let actions = self.core.one_step_with_tasks(
+            &self.positions_buf, &self.goals_buf, ctx.grid, &dist_maps, &self.has_task_buf,
+        );
 
         // Write into pre-allocated buffer
         self.plan_buffer.clear();
@@ -251,7 +233,9 @@ impl PibtSolver {
             }
 
             for i in 0..n {
-                if positions[i] != goals[i] {
+                if positions[i] == goals[i] {
+                    priorities[i] = 0.0;
+                } else {
                     priorities[i] += 1.0;
                 }
             }

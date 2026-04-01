@@ -3892,7 +3892,7 @@ dependencies = [
 
 [[package]]
 name = "mafis"
-version = "0.1.1"
+version = "0.4.4"
 dependencies = [
  "bevy",
  "bevy_egui",

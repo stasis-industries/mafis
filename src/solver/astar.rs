@@ -323,7 +323,100 @@ impl SpacetimeGrid {
 }
 
 // ---------------------------------------------------------------------------
-// Node (shared by both A* variants)
+// SeqGoalGrid — reusable flat-array storage for sequential-goal A*
+// ---------------------------------------------------------------------------
+
+/// Reusable flat-array storage for sequential-goal spacetime A*.
+///
+/// Like `SpacetimeGrid` but with an extra `goal_id` dimension.
+/// Indexed by `((y * width + x) * max_goals + goal_id) * stride + time`.
+pub struct SeqGoalGrid {
+    width: i32,
+    stride: usize,
+    max_goals: usize,
+    total: usize,
+    best_g: Vec<u64>,
+    came_from: Vec<CameFromEntry>,
+    closed: Vec<bool>,
+    /// Reusable buffer for path reconstruction.
+    path_buf: Vec<Action>,
+}
+
+impl Default for SeqGoalGrid {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl SeqGoalGrid {
+    pub fn new() -> Self {
+        Self {
+            width: 0,
+            stride: 0,
+            max_goals: 0,
+            total: 0,
+            best_g: Vec::new(),
+            came_from: Vec::new(),
+            closed: Vec::new(),
+            path_buf: Vec::new(),
+        }
+    }
+
+    /// Prepare for a new sequential A* search. Resizes if dimensions changed,
+    /// otherwise clears with `fill()`.
+    pub fn reset(&mut self, width: i32, height: i32, max_time: u64, max_goals: usize) {
+        let stride = (max_time + 1) as usize;
+        let total = (width * height) as usize * max_goals * stride;
+
+        self.width = width;
+        self.stride = stride;
+        self.max_goals = max_goals;
+
+        if self.total != total {
+            self.total = total;
+            self.best_g = vec![u64::MAX; total];
+            self.came_from = vec![CameFromEntry::EMPTY; total];
+            self.closed = vec![false; total];
+        } else {
+            self.best_g.fill(u64::MAX);
+            self.closed.fill(false);
+        }
+    }
+
+    #[inline]
+    fn st_index(&self, pos: IVec2, goal_id: usize, time: u64) -> usize {
+        ((pos.y * self.width + pos.x) as usize * self.max_goals + goal_id) * self.stride
+            + time as usize
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SeqNode — search node for sequential-goal A*
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct SeqNode {
+    pos: IVec2,
+    time: u64,
+    goal_id: usize,
+    g: u64,
+    f: u64,
+}
+
+impl Ord for SeqNode {
+    fn cmp(&self, other: &Self) -> Ordering {
+        other.f.cmp(&self.f).then_with(|| other.g.cmp(&self.g))
+    }
+}
+
+impl PartialOrd for SeqNode {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Node (shared by single-goal A* variants)
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -344,6 +437,221 @@ impl PartialOrd for Node {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
+}
+
+// ---------------------------------------------------------------------------
+// Spacetime A* — sequential-goal (flat arrays + generic constraints)
+// ---------------------------------------------------------------------------
+
+/// Sequential-goal spacetime A*: chains through multiple goals in order.
+///
+/// Matches the reference RHCR C++ `StateTimeAStar::run()` which tracks `goal_id`
+/// across a vector of goal locations. The search advances `goal_id` as each
+/// sub-goal is reached, with an admissible multi-goal heuristic.
+///
+/// The caller owns the `SeqGoalGrid` and reuses it across calls to avoid allocation.
+pub fn spacetime_astar_sequential<C: ConstraintChecker>(
+    grid: &GridMap,
+    start: IVec2,
+    goals: &[(IVec2, &DistanceMap)],
+    ci: &C,
+    max_time: u64,
+    stg: &mut SeqGoalGrid,
+    max_expansions: u64,
+) -> Result<Vec<Action>, SolverError> {
+    let n_goals = goals.len();
+    if n_goals == 0 {
+        return Ok(Vec::new());
+    }
+
+    if !grid.is_walkable(start) {
+        return Err(SolverError::InvalidInput(format!(
+            "start {start} is not walkable"
+        )));
+    }
+    for (i, (g, _)) in goals.iter().enumerate() {
+        if !grid.is_walkable(*g) {
+            return Err(SolverError::InvalidInput(format!(
+                "goal[{i}] {g} is not walkable"
+            )));
+        }
+    }
+
+    // We need n_goals + 1 layers: layers 0..n_goals for searching toward each goal,
+    // and layer n_goals as the terminal layer.
+    let grid_goals = n_goals + 1;
+    stg.reset(grid.width, grid.height, max_time, grid_goals);
+
+    // Precompute remaining_h[i] = sum of manhattan distances from goal[i] to goal[n-1].
+    // remaining_h[i] = dist(goal[i], goal[i+1]) + remaining_h[i+1]
+    let mut remaining_h = vec![0u64; n_goals + 1];
+    for i in (0..n_goals.saturating_sub(1)).rev() {
+        remaining_h[i] =
+            remaining_h[i + 1] + manhattan(goals[i].0, goals[i + 1].0);
+    }
+
+    let heuristic = |pos: IVec2, gid: usize| -> u64 {
+        if gid >= n_goals {
+            return 0;
+        }
+        let (goal_pos, dm) = goals[gid];
+        let d = dm.get(pos);
+        let base = if d == u64::MAX {
+            manhattan(pos, goal_pos)
+        } else {
+            d
+        };
+        base + remaining_h[gid]
+    };
+
+    let start_st = stg.st_index(start, 0, 0);
+    stg.best_g[start_st] = 0;
+
+    let h = heuristic(start, 0);
+    let mut open: BinaryHeap<SeqNode> = BinaryHeap::with_capacity(256);
+    open.push(SeqNode {
+        pos: start,
+        time: 0,
+        goal_id: 0,
+        g: 0,
+        f: h,
+    });
+    let mut expansions: u64 = 0;
+
+    while let Some(current) = open.pop() {
+        // Terminal: all goals reached
+        if current.goal_id >= n_goals {
+            // Reconstruct path, skipping layer transitions (same-time entries)
+            stg.path_buf.clear();
+            let goal_st = stg.st_index(current.pos, current.goal_id, current.time);
+            let mut cur_st = goal_st;
+            while cur_st != start_st {
+                let entry = stg.came_from[cur_st];
+                if entry.parent_st_idx == NO_PARENT {
+                    break;
+                }
+                // Only emit actions for real moves (time advances).
+                // Layer transitions have parent at the same time — skip them.
+                // We detect this by checking if the parent index differs from
+                // the current index by a time increment. Instead, we simply
+                // look at whether the parent's time equals this node's time
+                // by re-deriving the time from the index.
+                let parent_time_mod = entry.parent_st_idx % stg.stride;
+                let cur_time_mod = cur_st % stg.stride;
+                if parent_time_mod != cur_time_mod {
+                    stg.path_buf.push(entry.action);
+                }
+                cur_st = entry.parent_st_idx;
+            }
+            stg.path_buf.reverse();
+            return Ok(stg.path_buf.to_vec());
+        }
+
+        if current.time >= max_time {
+            continue;
+        }
+
+        let cur_st = stg.st_index(current.pos, current.goal_id, current.time);
+
+        if stg.closed[cur_st] {
+            continue;
+        }
+        stg.closed[cur_st] = true;
+        expansions += 1;
+        if expansions >= max_expansions {
+            return Err(SolverError::NoSolution);
+        }
+
+        // Goal-layer transition: if at current sub-goal, advance goal_id.
+        // This is a zero-time transition (same pos, same time, next layer).
+        if current.pos == goals[current.goal_id].0 {
+            let next_gid = current.goal_id + 1;
+            let next_st = stg.st_index(current.pos, next_gid, current.time);
+            if !stg.closed[next_st] && current.g < stg.best_g[next_st] {
+                stg.best_g[next_st] = current.g;
+                stg.came_from[next_st] = CameFromEntry {
+                    parent_st_idx: cur_st,
+                    action: Action::Wait, // dummy — won't appear in output
+                };
+                let f = current.g + heuristic(current.pos, next_gid);
+                open.push(SeqNode {
+                    pos: current.pos,
+                    time: current.time,
+                    goal_id: next_gid,
+                    g: current.g,
+                    f,
+                });
+            }
+            // Don't expand movement successors from a goal node — must transition first.
+            // (The agent logically "completes" this sub-goal before moving on.)
+            continue;
+        }
+
+        let next_time = current.time + 1;
+
+        // Wait action
+        if !ci.is_vertex_blocked(current.pos, next_time)
+            && !ci.is_edge_blocked(current.pos, current.pos, current.time)
+        {
+            let g = current.g + 1;
+            let next_st = stg.st_index(current.pos, current.goal_id, next_time);
+            if !stg.closed[next_st] && g < stg.best_g[next_st] {
+                stg.best_g[next_st] = g;
+                stg.came_from[next_st] = CameFromEntry {
+                    parent_st_idx: cur_st,
+                    action: Action::Wait,
+                };
+                let f = g + heuristic(current.pos, current.goal_id);
+                open.push(SeqNode {
+                    pos: current.pos,
+                    time: next_time,
+                    goal_id: current.goal_id,
+                    g,
+                    f,
+                });
+            }
+        }
+
+        // Move actions
+        for dir in Direction::ALL {
+            let next_pos = current.pos + dir.offset();
+
+            if !grid.is_walkable(next_pos) {
+                continue;
+            }
+            if ci.is_vertex_blocked(next_pos, next_time) {
+                continue;
+            }
+            if ci.is_edge_blocked(current.pos, next_pos, current.time) {
+                continue;
+            }
+
+            let g = current.g + 1;
+            let next_st = stg.st_index(next_pos, current.goal_id, next_time);
+            if stg.closed[next_st] {
+                continue;
+            }
+            if g >= stg.best_g[next_st] {
+                continue;
+            }
+
+            stg.best_g[next_st] = g;
+            stg.came_from[next_st] = CameFromEntry {
+                parent_st_idx: cur_st,
+                action: Action::Move(dir),
+            };
+            let f = g + heuristic(next_pos, current.goal_id);
+            open.push(SeqNode {
+                pos: next_pos,
+                time: next_time,
+                goal_id: current.goal_id,
+                g,
+                f,
+            });
+        }
+    }
+
+    Err(SolverError::NoSolution)
 }
 
 // ---------------------------------------------------------------------------
@@ -880,5 +1188,162 @@ mod tests {
         let mut pos = IVec2::new(4, 0);
         for a in &r2 { pos = a.apply(pos); }
         assert_eq!(pos, IVec2::new(0, 4));
+    }
+
+    // -----------------------------------------------------------------------
+    // Sequential-goal A* tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn sequential_astar_two_goals() {
+        // 5x5 open grid: start (0,0), goals [(4,0), (4,4)]
+        // Optimal: 4 steps east to (4,0), then 4 steps north to (4,4) = 8 total
+        let grid = GridMap::new(5, 5);
+        let g1 = IVec2::new(4, 0);
+        let g2 = IVec2::new(4, 4);
+        let dm1 = DistanceMap::compute(&grid, g1);
+        let dm2 = DistanceMap::compute(&grid, g2);
+        let goals: Vec<(IVec2, &DistanceMap)> = vec![(g1, &dm1), (g2, &dm2)];
+
+        let ci = ConstraintIndex::new();
+        let mut stg = SeqGoalGrid::new();
+        let path = spacetime_astar_sequential(
+            &grid, IVec2::ZERO, &goals, &ci, 20, &mut stg, u64::MAX,
+        ).unwrap();
+
+        assert_eq!(path.len(), 8, "expected 8 steps for two sequential goals");
+
+        // Walk the path and verify g1 is visited before g2
+        let mut pos = IVec2::ZERO;
+        let mut g1_time = None;
+        let mut g2_time = None;
+        for (t, a) in path.iter().enumerate() {
+            pos = a.apply(pos);
+            if pos == g1 && g1_time.is_none() {
+                g1_time = Some(t);
+            }
+            if pos == g2 && g2_time.is_none() {
+                g2_time = Some(t);
+            }
+        }
+        assert_eq!(pos, g2, "path must end at g2");
+        assert!(g1_time.unwrap() < g2_time.unwrap(), "g1 must be visited before g2");
+    }
+
+    #[test]
+    fn sequential_astar_single_goal_matches_fast() {
+        // Single goal: sequential variant should produce same-length plan as fast variant
+        let grid = GridMap::new(10, 10);
+        let start = IVec2::new(0, 0);
+        let goal = IVec2::new(9, 9);
+        let dm = DistanceMap::compute(&grid, goal);
+
+        let ci = ConstraintIndex::new();
+
+        let mut stg_fast = SpacetimeGrid::new();
+        let fast_path = spacetime_astar_fast(
+            &grid, start, goal, &ci, 30, Some(&dm), &mut stg_fast, u64::MAX,
+        ).unwrap();
+
+        let goals: Vec<(IVec2, &DistanceMap)> = vec![(goal, &dm)];
+        let mut stg_seq = SeqGoalGrid::new();
+        let seq_path = spacetime_astar_sequential(
+            &grid, start, &goals, &ci, 30, &mut stg_seq, u64::MAX,
+        ).unwrap();
+
+        assert_eq!(
+            fast_path.len(), seq_path.len(),
+            "sequential with 1 goal should match fast A* length"
+        );
+
+        // Verify seq path reaches goal
+        let mut pos = start;
+        for a in &seq_path {
+            pos = a.apply(pos);
+        }
+        assert_eq!(pos, goal);
+    }
+
+    #[test]
+    fn sequential_astar_goal_unreachable_within_horizon() {
+        // Horizon 5, goal at manhattan distance 8 => unreachable
+        let grid = GridMap::new(10, 10);
+        let start = IVec2::ZERO;
+        let goal = IVec2::new(4, 4); // manhattan = 8
+        let dm = DistanceMap::compute(&grid, goal);
+        let goals: Vec<(IVec2, &DistanceMap)> = vec![(goal, &dm)];
+
+        let ci = ConstraintIndex::new();
+        let mut stg = SeqGoalGrid::new();
+        let result = spacetime_astar_sequential(
+            &grid, start, &goals, &ci, 5, &mut stg, u64::MAX,
+        );
+        assert!(result.is_err(), "should fail when horizon is too short");
+    }
+
+    #[test]
+    fn sequential_astar_three_goals() {
+        // 10x10 grid, 3 goals forming an L-shape: total manhattan = 15
+        let grid = GridMap::new(10, 10);
+        let start = IVec2::ZERO;
+        let g1 = IVec2::new(5, 0); // manhattan 5 from start
+        let g2 = IVec2::new(5, 5); // manhattan 5 from g1
+        let g3 = IVec2::new(0, 5); // manhattan 5 from g2
+        let dm1 = DistanceMap::compute(&grid, g1);
+        let dm2 = DistanceMap::compute(&grid, g2);
+        let dm3 = DistanceMap::compute(&grid, g3);
+        let goals: Vec<(IVec2, &DistanceMap)> = vec![(g1, &dm1), (g2, &dm2), (g3, &dm3)];
+
+        let ci = ConstraintIndex::new();
+        let mut stg = SeqGoalGrid::new();
+        let path = spacetime_astar_sequential(
+            &grid, start, &goals, &ci, 30, &mut stg, u64::MAX,
+        ).unwrap();
+
+        assert_eq!(path.len(), 15, "expected 15 steps for three sequential goals");
+
+        // Verify final position
+        let mut pos = start;
+        for a in &path {
+            pos = a.apply(pos);
+        }
+        assert_eq!(pos, g3);
+    }
+
+    #[test]
+    fn sequential_astar_with_constraints() {
+        // 5x5 grid, goal at (4,0). Block (2,0) at t=2 to force a detour.
+        let grid = GridMap::new(5, 5);
+        let start = IVec2::ZERO;
+        let goal = IVec2::new(4, 0);
+        let dm = DistanceMap::compute(&grid, goal);
+        let goals: Vec<(IVec2, &DistanceMap)> = vec![(goal, &dm)];
+
+        let mut ci = ConstraintIndex::new();
+        ci.add_vertex(IVec2::new(2, 0), 2);
+
+        let mut stg = SeqGoalGrid::new();
+        let path = spacetime_astar_sequential(
+            &grid, start, &goals, &ci, 20, &mut stg, u64::MAX,
+        ).unwrap();
+
+        // Must be longer than manhattan distance 4 due to detour
+        assert!(path.len() > 4, "constraint should force a detour (got {} steps)", path.len());
+
+        // Verify reaches goal
+        let mut pos = start;
+        for a in &path {
+            pos = a.apply(pos);
+        }
+        assert_eq!(pos, goal);
+
+        // Verify the constraint is respected: agent must not be at (2,0) at t=2
+        let mut pos = start;
+        for (t, a) in path.iter().enumerate() {
+            pos = a.apply(pos);
+            if t + 1 == 2 {
+                assert_ne!(pos, IVec2::new(2, 0), "constraint violated at t=2");
+            }
+        }
     }
 }

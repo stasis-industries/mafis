@@ -116,7 +116,7 @@ Everything else has a home:
 
 - **[MAPF Tracker](https://tracker.pathfinding.ai/)** — solver benchmarks on clean instances
 - **[MovingAI](https://movingai.com/benchmarks/)** — standard grid instances
-- **[SMART MAPF](https://smart-mapf.com/)** — kinodynamic execution fidelity
+- **[LSMART](https://smart-mapf.github.io/lifelong-smart)** — realistic FMS evaluation with kinodynamic execution
 
 ---
 
