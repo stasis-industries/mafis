@@ -1477,8 +1477,10 @@
                     <tr><td>Propagation Rate</td><td>Average fraction of alive fleet affected per fault event.</td></tr>
                     <tr><td>Survival Rate</td><td>Fraction of initial fleet still alive.</td></tr>
                     <tr><td>Idle Ratio</td><td>Fraction of agent-ticks spent waiting (not moving). Includes solver waits, collision holds, and latency.</td></tr>
+                    <tr><td>Tasks Completed</td><td>Total pickup-to-delivery tasks completed since simulation start. Compared against the fault-free baseline to show cumulative productivity loss.</td></tr>
                     <tr><td>Impacted Area</td><td>Throughput deviation vs baseline: <span class="formula">(live &minus; baseline)&thinsp;/&thinsp;baseline &times; 100</span>. Negative = behind.</td></tr>
-                    <tr><td>Deficit Integral</td><td>Cumulative task deficit vs baseline over time.</td></tr>
+                    <tr><td>Deficit Integral</td><td>Cumulative sum of ticks where live tasks fell behind the baseline. Higher = more total productivity lost to faults.</td></tr>
+                    <tr><td>Surplus Integral</td><td>Cumulative sum of ticks where live tasks exceeded the baseline (Braess paradox — faults freed congestion). <span class="formula">Net = Deficit &minus; Surplus</span>.</td></tr>
                 </tbody>
             </table>
             <h3>Composite Score</h3>
