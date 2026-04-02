@@ -9,11 +9,6 @@ web/topologies/
 
 settings.local.json
 
-CLAUDE.md
-.claude/
-docs/superpowers/
-docs/papers
-
 results/
 **__pycache__
 

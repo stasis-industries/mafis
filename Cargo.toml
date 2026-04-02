@@ -55,6 +55,9 @@ rayon = "1.10"
 ron = "0.12"
 directories = "6"
 
+[dev-dependencies]
+proptest = "1"
+
 [features]
 default = []
 headless = []  # Desktop experiment-only: no 3D rendering, no observatory

@@ -277,6 +277,11 @@ impl TopologyRegistry {
         let width = v.get("width")?.as_i64()? as i32;
         let height = v.get("height")?.as_i64()? as i32;
 
+        // Reject non-positive dimensions
+        if width <= 0 || height <= 0 {
+            return None;
+        }
+
         let mut obstacles = std::collections::HashSet::new();
         let mut zones = ZoneMap::default();
         let mut delivery_directions: Vec<(IVec2, Direction)> = Vec::new();
@@ -286,6 +291,11 @@ impl TopologyRegistry {
                 let x = cell.get("x").and_then(|v| v.as_i64())? as i32;
                 let y = cell.get("y").and_then(|v| v.as_i64())? as i32;
                 let cell_type = cell.get("type").and_then(|v| v.as_str())?;
+
+                // Skip cells outside grid bounds
+                if x < 0 || x >= width || y < 0 || y >= height {
+                    continue;
+                }
                 let pos = IVec2::new(x, y);
 
                 match cell_type {
@@ -415,12 +425,12 @@ pub fn validate_connectivity(grid: &GridMap, zones: &ZoneMap) -> Result<(), Vec<
     // Check all pickup and delivery cells are in the reachable set
     let mut unreachable = Vec::new();
     for &pos in &zones.pickup_cells {
-        if !visited[idx(pos)] {
+        if !grid.is_in_bounds(pos) || !visited[idx(pos)] {
             unreachable.push(pos);
         }
     }
     for &pos in &zones.delivery_cells {
-        if !visited[idx(pos)] {
+        if !grid.is_in_bounds(pos) || !visited[idx(pos)] {
             unreachable.push(pos);
         }
     }
