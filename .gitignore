@@ -28,6 +28,3 @@ results/
 # OS artifacts
 Thumbs.db
 Desktop.ini
-
-# Papers (local only, not part of open-source project)
-papers/
