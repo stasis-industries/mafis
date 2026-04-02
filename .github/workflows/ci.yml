@@ -74,12 +74,17 @@ jobs:
       - name: cargo check (wasm32)
         run: cargo check --target wasm32-unknown-unknown
 
-  # ── Security audit (runs in parallel, ~15s) ─────────────────────────────────
+  # ── Security audit (runs in parallel) ──────────────────────────────────────
   audit:
     name: Security Audit
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: rustsec/audit-check@v2
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-audit
+        uses: taiki-e/install-action@v2
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          tool: cargo-audit
+      - name: cargo audit
+        run: cargo audit
