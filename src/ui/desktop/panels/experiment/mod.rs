@@ -11,9 +11,9 @@ use crate::core::task::SCHEDULER_NAMES;
 use crate::solver::SOLVER_NAMES;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-mod helpers;
 mod compact;
 mod fullpage;
+mod helpers;
 
 pub use compact::experiment_panel;
 pub use fullpage::experiment_fullpage_panel;
@@ -178,9 +178,7 @@ impl ExperimentGuiState {
         indices.sort_by(|&a, &b| {
             let ord = match self.sort_column {
                 SortColumn::Solver => summaries[a].solver_name.cmp(&summaries[b].solver_name),
-                SortColumn::Topology => {
-                    summaries[a].topology_name.cmp(&summaries[b].topology_name)
-                }
+                SortColumn::Topology => summaries[a].topology_name.cmp(&summaries[b].topology_name),
                 SortColumn::Scenario => {
                     summaries[a].scenario_label.cmp(&summaries[b].scenario_label)
                 }

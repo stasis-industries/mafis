@@ -12,7 +12,7 @@ mod sim_agent;
 pub use sim_agent::*;
 
 mod collision;
-use collision::{CollisionBuffers, count_paths_through_cell, COLLISION_NO_AGENT};
+use collision::{COLLISION_NO_AGENT, CollisionBuffers, count_paths_through_cell};
 
 use std::collections::{HashSet, VecDeque};
 

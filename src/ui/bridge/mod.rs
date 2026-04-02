@@ -68,10 +68,7 @@ impl Plugin for BridgePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<FpsTracker>().add_systems(
             Update,
-            (
-                serialize::sync_state_to_js,
-                commands::process_js_commands.in_set(BridgeSet),
-            ),
+            (serialize::sync_state_to_js, commands::process_js_commands.in_set(BridgeSet)),
         );
     }
 }

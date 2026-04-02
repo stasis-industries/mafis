@@ -3,8 +3,8 @@ use rand_chacha::ChaCha8Rng;
 use std::collections::HashSet;
 
 use super::super::topology::ZoneMap;
-use super::random::random_cell_from;
 use super::TaskScheduler;
+use super::random::random_cell_from;
 
 // ---------------------------------------------------------------------------
 // ClosestFirstScheduler

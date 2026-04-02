@@ -8,8 +8,8 @@ use bevy::prelude::*;
 use crate::core::action::Action;
 use crate::core::seed::SeededRng;
 
-use crate::solver::shared::pibt_core::PibtCore;
 use super::windowed::{PlanFragment, WindowContext, WindowResult, WindowedPlanner};
+use crate::solver::shared::pibt_core::PibtCore;
 
 pub struct PibtWindowPlanner {
     core: PibtCore,
@@ -23,9 +23,7 @@ impl Default for PibtWindowPlanner {
 
 impl PibtWindowPlanner {
     pub fn new() -> Self {
-        Self {
-            core: PibtCore::new(),
-        }
+        Self { core: PibtCore::new() }
     }
 
     #[cfg(test)]
@@ -39,11 +37,7 @@ impl WindowedPlanner for PibtWindowPlanner {
         "pibt_window"
     }
 
-    fn plan_window(
-        &mut self,
-        ctx: &WindowContext,
-        _rng: &mut SeededRng,
-    ) -> WindowResult {
+    fn plan_window(&mut self, ctx: &WindowContext, _rng: &mut SeededRng) -> WindowResult {
         let n = ctx.agents.len();
         if n == 0 {
             return WindowResult::Solved(Vec::new());
@@ -64,12 +58,7 @@ impl WindowedPlanner for PibtWindowPlanner {
                 break;
             }
 
-            let actions = self.core.one_step(
-                &positions,
-                &goals,
-                ctx.grid,
-                ctx.distance_maps,
-            );
+            let actions = self.core.one_step(&positions, &goals, ctx.grid, ctx.distance_maps);
 
             for i in 0..n {
                 let action = actions[i];
@@ -120,16 +109,21 @@ impl WindowedPlanner for PibtWindowPlanner {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use smallvec::SmallVec;
     use crate::core::grid::GridMap;
     use crate::core::seed::SeededRng;
-    use crate::solver::shared::heuristics::DistanceMap;
     use crate::solver::rhcr::windowed::WindowAgent;
+    use crate::solver::shared::heuristics::DistanceMap;
+    use smallvec::SmallVec;
 
     #[test]
     fn pibt_window_single_agent() {
         let grid = GridMap::new(5, 5);
-        let agents = vec![WindowAgent { index: 0, pos: IVec2::ZERO, goal: IVec2::new(4, 4), goal_sequence: SmallVec::new() }];
+        let agents = vec![WindowAgent {
+            index: 0,
+            pos: IVec2::ZERO,
+            goal: IVec2::new(4, 4),
+            goal_sequence: SmallVec::new(),
+        }];
         let dm = DistanceMap::compute(&grid, IVec2::new(4, 4));
         let dist_maps: Vec<&DistanceMap> = vec![&dm];
         let ctx = crate::solver::rhcr::windowed::WindowContext {
@@ -159,8 +153,18 @@ mod tests {
     fn pibt_window_priorities_persist_across_windows() {
         let grid = GridMap::new(5, 5);
         let agents = vec![
-            WindowAgent { index: 0, pos: IVec2::new(0, 0), goal: IVec2::new(4, 4), goal_sequence: SmallVec::new() },
-            WindowAgent { index: 1, pos: IVec2::new(0, 1), goal: IVec2::new(4, 3), goal_sequence: SmallVec::new() },
+            WindowAgent {
+                index: 0,
+                pos: IVec2::new(0, 0),
+                goal: IVec2::new(4, 4),
+                goal_sequence: SmallVec::new(),
+            },
+            WindowAgent {
+                index: 1,
+                pos: IVec2::new(0, 1),
+                goal: IVec2::new(4, 3),
+                goal_sequence: SmallVec::new(),
+            },
         ];
         let dm0 = DistanceMap::compute(&grid, IVec2::new(4, 4));
         let dm1 = DistanceMap::compute(&grid, IVec2::new(4, 3));
@@ -185,9 +189,14 @@ mod tests {
         let priorities_after_w2 = planner.priorities().to_vec();
 
         // Priorities should accumulate across windows, not reset to zero
-        assert_ne!(priorities_after_w2, vec![0.0; 2],
-            "Priorities should accumulate across windows, not reset to zero");
-        assert_ne!(priorities_after_w1, priorities_after_w2,
-            "Priorities should change between windows");
+        assert_ne!(
+            priorities_after_w2,
+            vec![0.0; 2],
+            "Priorities should accumulate across windows, not reset to zero"
+        );
+        assert_ne!(
+            priorities_after_w1, priorities_after_w2,
+            "Priorities should change between windows"
+        );
     }
 }

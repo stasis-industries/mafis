@@ -1,9 +1,9 @@
-pub mod shared;
 pub mod lifelong;
 pub mod pibt;
 pub mod rhcr;
-pub mod token;
 pub mod rt_lacam;
+pub mod shared;
+pub mod token;
 
 // ---------------------------------------------------------------------------
 // Backward-compatible re-exports — external callers keep working

@@ -1,7 +1,7 @@
-pub mod solver;
 pub mod pbs_planner;
 pub mod pibt_planner;
 pub mod priority_astar;
+pub mod solver;
 pub mod windowed;
-pub use solver::{RhcrSolver, RhcrConfig, RhcrMode};
-pub use windowed::{WindowedPlanner, WindowAgent, WindowContext, WindowResult, PlanFragment};
+pub use solver::{RhcrConfig, RhcrMode, RhcrSolver};
+pub use windowed::{PlanFragment, WindowAgent, WindowContext, WindowResult, WindowedPlanner};

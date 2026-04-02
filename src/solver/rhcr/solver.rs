@@ -16,11 +16,11 @@ use crate::core::action::Action;
 use crate::core::grid::GridMap;
 use crate::core::seed::SeededRng;
 
-use crate::solver::shared::heuristics::{manhattan, DistanceMapCache};
+use super::windowed::{WindowAgent, WindowContext, WindowResult, WindowedPlanner};
 use crate::solver::lifelong::{AgentPlan, AgentState, LifelongSolver, SolverContext, StepResult};
+use crate::solver::shared::heuristics::{DistanceMapCache, manhattan};
 use crate::solver::shared::pibt_core::PibtCore;
 use crate::solver::shared::traits::{Optimality, Scalability, SolverInfo};
-use super::windowed::{WindowAgent, WindowContext, WindowResult, WindowedPlanner};
 
 use super::pbs_planner::PbsPlanner;
 use super::pibt_planner::PibtWindowPlanner;
@@ -98,18 +98,14 @@ impl RhcrConfig {
     /// Key trade-off: longer horizons = better plans, but larger frame stalls.
     /// We cap H based on mode cost to keep worst-case replan under ~50ms in WASM.
     pub fn auto(mode: RhcrMode, grid_area: usize, num_agents: usize) -> Self {
-        let density = if grid_area > 0 {
-            num_agents as f32 / grid_area as f32
-        } else {
-            0.0
-        };
+        let density = if grid_area > 0 { num_agents as f32 / grid_area as f32 } else { 0.0 };
 
         // Mode-dependent max horizon: expensive modes get shorter horizons
         // to keep per-replan cost bounded for WASM frame budget.
         let mode_max_h = match mode {
             RhcrMode::PibtWindow => constants::RHCR_MAX_HORIZON, // PIBT is fast
-            RhcrMode::PriorityAStar => 20, // A* scales with n × H
-            RhcrMode::Pbs => 15,           // PBS tree search is exponential
+            RhcrMode::PriorityAStar => 20,                       // A* scales with n × H
+            RhcrMode::Pbs => 15,                                 // PBS tree search is exponential
         };
 
         // H: scale with grid size, but cap by density and mode
@@ -121,10 +117,7 @@ impl RhcrConfig {
         } else {
             base_h.min(mode_max_h)
         };
-        let h = h.clamp(
-            constants::RHCR_MIN_HORIZON,
-            constants::RHCR_MAX_HORIZON,
-        );
+        let h = h.clamp(constants::RHCR_MIN_HORIZON, constants::RHCR_MAX_HORIZON);
 
         // W: replan more often to spread cost across ticks.
         // W = H/3 keeps plans fresh without huge per-replan stalls.
@@ -148,13 +141,7 @@ impl RhcrConfig {
         // Tighter node limit for PBS — reduces worst-case tree explosion
         let pbs_node_limit = (num_agents * 3).clamp(50, constants::PBS_MAX_NODE_LIMIT);
 
-        Self {
-            mode,
-            fallback,
-            horizon: h,
-            replan_interval: w,
-            pbs_node_limit,
-        }
+        Self { mode, fallback, horizon: h, replan_interval: w, pbs_node_limit }
     }
 }
 
@@ -222,15 +209,17 @@ impl RhcrSolver {
         horizon: usize,
         rng: &mut SeededRng,
     ) {
-        let endpoints: Vec<IVec2> = zones.pickup_cells.iter()
-            .chain(zones.delivery_cells.iter())
-            .copied()
-            .collect();
-        if endpoints.is_empty() { return; }
+        let endpoints: Vec<IVec2> =
+            zones.pickup_cells.iter().chain(zones.delivery_cells.iter()).copied().collect();
+        if endpoints.is_empty() {
+            return;
+        }
 
         for (i, agent) in agents.iter_mut().enumerate() {
             let dist_to_goal = dist_maps[i].get(agent.pos);
-            if dist_to_goal >= horizon as u64 { continue; }
+            if dist_to_goal >= horizon as u64 {
+                continue;
+            }
 
             let mut cumulative = dist_to_goal;
             let mut last_goal = agent.goal;
@@ -241,7 +230,9 @@ impl RhcrSolver {
                 let next = endpoints[idx];
                 if next == last_goal {
                     attempts += 1;
-                    if attempts > 10 { break; }
+                    if attempts > 10 {
+                        break;
+                    }
                     continue;
                 }
                 attempts = 0;
@@ -282,7 +273,9 @@ impl RhcrSolver {
         let stuck_count = agents
             .iter()
             .enumerate()
-            .filter(|(i, a)| a.pos == self.prev_positions[*i] && a.goal.is_some() && a.pos != a.goal.unwrap())
+            .filter(|(i, a)| {
+                a.pos == self.prev_positions[*i] && a.goal.is_some() && a.pos != a.goal.unwrap()
+            })
             .count();
 
         // Decay existing wait counts
@@ -352,11 +345,7 @@ impl RhcrSolver {
         let mut cur_pos: Vec<IVec2> = plans
             .iter()
             .map(|(idx, _)| {
-                agents
-                    .iter()
-                    .find(|a| a.index == *idx)
-                    .map(|a| a.pos)
-                    .unwrap_or(IVec2::ZERO)
+                agents.iter().find(|a| a.index == *idx).map(|a| a.pos).unwrap_or(IVec2::ZERO)
             })
             .collect();
 
@@ -373,11 +362,8 @@ impl RhcrSolver {
 
             for slot in 0..n {
                 let (_, ref plan) = plans[slot];
-                let action = if cursors[slot] < plan.len() {
-                    plan[cursors[slot]]
-                } else {
-                    Action::Wait
-                };
+                let action =
+                    if cursors[slot] < plan.len() { plan[cursors[slot]] } else { Action::Wait };
                 intended_action.push(action);
                 intended_pos.push(action.apply(cur_pos[slot]));
             }
@@ -504,19 +490,22 @@ impl RhcrSolver {
         // Build combined positions for PIBT: failed agents first, then solved agents as "dummy"
         // agents that stay in place. This makes PibtCore's occupation grid aware of solved
         // agents' current cells, preventing failed agents from moving into them.
-        let solved_current: Vec<IVec2> = solved_first_steps.iter()
+        let solved_current: Vec<IVec2> = solved_first_steps
+            .iter()
             .filter_map(|&(idx, _)| agents.iter().find(|a| a.index == idx).map(|a| a.pos))
             .collect();
 
         let mut all_positions: Vec<IVec2> = sub_agents.iter().map(|a| a.pos).collect();
-        let mut all_goals: Vec<IVec2> = sub_agents.iter().map(|a| a.goal.unwrap_or(a.pos)).collect();
+        let mut all_goals: Vec<IVec2> =
+            sub_agents.iter().map(|a| a.goal.unwrap_or(a.pos)).collect();
 
         // Dummy solved agents: goal == current pos so they always plan Wait
         all_positions.extend_from_slice(&solved_current);
         all_goals.extend_from_slice(&solved_current);
 
         // Single cache call for all agents (failed + dummy solved)
-        let all_pairs: Vec<(IVec2, IVec2)> = all_positions.iter().zip(all_goals.iter()).map(|(&p, &g)| (p, g)).collect();
+        let all_pairs: Vec<(IVec2, IVec2)> =
+            all_positions.iter().zip(all_goals.iter()).map(|(&p, &g)| (p, g)).collect();
         let all_dist_maps = distance_cache.get_or_compute(grid, &all_pairs);
 
         let n_failed = sub_agents.len();
@@ -531,11 +520,9 @@ impl RhcrSolver {
             let target = action.apply(sub_agents[i].pos);
             if solved_targets.contains(&target) {
                 // Collision with solved agent's next position — force wait
-                self.plan_buffer
-                    .push((sub_agents[i].index, smallvec![Action::Wait]));
+                self.plan_buffer.push((sub_agents[i].index, smallvec![Action::Wait]));
             } else {
-                self.plan_buffer
-                    .push((sub_agents[i].index, smallvec![action]));
+                self.plan_buffer.push((sub_agents[i].index, smallvec![action]));
             }
         }
     }
@@ -605,7 +592,9 @@ impl LifelongSolver for RhcrSolver {
     }
 
     fn restore_priorities(&mut self, priorities: &[f32]) {
-        if priorities.is_empty() { return; }
+        if priorities.is_empty() {
+            return;
+        }
         let fb_len = priorities[0] as usize;
         let rest = &priorities[1..];
         if rest.len() >= fb_len {
@@ -663,15 +652,18 @@ impl LifelongSolver for RhcrSolver {
             .collect();
 
         // Build distance maps
-        let pairs: Vec<(IVec2, IVec2)> = window_agents
-            .iter()
-            .map(|a| (a.pos, a.goal))
-            .collect();
+        let pairs: Vec<(IVec2, IVec2)> = window_agents.iter().map(|a| (a.pos, a.goal)).collect();
         let dist_maps = distance_cache.get_or_compute(ctx.grid, &pairs);
 
         // Fill goal sequences for agents whose goal is close enough to reach
         // within the planning horizon (reference: KivaSystem::update_goal_locations).
-        Self::fill_goal_sequences(&mut window_agents, &dist_maps, ctx.zones, self.config.horizon, rng);
+        Self::fill_goal_sequences(
+            &mut window_agents,
+            &dist_maps,
+            ctx.zones,
+            self.config.horizon,
+            rng,
+        );
 
         // Build initial plans for warm-starting: reuse previous plans for agents
         // whose goal hasn't changed and whose plan is still valid (all cells walkable).
@@ -706,9 +698,8 @@ impl LifelongSolver for RhcrSolver {
         // Cross-window start constraints: vertex constraints at t=0 for all
         // agents' start positions, preventing agent A from planning to be at
         // agent B's position at t=0 when B hasn't moved yet.
-        let start_constraints: Vec<(IVec2, u64)> = window_agents.iter()
-            .map(|a| (a.pos, 0u64))
-            .collect();
+        let start_constraints: Vec<(IVec2, u64)> =
+            window_agents.iter().map(|a| (a.pos, 0u64)).collect();
 
         let window_ctx = WindowContext {
             grid: ctx.grid,
@@ -737,14 +728,15 @@ impl LifelongSolver for RhcrSolver {
                         // with single-Wait stubs for failed agents, then resolve
                         // conflicts timestep-by-timestep. This preserves plan
                         // structure (unlike PIBT fallback which discards everything).
-                        let mut combined: Vec<(usize, Vec<Action>)> = Vec::with_capacity(
-                            solved.len() + failed.len(),
-                        );
+                        let mut combined: Vec<(usize, Vec<Action>)> =
+                            Vec::with_capacity(solved.len() + failed.len());
                         let solved_first_steps: Vec<(usize, IVec2)> = solved
                             .iter()
                             .filter_map(|frag| {
                                 let agent = agents.iter().find(|a| a.index == frag.agent_index)?;
-                                let target = frag.actions.first()
+                                let target = frag
+                                    .actions
+                                    .first()
                                     .map(|action| action.apply(agent.pos))
                                     .unwrap_or(agent.pos);
                                 Some((frag.agent_index, target))
@@ -776,7 +768,11 @@ impl LifelongSolver for RhcrSolver {
                         }
                         if !pibt_needed.is_empty() {
                             self.pibt_fallback_for(
-                                &pibt_needed, agents, distance_cache, ctx.grid, &solved_first_steps,
+                                &pibt_needed,
+                                agents,
+                                distance_cache,
+                                ctx.grid,
+                                &solved_first_steps,
                             );
                         }
                     }
@@ -838,9 +834,8 @@ impl LifelongSolver for RhcrSolver {
                         }
 
                         // LRA resolve on kept_solved + extended_failed
-                        let mut combined: Vec<(usize, Vec<Action>)> = Vec::with_capacity(
-                            kept_solved.len() + extended_failed.len(),
-                        );
+                        let mut combined: Vec<(usize, Vec<Action>)> =
+                            Vec::with_capacity(kept_solved.len() + extended_failed.len());
                         for frag in &kept_solved {
                             combined.push((frag.agent_index, frag.actions.to_vec()));
                         }
@@ -852,7 +847,9 @@ impl LifelongSolver for RhcrSolver {
                             .iter()
                             .filter_map(|frag| {
                                 let agent = agents.iter().find(|a| a.index == frag.agent_index)?;
-                                let target = frag.actions.first()
+                                let target = frag
+                                    .actions
+                                    .first()
                                     .map(|action| action.apply(agent.pos))
                                     .unwrap_or(agent.pos);
                                 Some((frag.agent_index, target))
@@ -868,7 +865,9 @@ impl LifelongSolver for RhcrSolver {
 
                         let mut pibt_needed: Vec<usize> = Vec::new();
                         for (idx, actions) in &resolved {
-                            if actions.iter().all(|a| *a == Action::Wait) && extended_failed.contains(idx) {
+                            if actions.iter().all(|a| *a == Action::Wait)
+                                && extended_failed.contains(idx)
+                            {
                                 pibt_needed.push(*idx);
                             } else {
                                 self.plan_buffer.push((*idx, actions.iter().copied().collect()));
@@ -876,16 +875,18 @@ impl LifelongSolver for RhcrSolver {
                         }
                         if !pibt_needed.is_empty() {
                             self.pibt_fallback_for(
-                                &pibt_needed, agents, distance_cache, ctx.grid, &solved_first_steps,
+                                &pibt_needed,
+                                agents,
+                                distance_cache,
+                                ctx.grid,
+                                &solved_first_steps,
                             );
                         }
                     }
                     FallbackMode::Full => {
                         // Discard all windowed plans, PIBT everyone
                         let all_indices: Vec<usize> = agents.iter().map(|a| a.index).collect();
-                        self.pibt_fallback_for(
-                            &all_indices, agents, distance_cache, ctx.grid, &[],
-                        );
+                        self.pibt_fallback_for(&all_indices, agents, distance_cache, ctx.grid, &[]);
                     }
                 }
             }
@@ -944,12 +945,7 @@ mod tests {
             task_leg: TaskLeg::Free,
         }];
 
-        let ctx = SolverContext {
-            grid: &grid,
-            zones: &zones,
-            tick: 0,
-            num_agents: 1,
-        };
+        let ctx = SolverContext { grid: &grid, zones: &zones, tick: 0, num_agents: 1 };
 
         // First call should replan immediately (counter starts at W-1)
         let result = solver.step(&ctx, &agents, &mut cache, &mut rng);
@@ -1012,8 +1008,20 @@ mod tests {
         let mut cache = DistanceMapCache::default();
         let mut rng = SeededRng::new(42);
         let agents = vec![
-            AgentState { index: 0, pos: IVec2::new(0, 0), goal: Some(IVec2::new(4, 0)), has_plan: false, task_leg: TaskLeg::Free },
-            AgentState { index: 1, pos: IVec2::new(0, 4), goal: Some(IVec2::new(4, 4)), has_plan: false, task_leg: TaskLeg::Free },
+            AgentState {
+                index: 0,
+                pos: IVec2::new(0, 0),
+                goal: Some(IVec2::new(4, 0)),
+                has_plan: false,
+                task_leg: TaskLeg::Free,
+            },
+            AgentState {
+                index: 1,
+                pos: IVec2::new(0, 4),
+                goal: Some(IVec2::new(4, 4)),
+                has_plan: false,
+                task_leg: TaskLeg::Free,
+            },
         ];
 
         let ctx = SolverContext { grid: &grid, zones: &zones, tick: 0, num_agents: 2 };
@@ -1042,9 +1050,13 @@ mod tests {
         let mut solver = RhcrSolver::new(config);
         let mut cache = DistanceMapCache::default();
         let mut rng = SeededRng::new(42);
-        let agents = vec![
-            AgentState { index: 0, pos: IVec2::new(0, 0), goal: Some(IVec2::new(4, 4)), has_plan: false, task_leg: TaskLeg::Free },
-        ];
+        let agents = vec![AgentState {
+            index: 0,
+            pos: IVec2::new(0, 0),
+            goal: Some(IVec2::new(4, 4)),
+            has_plan: false,
+            task_leg: TaskLeg::Free,
+        }];
 
         let ctx = SolverContext { grid: &grid, zones: &zones, tick: 0, num_agents: 1 };
         let result = solver.step(&ctx, &agents, &mut cache, &mut rng);
@@ -1146,7 +1158,8 @@ mod tests {
         let zones = &zones_owned;
 
         let walkable: Vec<IVec2> = zones
-            .corridor_cells.iter()
+            .corridor_cells
+            .iter()
             .chain(zones.pickup_cells.iter())
             .chain(zones.delivery_cells.iter())
             .copied()
@@ -1170,7 +1183,8 @@ mod tests {
         let zones = &zones_owned;
 
         let walkable: Vec<IVec2> = zones
-            .corridor_cells.iter()
+            .corridor_cells
+            .iter()
             .chain(zones.pickup_cells.iter())
             .chain(zones.delivery_cells.iter())
             .copied()
@@ -1265,16 +1279,15 @@ mod tests {
         n: usize,
         ticks: u64,
     ) {
+        use rand::Rng;
         use rand::SeedableRng;
         use rand_chacha::ChaCha8Rng;
-        use rand::Rng;
         use std::time::Instant;
 
         let mut rng_seed = ChaCha8Rng::seed_from_u64(99);
         let mut positions: Vec<IVec2> = walkable[..n].to_vec();
-        let mut goals: Vec<IVec2> = (0..n)
-            .map(|_| walkable[rng_seed.random_range(0..walkable.len())])
-            .collect();
+        let mut goals: Vec<IVec2> =
+            (0..n).map(|_| walkable[rng_seed.random_range(0..walkable.len())]).collect();
         let mut plans: Vec<std::collections::VecDeque<Action>> =
             vec![std::collections::VecDeque::new(); n];
 
@@ -1294,7 +1307,10 @@ mod tests {
                 assert!(
                     grid.is_walkable(new_pos),
                     "RHCR {:?}: agent {} tick {} moved to obstacle {:?}",
-                    mode, i, tick, new_pos,
+                    mode,
+                    i,
+                    tick,
+                    new_pos,
                 );
                 positions[i] = new_pos;
             }
@@ -1324,12 +1340,7 @@ mod tests {
                 zone_type: zones.zone_type.clone(),
                 queue_lines: Vec::new(),
             };
-            let ctx = SolverContext {
-                grid,
-                zones: &solver_zones,
-                tick,
-                num_agents: n,
-            };
+            let ctx = SolverContext { grid, zones: &solver_zones, tick, num_agents: n };
 
             match solver.step(&ctx, &agent_states, &mut cache, &mut rng) {
                 StepResult::Continue => {}
@@ -1355,15 +1366,17 @@ mod tests {
     #[test]
     fn rhcr_throughput_benchmark() {
         use crate::core::topology::TopologyRegistry;
+        use rand::Rng;
         use rand::SeedableRng;
         use rand_chacha::ChaCha8Rng;
-        use rand::Rng;
 
         let registry = TopologyRegistry::load_from_dir(std::path::Path::new("topologies"));
         let entry = registry.find("warehouse_large").expect("warehouse_large.json missing");
         let (grid, zones) = TopologyRegistry::parse_entry(entry).unwrap();
 
-        let walkable: Vec<IVec2> = zones.corridor_cells.iter()
+        let walkable: Vec<IVec2> = zones
+            .corridor_cells
+            .iter()
             .chain(zones.pickup_cells.iter())
             .chain(zones.delivery_cells.iter())
             .copied()
@@ -1376,9 +1389,8 @@ mod tests {
         for mode in [RhcrMode::PibtWindow, RhcrMode::PriorityAStar, RhcrMode::Pbs] {
             let mut rng_seed = ChaCha8Rng::seed_from_u64(99);
             let mut positions: Vec<IVec2> = walkable[..n].to_vec();
-            let mut goals: Vec<IVec2> = (0..n)
-                .map(|_| walkable[rng_seed.random_range(0..walkable.len())])
-                .collect();
+            let mut goals: Vec<IVec2> =
+                (0..n).map(|_| walkable[rng_seed.random_range(0..walkable.len())]).collect();
             let mut plans: Vec<std::collections::VecDeque<Action>> =
                 vec![std::collections::VecDeque::new(); n];
 
@@ -1416,12 +1428,7 @@ mod tests {
                     })
                     .collect();
 
-                let ctx = SolverContext {
-                    grid: &grid,
-                    zones: &zones,
-                    tick,
-                    num_agents: n,
-                };
+                let ctx = SolverContext { grid: &grid, zones: &zones, tick, num_agents: n };
 
                 match solver.step(&ctx, &agent_states, &mut cache, &mut rng) {
                     StepResult::Continue => {}
@@ -1437,9 +1444,12 @@ mod tests {
 
             eprintln!(
                 "THROUGHPUT RHCR {:?}: {} tasks in {} ticks ({:.1}/100t) [H={} W={}]",
-                mode, tasks_completed, ticks,
+                mode,
+                tasks_completed,
+                ticks,
                 tasks_completed as f64 / ticks as f64 * 100.0,
-                h, w,
+                h,
+                w,
             );
         }
     }
@@ -1472,8 +1482,20 @@ mod tests {
         let mut rng = SeededRng::new(42);
 
         let agents = vec![
-            AgentState { index: 0, pos: IVec2::new(0, 0), goal: Some(IVec2::new(9, 9)), has_plan: false, task_leg: TaskLeg::Free },
-            AgentState { index: 1, pos: IVec2::new(9, 0), goal: Some(IVec2::new(0, 9)), has_plan: false, task_leg: TaskLeg::Free },
+            AgentState {
+                index: 0,
+                pos: IVec2::new(0, 0),
+                goal: Some(IVec2::new(9, 9)),
+                has_plan: false,
+                task_leg: TaskLeg::Free,
+            },
+            AgentState {
+                index: 1,
+                pos: IVec2::new(9, 0),
+                goal: Some(IVec2::new(0, 9)),
+                has_plan: false,
+                task_leg: TaskLeg::Free,
+            },
         ];
 
         let ctx = SolverContext { grid: &grid, zones: &zones, tick: 0, num_agents: 2 };
@@ -1509,8 +1531,20 @@ mod tests {
             (1, vec![Action::Move(Direction::West), Action::Move(Direction::West)]),
         ];
         let agents = vec![
-            AgentState { index: 0, pos: IVec2::new(1, 0), goal: Some(IVec2::new(3, 0)), has_plan: true, task_leg: TaskLeg::Free },
-            AgentState { index: 1, pos: IVec2::new(3, 0), goal: Some(IVec2::new(1, 0)), has_plan: true, task_leg: TaskLeg::Free },
+            AgentState {
+                index: 0,
+                pos: IVec2::new(1, 0),
+                goal: Some(IVec2::new(3, 0)),
+                has_plan: true,
+                task_leg: TaskLeg::Free,
+            },
+            AgentState {
+                index: 1,
+                pos: IVec2::new(3, 0),
+                goal: Some(IVec2::new(1, 0)),
+                has_plan: true,
+                task_leg: TaskLeg::Free,
+            },
         ];
 
         let resolved = RhcrSolver::lra_resolve_conflicts(&plans, &agents, &grid, 4);
@@ -1552,8 +1586,20 @@ mod tests {
 
         // Two agents with crossing goals
         let agents = vec![
-            AgentState { index: 0, pos: IVec2::new(0, 2), goal: Some(IVec2::new(4, 2)), has_plan: false, task_leg: TaskLeg::Free },
-            AgentState { index: 1, pos: IVec2::new(4, 2), goal: Some(IVec2::new(0, 2)), has_plan: false, task_leg: TaskLeg::Free },
+            AgentState {
+                index: 0,
+                pos: IVec2::new(0, 2),
+                goal: Some(IVec2::new(4, 2)),
+                has_plan: false,
+                task_leg: TaskLeg::Free,
+            },
+            AgentState {
+                index: 1,
+                pos: IVec2::new(4, 2),
+                goal: Some(IVec2::new(0, 2)),
+                has_plan: false,
+                task_leg: TaskLeg::Free,
+            },
         ];
 
         let ctx = SolverContext { grid: &grid, zones: &zones, tick: 0, num_agents: 2 };
@@ -1581,8 +1627,20 @@ mod tests {
             (1, vec![Action::Move(Direction::West)]),
         ];
         let agents = vec![
-            AgentState { index: 0, pos: IVec2::new(1, 0), goal: Some(IVec2::new(2, 0)), has_plan: true, task_leg: TaskLeg::Free },
-            AgentState { index: 1, pos: IVec2::new(2, 0), goal: Some(IVec2::new(1, 0)), has_plan: true, task_leg: TaskLeg::Free },
+            AgentState {
+                index: 0,
+                pos: IVec2::new(1, 0),
+                goal: Some(IVec2::new(2, 0)),
+                has_plan: true,
+                task_leg: TaskLeg::Free,
+            },
+            AgentState {
+                index: 1,
+                pos: IVec2::new(2, 0),
+                goal: Some(IVec2::new(1, 0)),
+                has_plan: true,
+                task_leg: TaskLeg::Free,
+            },
         ];
 
         let resolved = RhcrSolver::lra_resolve_conflicts(&plans, &agents, &grid, 4);

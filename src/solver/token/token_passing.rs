@@ -17,13 +17,13 @@ use crate::core::grid::GridMap;
 use crate::core::seed::SeededRng;
 use crate::core::task::TaskLeg;
 
+use super::common::{MasterConstraintIndex, Token};
+use crate::solver::lifelong::{AgentPlan, AgentState, LifelongSolver, SolverContext, StepResult};
 use crate::solver::shared::astar::{SpacetimeGrid, spacetime_astar_fast};
 use crate::solver::shared::heuristics::DistanceMapCache;
-use crate::solver::lifelong::{AgentPlan, AgentState, LifelongSolver, SolverContext, StepResult};
-use super::common::{Token, MasterConstraintIndex};
 use crate::solver::shared::traits::{Optimality, Scalability, SolverInfo};
 
-use crate::constants::{TOKEN_PATH_MAX_TIME, TOKEN_ASTAR_MAX_TIME, ASTAR_MAX_EXPANSIONS};
+use crate::constants::{ASTAR_MAX_EXPANSIONS, TOKEN_ASTAR_MAX_TIME, TOKEN_PATH_MAX_TIME};
 
 // ---------------------------------------------------------------------------
 // Token Passing Solver
@@ -115,9 +115,17 @@ impl TokenPassingSolver {
         let dm = maps[0];
 
         let actions = spacetime_astar_fast(
-            grid, start, goal, &self.master_ci, TOKEN_ASTAR_MAX_TIME, Some(dm), &mut self.stg,
-            ASTAR_MAX_EXPANSIONS, None,
-        ).ok()?;
+            grid,
+            start,
+            goal,
+            &self.master_ci,
+            TOKEN_ASTAR_MAX_TIME,
+            Some(dm),
+            &mut self.stg,
+            ASTAR_MAX_EXPANSIONS,
+            None,
+        )
+        .ok()?;
 
         let mut positions = Vec::with_capacity(actions.len() + 1);
         positions.push(start);
@@ -178,12 +186,13 @@ impl LifelongSolver for TokenPassingSolver {
         // Sync actual positions
         for a in agents {
             if let Some(&local) = self.agent_map.get(a.index)
-                && local < self.token.paths.len() {
-                    let token_pos = self.token.paths[local].front().copied();
-                    if token_pos != Some(a.pos) {
-                        self.token.set_path(local, vec![a.pos]);
-                    }
+                && local < self.token.paths.len()
+            {
+                let token_pos = self.token.paths[local].front().copied();
+                if token_pos != Some(a.pos) {
+                    self.token.set_path(local, vec![a.pos]);
                 }
+            }
         }
 
         // Build master constraint index once from all token paths
@@ -206,9 +215,8 @@ impl LifelongSolver for TokenPassingSolver {
                 _ => continue,
             };
 
-            let needs_plan = self.token.paths[local].len() <= 1
-                && a.goal.is_some()
-                && a.pos != a.goal.unwrap();
+            let needs_plan =
+                self.token.paths[local].len() <= 1 && a.goal.is_some() && a.pos != a.goal.unwrap();
 
             if !needs_plan {
                 continue;
@@ -228,9 +236,7 @@ impl LifelongSolver for TokenPassingSolver {
                 TaskLeg::TravelLoaded { from: _, to } => {
                     self.plan_for_agent(local, a.pos, *to, ctx.grid, distance_cache)
                 }
-                _ => {
-                    self.plan_for_agent(local, a.pos, goal, ctx.grid, distance_cache)
-                }
+                _ => self.plan_for_agent(local, a.pos, goal, ctx.grid, distance_cache),
             };
 
             if let Some(positions) = path {
@@ -407,5 +413,4 @@ mod tests {
         assert!(!solver.initialized);
         assert!(solver.token.paths.is_empty());
     }
-
 }

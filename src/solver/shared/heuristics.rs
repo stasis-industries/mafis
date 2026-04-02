@@ -82,18 +82,15 @@ impl DistanceMap {
 /// Batch-compute distance maps for all agent goals.
 /// Returns `Vec<DistanceMap>` aligned with the `agents` slice.
 pub fn compute_distance_maps(grid: &GridMap, agents: &[(IVec2, IVec2)]) -> Vec<DistanceMap> {
-    agents
-        .iter()
-        .map(|&(_, goal)| DistanceMap::compute(grid, goal))
-        .collect()
+    agents.iter().map(|&(_, goal)| DistanceMap::compute(grid, goal)).collect()
 }
 
 // ---------------------------------------------------------------------------
 // Distance map cache — reuse BFS maps across lifelong replans
 // ---------------------------------------------------------------------------
 
-use std::collections::HashMap;
 use bevy::prelude::Resource;
+use std::collections::HashMap;
 
 /// Caches BFS distance maps keyed by goal position.
 /// In lifelong mode most agents keep the same goal across replans — only agents
@@ -159,16 +156,11 @@ impl DistanceMapCache {
 
         // Ensure all goals are in the cache
         for &(_, goal) in agents {
-            self.cache
-                .entry(goal)
-                .or_insert_with(|| DistanceMap::compute(grid, goal));
+            self.cache.entry(goal).or_insert_with(|| DistanceMap::compute(grid, goal));
         }
 
         // Return references aligned with agents
-        agents
-            .iter()
-            .map(|&(_, goal)| self.cache.get(&goal).unwrap())
-            .collect()
+        agents.iter().map(|&(_, goal)| self.cache.get(&goal).unwrap()).collect()
     }
 
     /// Evict entries for goals no longer in use (call periodically to bound memory).
@@ -294,10 +286,7 @@ mod tests {
     #[test]
     fn compute_distance_maps_returns_one_per_agent() {
         let grid = open5();
-        let agents = vec![
-            (IVec2::ZERO, IVec2::new(4, 4)),
-            (IVec2::new(4, 0), IVec2::new(0, 4)),
-        ];
+        let agents = vec![(IVec2::ZERO, IVec2::new(4, 4)), (IVec2::new(4, 0), IVec2::new(0, 4))];
         let maps = compute_distance_maps(&grid, &agents);
         assert_eq!(maps.len(), 2);
         assert_eq!(maps[0].get(IVec2::new(4, 4)), 0);

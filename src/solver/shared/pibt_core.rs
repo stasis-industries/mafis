@@ -260,14 +260,10 @@ impl PibtCore {
                 let tb = has_task.get(b).copied().unwrap_or(false);
                 // Tasked agents first (true > false when reversed)
                 tb.cmp(&ta).then_with(|| {
-                    priorities[b]
-                        .partial_cmp(&priorities[a])
-                        .unwrap_or(std::cmp::Ordering::Equal)
+                    priorities[b].partial_cmp(&priorities[a]).unwrap_or(std::cmp::Ordering::Equal)
                 })
             } else {
-                priorities[b]
-                    .partial_cmp(&priorities[a])
-                    .unwrap_or(std::cmp::Ordering::Equal)
+                priorities[b].partial_cmp(&priorities[a]).unwrap_or(std::cmp::Ordering::Equal)
             }
         });
 
@@ -372,9 +368,7 @@ pub fn pibt_one_step_constrained(
 
     let mut order: Vec<usize> = (0..n).filter(|i| !decided[*i]).collect();
     order.sort_unstable_by(|&a, &b| {
-        priorities[b]
-            .partial_cmp(&priorities[a])
-            .unwrap_or(std::cmp::Ordering::Equal)
+        priorities[b].partial_cmp(&priorities[a]).unwrap_or(std::cmp::Ordering::Equal)
     });
 
     // Use a simple step counter for deterministic shuffle in standalone path
@@ -400,9 +394,7 @@ pub fn pibt_one_step_constrained(
         );
     }
 
-    (0..n)
-        .map(|i| delta_to_action(positions[i], next_pos[i]))
-        .collect()
+    (0..n).map(|i| delta_to_action(positions[i], next_pos[i])).collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -450,7 +442,8 @@ fn pibt_assign_grid(
     // Shuffle before sorting (reference C++ behavior): randomizes among
     // equal-distance candidates, preventing systematic bias in corridors.
     // Use a fast deterministic hash instead of full RNG to avoid allocation.
-    let hash_base = shuffle_seed.wrapping_mul(6364136223846793005)
+    let hash_base = shuffle_seed
+        .wrapping_mul(6364136223846793005)
         .wrapping_add(agent as u64)
         .wrapping_add(depth as u64);
     candidates.sort_unstable_by(|&a, &b| {
@@ -477,26 +470,25 @@ fn pibt_assign_grid(
                 .then_with(hash_cmp)
         } else {
             // Original integer path — zero overhead when bias is None
-            da_raw.cmp(&db_raw)
-                .then_with(occ_cmp)
-                .then_with(hash_cmp)
+            da_raw.cmp(&db_raw).then_with(occ_cmp).then_with(hash_cmp)
         }
     });
 
     for &candidate in candidates.iter() {
         if let Some(j) = next_occ.get(candidate)
-            && j != agent {
-                continue;
-            }
+            && j != agent
+        {
+            continue;
+        }
 
         if let Some(j) = next_occ.get(pos)
-            && j != agent && current[j] == candidate {
-                continue;
-            }
+            && j != agent
+            && current[j] == candidate
+        {
+            continue;
+        }
 
-        let blocker = current_occ
-            .get(candidate)
-            .filter(|&j| j != agent && !decided[j]);
+        let blocker = current_occ.get(candidate).filter(|&j| j != agent && !decided[j]);
 
         if let Some(blocker_id) = blocker {
             // Reference behavior (pibt_mapd.cpp:230-232): push ANY undecided
@@ -508,8 +500,19 @@ fn pibt_assign_grid(
             next_occ.set(candidate, agent);
 
             if pibt_assign_grid(
-                blocker_id, next_pos, decided, current, goals, grid, dist_maps,
-                priorities, depth + 1, current_occ, next_occ, shuffle_seed, bias_fn,
+                blocker_id,
+                next_pos,
+                decided,
+                current,
+                goals,
+                grid,
+                dist_maps,
+                priorities,
+                depth + 1,
+                current_occ,
+                next_occ,
+                shuffle_seed,
+                bias_fn,
             ) {
                 return true;
             }
@@ -531,4 +534,3 @@ fn pibt_assign_grid(
     next_occ.set(pos, agent);
     false
 }
-

@@ -9,9 +9,9 @@ use crate::solver::heuristics::DistanceMapCache;
 pub mod closest;
 pub use closest::ClosestFirstScheduler;
 pub mod random;
-pub use random::{random_cell_from, RandomScheduler};
+pub use random::{RandomScheduler, random_cell_from};
 pub mod recycle;
-pub use recycle::{recycle_goals_core, RecycleResult, TaskAgentSnapshot, TaskUpdate};
+pub use recycle::{RecycleResult, TaskAgentSnapshot, TaskUpdate, recycle_goals_core};
 
 // ---------------------------------------------------------------------------
 // TaskLeg

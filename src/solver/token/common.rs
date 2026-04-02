@@ -60,13 +60,7 @@ pub(super) struct MasterConstraintIndex {
 
 impl MasterConstraintIndex {
     pub(super) fn new() -> Self {
-        Self {
-            vertex_counts: Vec::new(),
-            edge_counts: Vec::new(),
-            width: 0,
-            stride: 0,
-            cells: 0,
-        }
+        Self { vertex_counts: Vec::new(), edge_counts: Vec::new(), width: 0, stride: 0, cells: 0 }
     }
 
     pub(super) fn reset(&mut self, width: i32, height: i32, max_time: u64) {
@@ -228,9 +222,8 @@ mod tests {
     fn master_ci_add_remove_symmetric() {
         let mut mci = MasterConstraintIndex::new();
         mci.reset(5, 5, 10);
-        let path: VecDeque<IVec2> = vec![
-            IVec2::new(0, 0), IVec2::new(1, 0), IVec2::new(2, 0),
-        ].into();
+        let path: VecDeque<IVec2> =
+            vec![IVec2::new(0, 0), IVec2::new(1, 0), IVec2::new(2, 0)].into();
         mci.add_path(&path, 10);
         assert!(mci.is_vertex_blocked(IVec2::new(1, 0), 1));
         assert!(mci.is_vertex_blocked(IVec2::new(2, 0), 5));

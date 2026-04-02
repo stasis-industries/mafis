@@ -1,5 +1,5 @@
-use bevy::prelude::*;
 use bevy::ecs::system::SystemParam;
+use bevy::prelude::*;
 
 use crate::analysis::heatmap::{HeatmapMode, HeatmapState};
 use crate::analysis::history::TickHistory;
@@ -22,10 +22,6 @@ use crate::solver::ActiveSolver;
 use crate::ui::controls::UiState;
 
 #[cfg(target_arch = "wasm32")]
-use crate::ui::controls::ImportedScenario;
-#[cfg(target_arch = "wasm32")]
-use crate::ui::controls::PreviewMap;
-#[cfg(target_arch = "wasm32")]
 use crate::core::topology::{CustomMap, ZoneMap, ZoneType};
 #[cfg(target_arch = "wasm32")]
 use crate::export::config::ExportTrigger;
@@ -33,6 +29,10 @@ use crate::export::config::ExportTrigger;
 use crate::render::orbit_camera as orbit_camera_fns;
 #[cfg(target_arch = "wasm32")]
 use crate::solver::lifelong_solver_from_name;
+#[cfg(target_arch = "wasm32")]
+use crate::ui::controls::ImportedScenario;
+#[cfg(target_arch = "wasm32")]
+use crate::ui::controls::PreviewMap;
 
 // ---------------------------------------------------------------------------
 // JS commands

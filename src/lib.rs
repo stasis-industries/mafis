@@ -35,6 +35,5 @@ impl Plugin for MapfFisPlugin {
         // Render + Export only in observatory mode (WASM or non-headless desktop)
         #[cfg(any(target_arch = "wasm32", not(feature = "headless")))]
         app.add_plugins((render::RenderPlugin, export::ExportPlugin));
-
     }
 }

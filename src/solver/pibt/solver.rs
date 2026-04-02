@@ -13,8 +13,10 @@ use crate::core::action::Action;
 use crate::core::grid::GridMap;
 use crate::core::seed::SeededRng;
 
+use crate::solver::lifelong::{
+    ActiveSolver, AgentPlan, AgentState, LifelongSolver, SolverContext, StepResult,
+};
 use crate::solver::shared::heuristics::{DistanceMap, DistanceMapCache, compute_distance_maps};
-use crate::solver::lifelong::{ActiveSolver, AgentPlan, AgentState, LifelongSolver, SolverContext, StepResult};
 use crate::solver::shared::pibt_core::PibtCore;
 use crate::solver::shared::traits::{MAPFSolver, Optimality, Scalability, SolverError, SolverInfo};
 
@@ -114,7 +116,11 @@ impl LifelongSolver for PibtLifelongSolver {
         }));
 
         let actions = self.core.one_step_with_tasks(
-            &self.positions_buf, &self.goals_buf, ctx.grid, &dist_maps, &self.has_task_buf,
+            &self.positions_buf,
+            &self.goals_buf,
+            ctx.grid,
+            &dist_maps,
+            &self.has_task_buf,
         );
 
         // Write into pre-allocated buffer
@@ -147,9 +153,7 @@ pub struct PibtSolver {
 
 impl Default for PibtSolver {
     fn default() -> Self {
-        Self {
-            max_timesteps: DEFAULT_MAX_TIMESTEPS,
-        }
+        Self { max_timesteps: DEFAULT_MAX_TIMESTEPS }
     }
 }
 
@@ -214,9 +218,8 @@ impl PibtSolver {
         let goals: Vec<IVec2> = agents.iter().map(|(_, g)| *g).collect();
         let mut positions: Vec<IVec2> = agents.iter().map(|(s, _)| *s).collect();
         let mut paths: Vec<Vec<Action>> = vec![Vec::new(); n];
-        let mut priorities: Vec<f32> = (0..n)
-            .map(|i| dist_maps[i].get(positions[i]) as f32)
-            .collect();
+        let mut priorities: Vec<f32> =
+            (0..n).map(|i| dist_maps[i].get(positions[i]) as f32).collect();
 
         for _t in 0..self.max_timesteps {
             if positions.iter().zip(goals.iter()).all(|(p, g)| p == g) {
@@ -224,7 +227,11 @@ impl PibtSolver {
             }
 
             let step_actions = crate::solver::shared::pibt_core::pibt_one_step(
-                &positions, &goals, grid, dist_maps, &mut priorities,
+                &positions,
+                &goals,
+                grid,
+                dist_maps,
+                &mut priorities,
             );
 
             for i in 0..n {
@@ -326,10 +333,8 @@ mod tests {
 
     #[test]
     fn pibt_two_agents_no_vertex_conflict() {
-        let agents = vec![
-            (IVec2::new(0, 2), IVec2::new(4, 2)),
-            (IVec2::new(4, 2), IVec2::new(0, 2)),
-        ];
+        let agents =
+            vec![(IVec2::new(0, 2), IVec2::new(4, 2)), (IVec2::new(4, 2), IVec2::new(0, 2))];
         let result = solver().solve(&open5(), &agents).unwrap();
         assert_eq!(result.len(), 2);
         assert!(no_vertex_conflicts(&result, &agents));
@@ -337,10 +342,8 @@ mod tests {
 
     #[test]
     fn pibt_two_parallel_agents_reach_goals() {
-        let agents = vec![
-            (IVec2::new(0, 0), IVec2::new(4, 0)),
-            (IVec2::new(0, 4), IVec2::new(4, 4)),
-        ];
+        let agents =
+            vec![(IVec2::new(0, 0), IVec2::new(4, 0)), (IVec2::new(0, 4), IVec2::new(4, 4))];
         let result = solver().solve(&open5(), &agents).unwrap();
         assert_eq!(result.len(), 2);
         assert!(no_vertex_conflicts(&result, &agents));
@@ -389,25 +392,21 @@ mod tests {
             let (grid, zones) = TopologyRegistry::parse_entry(entry).unwrap();
 
             // Place agents on walkable cells (corridors + pickup cells)
-            let walkable: Vec<IVec2> = zones
-                .corridor_cells
-                .iter()
-                .chain(zones.pickup_cells.iter())
-                .copied()
-                .collect();
-            if walkable.len() < 20 { continue; }
+            let walkable: Vec<IVec2> =
+                zones.corridor_cells.iter().chain(zones.pickup_cells.iter()).copied().collect();
+            if walkable.len() < 20 {
+                continue;
+            }
 
             // Pair agents with goals across the warehouse
             let n = 15.min(walkable.len() / 2);
-            let agents: Vec<(IVec2, IVec2)> = (0..n)
-                .map(|i| (walkable[i], walkable[walkable.len() - 1 - i]))
-                .collect();
+            let agents: Vec<(IVec2, IVec2)> =
+                (0..n).map(|i| (walkable[i], walkable[walkable.len() - 1 - i])).collect();
 
             let result = solver().solve(&grid, &agents).unwrap();
 
             // Check every position along every agent path
-            for (agent_idx, (plan, (start, _goal))) in
-                result.iter().zip(agents.iter()).enumerate()
+            for (agent_idx, (plan, (start, _goal))) in result.iter().zip(agents.iter()).enumerate()
             {
                 let mut pos = *start;
                 for (t, &action) in plan.iter().enumerate() {
@@ -429,9 +428,9 @@ mod tests {
     #[test]
     fn pibt_warehouse_lifelong_no_obstacle_violations() {
         use crate::core::topology::TopologyRegistry;
+        use rand::Rng;
         use rand::SeedableRng;
         use rand_chacha::ChaCha8Rng;
-        use rand::Rng;
 
         let registry = TopologyRegistry::load_from_dir(std::path::Path::new("topologies"));
         let entry = registry.find("warehouse_large").expect("warehouse_large.json missing");
@@ -450,16 +449,16 @@ mod tests {
 
         let n = 10;
         let mut positions: Vec<IVec2> = walkable[..n].to_vec();
-        let mut goals: Vec<IVec2> = (0..n)
-            .map(|_| walkable[rng.random_range(0..walkable.len())])
-            .collect();
+        let mut goals: Vec<IVec2> =
+            (0..n).map(|_| walkable[rng.random_range(0..walkable.len())]).collect();
 
         let mut core = crate::solver::shared::pibt_core::PibtCore::new();
 
         for tick in 0..200 {
             let agent_pairs: Vec<(IVec2, IVec2)> =
                 positions.iter().zip(goals.iter()).map(|(&p, &g)| (p, g)).collect();
-            let dist_maps = crate::solver::shared::heuristics::compute_distance_maps(grid, &agent_pairs);
+            let dist_maps =
+                crate::solver::shared::heuristics::compute_distance_maps(grid, &agent_pairs);
             let dist_refs: Vec<&crate::solver::shared::heuristics::DistanceMap> =
                 dist_maps.iter().collect();
 
@@ -517,11 +516,17 @@ mod tests {
 
         for tick in 0..100 {
             let agents = vec![AgentState {
-                index: 0, pos, goal: Some(goal), has_plan: tick > 0,
+                index: 0,
+                pos,
+                goal: Some(goal),
+                has_plan: tick > 0,
                 task_leg: crate::core::task::TaskLeg::TravelEmpty(goal),
             }];
             let ctx = crate::solver::lifelong::SolverContext {
-                grid: &grid, zones: &zones, tick, num_agents: 1,
+                grid: &grid,
+                zones: &zones,
+                tick,
+                num_agents: 1,
             };
             if let crate::solver::lifelong::StepResult::Replan(plans) =
                 solver.step(&ctx, &agents, &mut cache, &mut rng)
@@ -536,7 +541,9 @@ mod tests {
                 return; // Success — reached goal within 100 ticks
             }
         }
-        panic!("highest-priority agent did not reach goal (7,7) from (0,0) in 100 ticks on open 8x8 grid");
+        panic!(
+            "highest-priority agent did not reach goal (7,7) from (0,0) in 100 ticks on open 8x8 grid"
+        );
     }
 
     /// Paper property: PIBT with multiple agents on a solvable grid should
@@ -563,26 +570,37 @@ mod tests {
         let mut rng = crate::core::seed::SeededRng::new(42);
 
         let mut positions = vec![
-            IVec2::new(0, 0), IVec2::new(7, 7), IVec2::new(0, 7),
-            IVec2::new(7, 0), IVec2::new(3, 3),
+            IVec2::new(0, 0),
+            IVec2::new(7, 7),
+            IVec2::new(0, 7),
+            IVec2::new(7, 0),
+            IVec2::new(3, 3),
         ];
         let goals = vec![
-            IVec2::new(7, 7), IVec2::new(0, 0), IVec2::new(7, 0),
-            IVec2::new(0, 7), IVec2::new(5, 5),
+            IVec2::new(7, 7),
+            IVec2::new(0, 0),
+            IVec2::new(7, 0),
+            IVec2::new(0, 7),
+            IVec2::new(5, 5),
         ];
         let mut goals_reached = 0;
 
         for tick in 0..200 {
             let agents: Vec<AgentState> = (0..5)
                 .map(|i| AgentState {
-                    index: i, pos: positions[i], goal: Some(goals[i]),
+                    index: i,
+                    pos: positions[i],
+                    goal: Some(goals[i]),
                     has_plan: tick > 0,
                     task_leg: crate::core::task::TaskLeg::TravelEmpty(goals[i]),
                 })
                 .collect();
 
             let ctx = crate::solver::lifelong::SolverContext {
-                grid: &grid, zones: &zones, tick, num_agents: 5,
+                grid: &grid,
+                zones: &zones,
+                tick,
+                num_agents: 5,
             };
             if let crate::solver::lifelong::StepResult::Replan(plans) =
                 solver.step(&ctx, &agents, &mut cache, &mut rng)
@@ -599,7 +617,10 @@ mod tests {
                 }
             }
         }
-        assert!(goals_reached > 0, "no agent reached its goal in 200 ticks — PIBT may be deadlocked");
+        assert!(
+            goals_reached > 0,
+            "no agent reached its goal in 200 ticks — PIBT may be deadlocked"
+        );
     }
 
     /// Diagnostic: run PIBT on warehouse_medium and print per-tick task state
@@ -608,12 +629,12 @@ mod tests {
     #[test]
     #[ignore]
     fn pibt_throughput_diagnostic() {
-        use crate::core::runner::SimulationRunner;
-        use crate::core::topology::TopologyRegistry;
-        use crate::core::task::{ActiveScheduler, TaskLeg};
-        use crate::core::queue::ActiveQueuePolicy;
-        use crate::core::seed::SeededRng;
         use crate::analysis::baseline::place_agents;
+        use crate::core::queue::ActiveQueuePolicy;
+        use crate::core::runner::SimulationRunner;
+        use crate::core::seed::SeededRng;
+        use crate::core::task::{ActiveScheduler, TaskLeg};
+        use crate::core::topology::TopologyRegistry;
         use crate::fault::config::FaultConfig;
         use crate::fault::scenario::FaultSchedule;
 
@@ -629,7 +650,11 @@ mod tests {
 
         let solver = crate::solver::lifelong_solver_from_name("pibt", grid_area, num).unwrap();
         let mut runner = SimulationRunner::new(
-            grid, zones, agents, solver, rng_after,
+            grid,
+            zones,
+            agents,
+            solver,
+            rng_after,
             FaultConfig { enabled: false, ..Default::default() },
             FaultSchedule::default(),
         );
@@ -646,7 +671,9 @@ mod tests {
             let mut wait_count = 0u32;
 
             for a in &runner.agents {
-                if !a.alive { continue; }
+                if !a.alive {
+                    continue;
+                }
                 let idx = match &a.task_leg {
                     TaskLeg::Free => 0,
                     TaskLeg::TravelEmpty(_) => 1,
@@ -658,16 +685,27 @@ mod tests {
                     TaskLeg::Charging => 7,
                 };
                 counts[idx] += 1;
-                if a.pos == a.goal { at_goal += 1; }
-                if a.last_action == crate::core::action::Action::Wait { wait_count += 1; }
+                if a.pos == a.goal {
+                    at_goal += 1;
+                }
+                if a.last_action == crate::core::action::Action::Wait {
+                    wait_count += 1;
+                }
             }
 
             if tick <= 10 || tick % 20 == 0 || tick == 200 {
                 eprintln!(
                     "{tick:4} | {fr:4} {te:5} {ld:4} {tq:4} {qu:4} {tl:4} {ul:4} | {ag:6} {wt:5} | {tasks:5}",
-                    fr=counts[0], te=counts[1], ld=counts[2], tq=counts[3],
-                    qu=counts[4], tl=counts[5], ul=counts[6],
-                    ag=at_goal, wt=wait_count, tasks=runner.tasks_completed,
+                    fr = counts[0],
+                    te = counts[1],
+                    ld = counts[2],
+                    tq = counts[3],
+                    qu = counts[4],
+                    tl = counts[5],
+                    ul = counts[6],
+                    ag = at_goal,
+                    wt = wait_count,
+                    tasks = runner.tasks_completed,
                 );
             }
         }

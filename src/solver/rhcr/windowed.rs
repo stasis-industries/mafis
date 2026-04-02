@@ -61,10 +61,7 @@ pub enum WindowResult {
     /// All agents planned successfully.
     Solved(Vec<PlanFragment>),
     /// Some agents planned, others need fallback.
-    Partial {
-        solved: Vec<PlanFragment>,
-        failed: Vec<usize>,
-    },
+    Partial { solved: Vec<PlanFragment>, failed: Vec<usize> },
 }
 
 // ---------------------------------------------------------------------------
@@ -74,11 +71,7 @@ pub enum WindowResult {
 pub trait WindowedPlanner: Send + Sync {
     fn name(&self) -> &'static str;
 
-    fn plan_window(
-        &mut self,
-        ctx: &WindowContext,
-        rng: &mut SeededRng,
-    ) -> WindowResult;
+    fn plan_window(&mut self, ctx: &WindowContext, rng: &mut SeededRng) -> WindowResult;
 
     /// Reset all internal state (for rewind/scenario change).
     /// Default: no-op.
@@ -86,7 +79,9 @@ pub trait WindowedPlanner: Send + Sync {
 
     /// Save internal priority state for deterministic rewind.
     /// Default: no state to save.
-    fn save_priorities(&self) -> Vec<f32> { Vec::new() }
+    fn save_priorities(&self) -> Vec<f32> {
+        Vec::new()
+    }
 
     /// Restore priorities from a snapshot.
     /// Default: no-op.

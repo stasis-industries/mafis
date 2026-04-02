@@ -41,32 +41,24 @@ impl Default for Constraints {
 
 impl Constraints {
     pub fn new() -> Self {
-        Self {
-            vertex: Vec::new(),
-            edge: Vec::new(),
-        }
+        Self { vertex: Vec::new(), edge: Vec::new() }
     }
 
     /// Build O(1)-lookup index for a specific agent.
     fn index_for(&self, agent: usize) -> ConstraintIndex {
-        let mut vertex_set =
-            HashSet::with_capacity(self.vertex.len());
+        let mut vertex_set = HashSet::with_capacity(self.vertex.len());
         for c in &self.vertex {
             if c.agent == agent {
                 vertex_set.insert((c.pos, c.time));
             }
         }
-        let mut edge_set =
-            HashSet::with_capacity(self.edge.len());
+        let mut edge_set = HashSet::with_capacity(self.edge.len());
         for c in &self.edge {
             if c.agent == agent {
                 edge_set.insert((c.from, c.to, c.time));
             }
         }
-        ConstraintIndex {
-            vertex: vertex_set,
-            edge: edge_set,
-        }
+        ConstraintIndex { vertex: vertex_set, edge: edge_set }
     }
 }
 
@@ -100,17 +92,11 @@ impl Default for ConstraintIndex {
 
 impl ConstraintIndex {
     pub fn new() -> Self {
-        Self {
-            vertex: HashSet::new(),
-            edge: HashSet::new(),
-        }
+        Self { vertex: HashSet::new(), edge: HashSet::new() }
     }
 
     pub fn with_capacity(cap: usize) -> Self {
-        Self {
-            vertex: HashSet::with_capacity(cap),
-            edge: HashSet::with_capacity(cap),
-        }
+        Self { vertex: HashSet::with_capacity(cap), edge: HashSet::with_capacity(cap) }
     }
 
     #[inline]
@@ -259,12 +245,7 @@ impl FlatCAT {
     pub fn new(width: i32, height: i32, max_time: u64) -> Self {
         let stride = (max_time + 1) as usize;
         let cells = (width * height) as usize;
-        Self {
-            counts: vec![0; cells * stride],
-            width,
-            stride,
-            cells,
-        }
+        Self { counts: vec![0; cells * stride], width, stride, cells }
     }
 
     pub fn reset(&mut self, width: i32, height: i32, max_time: u64) {
@@ -286,18 +267,24 @@ impl FlatCAT {
         let mut pos = start;
         // Mark start position at t=0
         let idx = self.idx(pos, 0);
-        if idx < self.counts.len() { self.counts[idx] = self.counts[idx].saturating_add(1); }
+        if idx < self.counts.len() {
+            self.counts[idx] = self.counts[idx].saturating_add(1);
+        }
 
         for (t, &action) in actions.iter().enumerate() {
             pos = action.apply(pos);
             let idx = self.idx(pos, (t + 1) as u64);
-            if idx < self.counts.len() { self.counts[idx] = self.counts[idx].saturating_add(1); }
+            if idx < self.counts.len() {
+                self.counts[idx] = self.counts[idx].saturating_add(1);
+            }
         }
         // Hold final position for remaining timesteps
         let final_t = actions.len();
         for t in (final_t + 1)..self.stride {
             let idx = self.idx(pos, t as u64);
-            if idx < self.counts.len() { self.counts[idx] = self.counts[idx].saturating_add(1); }
+            if idx < self.counts.len() {
+                self.counts[idx] = self.counts[idx].saturating_add(1);
+            }
         }
     }
 
@@ -327,10 +314,7 @@ struct CameFromEntry {
 }
 
 impl CameFromEntry {
-    const EMPTY: Self = Self {
-        parent_st_idx: NO_PARENT,
-        action: Action::Wait,
-    };
+    const EMPTY: Self = Self { parent_st_idx: NO_PARENT, action: Action::Wait };
 }
 
 /// Reusable flat-array storage for spacetime A*, replacing HashMap/HashSet.
@@ -504,7 +488,9 @@ struct Node {
 
 impl Ord for Node {
     fn cmp(&self, other: &Self) -> Ordering {
-        other.f.cmp(&self.f)
+        other
+            .f
+            .cmp(&self.f)
             .then_with(|| self.conflicts.cmp(&other.conflicts)) // fewer conflicts = better
             .then_with(|| other.g.cmp(&self.g))
     }
@@ -542,15 +528,11 @@ pub fn spacetime_astar_sequential<C: ConstraintChecker>(
     }
 
     if !grid.is_walkable(start) {
-        return Err(SolverError::InvalidInput(format!(
-            "start {start} is not walkable"
-        )));
+        return Err(SolverError::InvalidInput(format!("start {start} is not walkable")));
     }
     for (i, (g, _)) in goals.iter().enumerate() {
         if !grid.is_walkable(*g) {
-            return Err(SolverError::InvalidInput(format!(
-                "goal[{i}] {g} is not walkable"
-            )));
+            return Err(SolverError::InvalidInput(format!("goal[{i}] {g} is not walkable")));
         }
     }
 
@@ -563,8 +545,7 @@ pub fn spacetime_astar_sequential<C: ConstraintChecker>(
     // remaining_h[i] = dist(goal[i], goal[i+1]) + remaining_h[i+1]
     let mut remaining_h = vec![0u64; n_goals + 1];
     for i in (0..n_goals.saturating_sub(1)).rev() {
-        remaining_h[i] =
-            remaining_h[i + 1] + manhattan(goals[i].0, goals[i + 1].0);
+        remaining_h[i] = remaining_h[i + 1] + manhattan(goals[i].0, goals[i + 1].0);
     }
 
     let heuristic = |pos: IVec2, gid: usize| -> u64 {
@@ -573,11 +554,7 @@ pub fn spacetime_astar_sequential<C: ConstraintChecker>(
         }
         let (goal_pos, dm) = goals[gid];
         let d = dm.get(pos);
-        let base = if d == u64::MAX {
-            manhattan(pos, goal_pos)
-        } else {
-            d
-        };
+        let base = if d == u64::MAX { manhattan(pos, goal_pos) } else { d };
         base + remaining_h[gid]
     };
 
@@ -586,13 +563,7 @@ pub fn spacetime_astar_sequential<C: ConstraintChecker>(
 
     let h = heuristic(start, 0);
     let mut open: BinaryHeap<SeqNode> = BinaryHeap::with_capacity(256);
-    open.push(SeqNode {
-        pos: start,
-        time: 0,
-        goal_id: 0,
-        g: 0,
-        f: h,
-    });
+    open.push(SeqNode { pos: start, time: 0, goal_id: 0, g: 0, f: h });
     let mut expansions: u64 = 0;
 
     while let Some(current) = open.pop() {
@@ -677,10 +648,8 @@ pub fn spacetime_astar_sequential<C: ConstraintChecker>(
             let next_st = stg.st_index(current.pos, current.goal_id, next_time);
             if !stg.closed[next_st] && g < stg.best_g[next_st] {
                 stg.best_g[next_st] = g;
-                stg.came_from[next_st] = CameFromEntry {
-                    parent_st_idx: cur_st,
-                    action: Action::Wait,
-                };
+                stg.came_from[next_st] =
+                    CameFromEntry { parent_st_idx: cur_st, action: Action::Wait };
                 let f = g + heuristic(current.pos, current.goal_id);
                 open.push(SeqNode {
                     pos: current.pos,
@@ -716,18 +685,10 @@ pub fn spacetime_astar_sequential<C: ConstraintChecker>(
             }
 
             stg.best_g[next_st] = g;
-            stg.came_from[next_st] = CameFromEntry {
-                parent_st_idx: cur_st,
-                action: Action::Move(dir),
-            };
+            stg.came_from[next_st] =
+                CameFromEntry { parent_st_idx: cur_st, action: Action::Move(dir) };
             let f = g + heuristic(next_pos, current.goal_id);
-            open.push(SeqNode {
-                pos: next_pos,
-                time: next_time,
-                goal_id: current.goal_id,
-                g,
-                f,
-            });
+            open.push(SeqNode { pos: next_pos, time: next_time, goal_id: current.goal_id, g, f });
         }
     }
 
@@ -831,12 +792,11 @@ pub fn spacetime_astar_fast<C: ConstraintChecker>(
             let next_st = stg.st_index(current.pos, next_time);
             if !stg.closed[next_st] && g < stg.best_g[next_st] {
                 stg.best_g[next_st] = g;
-                stg.came_from[next_st] = CameFromEntry {
-                    parent_st_idx: cur_st,
-                    action: Action::Wait,
-                };
+                stg.came_from[next_st] =
+                    CameFromEntry { parent_st_idx: cur_st, action: Action::Wait };
                 let f = g + heuristic(current.pos);
-                let cat_cost = cat.map(|c| c.conflicts_at(current.pos, next_time) as u32).unwrap_or(0);
+                let cat_cost =
+                    cat.map(|c| c.conflicts_at(current.pos, next_time) as u32).unwrap_or(0);
                 let conflicts = current.conflicts + cat_cost;
                 open.push(Node { pos: current.pos, time: next_time, g, f, conflicts });
             }
@@ -866,10 +826,8 @@ pub fn spacetime_astar_fast<C: ConstraintChecker>(
             }
 
             stg.best_g[next_st] = g;
-            stg.came_from[next_st] = CameFromEntry {
-                parent_st_idx: cur_st,
-                action: Action::Move(dir),
-            };
+            stg.came_from[next_st] =
+                CameFromEntry { parent_st_idx: cur_st, action: Action::Move(dir) };
             let f = g + heuristic(next_pos);
             let cat_cost = cat.map(|c| c.conflicts_at(next_pos, next_time) as u32).unwrap_or(0);
             let conflicts = current.conflicts + cat_cost;
@@ -940,13 +898,7 @@ pub fn spacetime_astar_with_index(
     };
 
     let h = heuristic(start);
-    let start_node = Node {
-        pos: start,
-        time: 0,
-        g: 0,
-        f: h,
-        conflicts: 0,
-    };
+    let start_node = Node { pos: start, time: 0, g: 0, f: h, conflicts: 0 };
 
     let cap = (max_time as usize) * 8;
     let mut open: BinaryHeap<Node> = BinaryHeap::with_capacity(cap.min(256));
@@ -960,12 +912,7 @@ pub fn spacetime_astar_with_index(
 
     while let Some(current) = open.pop() {
         if current.pos == goal {
-            return Ok(reconstruct_path(
-                &came_from,
-                start,
-                current.pos,
-                current.time,
-            ));
+            return Ok(reconstruct_path(&came_from, start, current.pos, current.time));
         }
 
         if current.time >= max_time {
@@ -988,13 +935,7 @@ pub fn spacetime_astar_with_index(
                 best_g.insert(key, g);
                 came_from.insert(key, (current.pos, current.time, Action::Wait));
                 let f = g + heuristic(current.pos);
-                open.push(Node {
-                    pos: current.pos,
-                    time: next_time,
-                    g,
-                    f,
-                    conflicts: 0,
-                });
+                open.push(Node { pos: current.pos, time: next_time, g, f, conflicts: 0 });
             }
         }
 
@@ -1024,13 +965,7 @@ pub fn spacetime_astar_with_index(
             best_g.insert(key, g);
             came_from.insert(key, (current.pos, current.time, Action::Move(dir)));
             let f = g + heuristic(next_pos);
-            open.push(Node {
-                pos: next_pos,
-                time: next_time,
-                g,
-                f,
-                conflicts: 0,
-            });
+            open.push(Node { pos: next_pos, time: next_time, g, f, conflicts: 0 });
         }
     }
 
@@ -1092,10 +1027,10 @@ mod tests {
 
         // Add some edge constraints
         let edges = [
-            (IVec2::new(3, 4), IVec2::new(3, 5), 5u64),  // North
-            (IVec2::new(0, 0), IVec2::new(1, 0), 0),      // East
-            (IVec2::new(5, 5), IVec2::new(5, 5), 10),      // Self/Wait
-            (IVec2::new(7, 3), IVec2::new(6, 3), 15),      // West
+            (IVec2::new(3, 4), IVec2::new(3, 5), 5u64), // North
+            (IVec2::new(0, 0), IVec2::new(1, 0), 0),    // East
+            (IVec2::new(5, 5), IVec2::new(5, 5), 10),   // Self/Wait
+            (IVec2::new(7, 3), IVec2::new(6, 3), 15),   // West
         ];
         for &(from, to, t) in &edges {
             ci.add_edge(from, to, t);
@@ -1168,14 +1103,12 @@ mod tests {
         let dm = DistanceMap::compute(&grid, goal);
 
         let ci = ConstraintIndex::new();
-        let original = spacetime_astar_with_index(
-            &grid, start, goal, &ci, 30, Some(&dm),
-        ).unwrap();
+        let original = spacetime_astar_with_index(&grid, start, goal, &ci, 30, Some(&dm)).unwrap();
 
         let mut stg = SpacetimeGrid::new();
-        let fast = spacetime_astar_fast(
-            &grid, start, goal, &ci, 30, Some(&dm), &mut stg, u64::MAX, None,
-        ).unwrap();
+        let fast =
+            spacetime_astar_fast(&grid, start, goal, &ci, 30, Some(&dm), &mut stg, u64::MAX, None)
+                .unwrap();
 
         // Both should find optimal path of length 18 (Manhattan distance)
         assert_eq!(original.len(), fast.len());
@@ -1197,14 +1130,12 @@ mod tests {
         let mut ci = ConstraintIndex::new();
         ci.add_vertex(IVec2::new(2, 0), 2);
 
-        let original = spacetime_astar_with_index(
-            &grid, start, goal, &ci, 20, None,
-        ).unwrap();
+        let original = spacetime_astar_with_index(&grid, start, goal, &ci, 20, None).unwrap();
 
         let mut stg = SpacetimeGrid::new();
-        let fast = spacetime_astar_fast(
-            &grid, start, goal, &ci, 20, None, &mut stg, u64::MAX, None,
-        ).unwrap();
+        let fast =
+            spacetime_astar_fast(&grid, start, goal, &ci, 20, None, &mut stg, u64::MAX, None)
+                .unwrap();
 
         assert_eq!(original.len(), fast.len());
 
@@ -1227,9 +1158,9 @@ mod tests {
         fci.add_vertex(IVec2::new(2, 0), 2);
 
         let mut stg = SpacetimeGrid::new();
-        let result = spacetime_astar_fast(
-            &grid, start, goal, &fci, 20, None, &mut stg, u64::MAX, None,
-        ).unwrap();
+        let result =
+            spacetime_astar_fast(&grid, start, goal, &fci, 20, None, &mut stg, u64::MAX, None)
+                .unwrap();
 
         let mut pos = start;
         for a in &result {
@@ -1251,7 +1182,15 @@ mod tests {
         let ci = ConstraintIndex::new();
         let mut stg = SpacetimeGrid::new();
         let result = spacetime_astar_fast(
-            &grid, IVec2::ZERO, IVec2::new(4, 0), &ci, 20, None, &mut stg, u64::MAX, None,
+            &grid,
+            IVec2::ZERO,
+            IVec2::new(4, 0),
+            &ci,
+            20,
+            None,
+            &mut stg,
+            u64::MAX,
+            None,
         );
         assert!(result.is_err());
     }
@@ -1264,21 +1203,43 @@ mod tests {
 
         // First call
         let r1 = spacetime_astar_fast(
-            &grid, IVec2::ZERO, IVec2::new(4, 4), &ci, 20, None, &mut stg, u64::MAX, None,
-        ).unwrap();
+            &grid,
+            IVec2::ZERO,
+            IVec2::new(4, 4),
+            &ci,
+            20,
+            None,
+            &mut stg,
+            u64::MAX,
+            None,
+        )
+        .unwrap();
 
         // Second call with same grid (reuses arrays)
         let r2 = spacetime_astar_fast(
-            &grid, IVec2::new(4, 0), IVec2::new(0, 4), &ci, 20, None, &mut stg, u64::MAX, None,
-        ).unwrap();
+            &grid,
+            IVec2::new(4, 0),
+            IVec2::new(0, 4),
+            &ci,
+            20,
+            None,
+            &mut stg,
+            u64::MAX,
+            None,
+        )
+        .unwrap();
 
         // Both should find valid paths
         let mut pos = IVec2::ZERO;
-        for a in &r1 { pos = a.apply(pos); }
+        for a in &r1 {
+            pos = a.apply(pos);
+        }
         assert_eq!(pos, IVec2::new(4, 4));
 
         let mut pos = IVec2::new(4, 0);
-        for a in &r2 { pos = a.apply(pos); }
+        for a in &r2 {
+            pos = a.apply(pos);
+        }
         assert_eq!(pos, IVec2::new(0, 4));
     }
 
@@ -1299,9 +1260,9 @@ mod tests {
 
         let ci = ConstraintIndex::new();
         let mut stg = SeqGoalGrid::new();
-        let path = spacetime_astar_sequential(
-            &grid, IVec2::ZERO, &goals, &ci, 20, &mut stg, u64::MAX,
-        ).unwrap();
+        let path =
+            spacetime_astar_sequential(&grid, IVec2::ZERO, &goals, &ci, 20, &mut stg, u64::MAX)
+                .unwrap();
 
         assert_eq!(path.len(), 8, "expected 8 steps for two sequential goals");
 
@@ -1334,17 +1295,27 @@ mod tests {
 
         let mut stg_fast = SpacetimeGrid::new();
         let fast_path = spacetime_astar_fast(
-            &grid, start, goal, &ci, 30, Some(&dm), &mut stg_fast, u64::MAX, None,
-        ).unwrap();
+            &grid,
+            start,
+            goal,
+            &ci,
+            30,
+            Some(&dm),
+            &mut stg_fast,
+            u64::MAX,
+            None,
+        )
+        .unwrap();
 
         let goals: Vec<(IVec2, &DistanceMap)> = vec![(goal, &dm)];
         let mut stg_seq = SeqGoalGrid::new();
-        let seq_path = spacetime_astar_sequential(
-            &grid, start, &goals, &ci, 30, &mut stg_seq, u64::MAX,
-        ).unwrap();
+        let seq_path =
+            spacetime_astar_sequential(&grid, start, &goals, &ci, 30, &mut stg_seq, u64::MAX)
+                .unwrap();
 
         assert_eq!(
-            fast_path.len(), seq_path.len(),
+            fast_path.len(),
+            seq_path.len(),
             "sequential with 1 goal should match fast A* length"
         );
 
@@ -1367,9 +1338,7 @@ mod tests {
 
         let ci = ConstraintIndex::new();
         let mut stg = SeqGoalGrid::new();
-        let result = spacetime_astar_sequential(
-            &grid, start, &goals, &ci, 5, &mut stg, u64::MAX,
-        );
+        let result = spacetime_astar_sequential(&grid, start, &goals, &ci, 5, &mut stg, u64::MAX);
         assert!(result.is_err(), "should fail when horizon is too short");
     }
 
@@ -1388,9 +1357,8 @@ mod tests {
 
         let ci = ConstraintIndex::new();
         let mut stg = SeqGoalGrid::new();
-        let path = spacetime_astar_sequential(
-            &grid, start, &goals, &ci, 30, &mut stg, u64::MAX,
-        ).unwrap();
+        let path =
+            spacetime_astar_sequential(&grid, start, &goals, &ci, 30, &mut stg, u64::MAX).unwrap();
 
         assert_eq!(path.len(), 15, "expected 15 steps for three sequential goals");
 
@@ -1415,9 +1383,8 @@ mod tests {
         ci.add_vertex(IVec2::new(2, 0), 2);
 
         let mut stg = SeqGoalGrid::new();
-        let path = spacetime_astar_sequential(
-            &grid, start, &goals, &ci, 20, &mut stg, u64::MAX,
-        ).unwrap();
+        let path =
+            spacetime_astar_sequential(&grid, start, &goals, &ci, 20, &mut stg, u64::MAX).unwrap();
 
         // Must be longer than manhattan distance 4 due to detour
         assert!(path.len() > 4, "constraint should force a detour (got {} steps)", path.len());
@@ -1452,9 +1419,8 @@ mod tests {
 
         let mut stg = SeqGoalGrid::new();
         let ci = FlatConstraintIndex::new(5, 5, 4);
-        let result = spacetime_astar_sequential(
-            &grid, IVec2::ZERO, &goals, &ci, 4, &mut stg, u64::MAX,
-        );
+        let result =
+            spacetime_astar_sequential(&grid, IVec2::ZERO, &goals, &ci, 4, &mut stg, u64::MAX);
         let plan = result.expect("should find path at exact horizon");
         assert_eq!(plan.len(), 4);
     }

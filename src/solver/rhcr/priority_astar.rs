@@ -9,10 +9,12 @@ use bevy::prelude::*;
 use crate::core::action::Action;
 use crate::core::seed::SeededRng;
 
-use crate::solver::shared::astar::{FlatCAT, FlatConstraintIndex, SpacetimeGrid, SeqGoalGrid,
-    spacetime_astar_fast, spacetime_astar_sequential};
-use crate::solver::shared::heuristics::DistanceMap;
 use super::windowed::{PlanFragment, WindowContext, WindowResult, WindowedPlanner};
+use crate::solver::shared::astar::{
+    FlatCAT, FlatConstraintIndex, SeqGoalGrid, SpacetimeGrid, spacetime_astar_fast,
+    spacetime_astar_sequential,
+};
+use crate::solver::shared::heuristics::DistanceMap;
 
 pub struct PriorityAStarPlanner {
     ci: FlatConstraintIndex,
@@ -43,11 +45,7 @@ impl WindowedPlanner for PriorityAStarPlanner {
         "priority_astar"
     }
 
-    fn plan_window(
-        &mut self,
-        ctx: &WindowContext,
-        _rng: &mut SeededRng,
-    ) -> WindowResult {
+    fn plan_window(&mut self, ctx: &WindowContext, _rng: &mut SeededRng) -> WindowResult {
         let n = ctx.agents.len();
         if n == 0 {
             return WindowResult::Solved(Vec::new());
@@ -108,10 +106,13 @@ impl WindowedPlanner for PriorityAStarPlanner {
                     Some(&self.cat),
                 )
             } else {
-                let seq_dms: Vec<DistanceMap> = agent.goal_sequence.iter()
+                let seq_dms: Vec<DistanceMap> = agent
+                    .goal_sequence
+                    .iter()
                     .map(|&g| DistanceMap::compute(ctx.grid, g))
                     .collect();
-                let mut goals: Vec<(IVec2, &DistanceMap)> = vec![(agent.goal, ctx.distance_maps[i])];
+                let mut goals: Vec<(IVec2, &DistanceMap)> =
+                    vec![(agent.goal, ctx.distance_maps[i])];
                 for (j, &g) in agent.goal_sequence.iter().enumerate() {
                     goals.push((g, &seq_dms[j]));
                 }
@@ -120,17 +121,30 @@ impl WindowedPlanner for PriorityAStarPlanner {
                 let mut result = Err(crate::solver::shared::traits::SolverError::NoSolution);
                 while goals.len() > 1 {
                     result = spacetime_astar_sequential(
-                        ctx.grid, agent.pos, &goals, &self.ci,
-                        ctx.horizon as u64, &mut self.seq_stg, u64::MAX,
+                        ctx.grid,
+                        agent.pos,
+                        &goals,
+                        &self.ci,
+                        ctx.horizon as u64,
+                        &mut self.seq_stg,
+                        u64::MAX,
                     );
-                    if result.is_ok() { break; }
+                    if result.is_ok() {
+                        break;
+                    }
                     goals.pop();
                 }
                 if result.is_err() {
                     result = spacetime_astar_fast(
-                        ctx.grid, agent.pos, agent.goal, &self.ci,
-                        ctx.horizon as u64, Some(ctx.distance_maps[i]),
-                        &mut self.stg, u64::MAX, Some(&self.cat),
+                        ctx.grid,
+                        agent.pos,
+                        agent.goal,
+                        &self.ci,
+                        ctx.horizon as u64,
+                        Some(ctx.distance_maps[i]),
+                        &mut self.stg,
+                        u64::MAX,
+                        Some(&self.cat),
                     );
                 }
                 result
@@ -192,16 +206,21 @@ fn add_plan_to_flat_index(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use smallvec::SmallVec;
     use crate::core::grid::GridMap;
     use crate::core::seed::SeededRng;
-    use crate::solver::shared::heuristics::DistanceMap;
     use crate::solver::rhcr::windowed::WindowAgent;
+    use crate::solver::shared::heuristics::DistanceMap;
+    use smallvec::SmallVec;
 
     #[test]
     fn priority_astar_single_agent() {
         let grid = GridMap::new(5, 5);
-        let agents = vec![WindowAgent { index: 0, pos: IVec2::ZERO, goal: IVec2::new(4, 4), goal_sequence: SmallVec::new() }];
+        let agents = vec![WindowAgent {
+            index: 0,
+            pos: IVec2::ZERO,
+            goal: IVec2::new(4, 4),
+            goal_sequence: SmallVec::new(),
+        }];
         let dm = DistanceMap::compute(&grid, IVec2::new(4, 4));
         let dist_maps: Vec<&DistanceMap> = vec![&dm];
         let ctx = crate::solver::rhcr::windowed::WindowContext {
@@ -230,8 +249,18 @@ mod tests {
     fn priority_astar_two_parallel_agents() {
         let grid = GridMap::new(5, 5);
         let agents = vec![
-            WindowAgent { index: 0, pos: IVec2::new(0, 0), goal: IVec2::new(4, 0), goal_sequence: SmallVec::new() },
-            WindowAgent { index: 1, pos: IVec2::new(0, 4), goal: IVec2::new(4, 4), goal_sequence: SmallVec::new() },
+            WindowAgent {
+                index: 0,
+                pos: IVec2::new(0, 0),
+                goal: IVec2::new(4, 0),
+                goal_sequence: SmallVec::new(),
+            },
+            WindowAgent {
+                index: 1,
+                pos: IVec2::new(0, 4),
+                goal: IVec2::new(4, 4),
+                goal_sequence: SmallVec::new(),
+            },
         ];
         let dm0 = DistanceMap::compute(&grid, IVec2::new(4, 0));
         let dm1 = DistanceMap::compute(&grid, IVec2::new(4, 4));
