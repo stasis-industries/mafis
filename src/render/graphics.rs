@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use bevy::render::view::Msaa;
 
-use crate::render::animator::{MaterialPalette, TASK_STATES, HEAT_LEVELS};
+use crate::render::animator::{HEAT_LEVELS, MaterialPalette, TASK_STATES};
 use crate::render::orbit_camera::OrbitCameraTag;
 
 // ---------------------------------------------------------------------------
@@ -17,11 +17,7 @@ pub struct GraphicsConfig {
 
 impl Default for GraphicsConfig {
     fn default() -> Self {
-        Self {
-            shadows: false,
-            msaa: true,
-            colorblind: false,
-        }
+        Self { shadows: false, msaa: true, colorblind: false }
     }
 }
 
@@ -58,10 +54,7 @@ const SIMPLE_COLORBLIND_TASK_COLORS: [(f32, f32, f32); TASK_STATES] = [
 // ---------------------------------------------------------------------------
 
 /// Toggle directional light shadows when config changes.
-pub fn apply_shadows(
-    config: Res<GraphicsConfig>,
-    mut lights: Query<&mut DirectionalLight>,
-) {
+pub fn apply_shadows(config: Res<GraphicsConfig>, mut lights: Query<&mut DirectionalLight>) {
     if !config.is_changed() {
         return;
     }
@@ -97,11 +90,8 @@ pub fn apply_visual_palette(
         return;
     }
 
-    let colors = if config.colorblind {
-        &SIMPLE_COLORBLIND_TASK_COLORS
-    } else {
-        &SIMPLE_TASK_COLORS
-    };
+    let colors =
+        if config.colorblind { &SIMPLE_COLORBLIND_TASK_COLORS } else { &SIMPLE_TASK_COLORS };
 
     for (state, &(br, bg, bb)) in colors.iter().enumerate().take(TASK_STATES) {
         for heat in 0..HEAT_LEVELS {
@@ -109,12 +99,8 @@ pub fn apply_visual_palette(
             let glow = t * 3.5;
             if let Some(mat) = materials.get_mut(&palette.task_heat[state][heat]) {
                 mat.base_color = Color::srgb(br, bg, bb);
-                mat.emissive = LinearRgba::new(
-                    glow * br * 1.2,
-                    glow * bg * 0.8,
-                    glow * bb * 0.5,
-                    1.0,
-                );
+                mat.emissive =
+                    LinearRgba::new(glow * br * 1.2, glow * bg * 0.8, glow * bb * 0.5, 1.0);
             }
         }
     }
@@ -150,9 +136,6 @@ pub struct GraphicsPlugin;
 impl Plugin for GraphicsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<GraphicsConfig>()
-            .add_systems(
-                Update,
-                (apply_shadows, apply_msaa, apply_visual_palette),
-            );
+            .add_systems(Update, (apply_shadows, apply_msaa, apply_visual_palette));
     }
 }

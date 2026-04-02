@@ -1,7 +1,7 @@
 use std::path::Path;
 
-use comfy_table::presets::UTF8_FULL_CONDENSED;
 use comfy_table::Table;
+use comfy_table::presets::UTF8_FULL_CONDENSED;
 use owo_colors::OwoColorize;
 
 use crate::shell;
@@ -64,39 +64,23 @@ pub fn list() -> anyhow::Result<()> {
     }
 
     let total: usize = EXPERIMENTS.iter().map(|e| e.runs).sum();
-    table.add_row(vec![
-        "TOTAL".bold().to_string(),
-        total.bold().to_string(),
-        String::new(),
-    ]);
+    table.add_row(vec!["TOTAL".bold().to_string(), total.bold().to_string(), String::new()]);
 
     println!("{table}");
     println!();
-    println!(
-        "  Run with: {}",
-        style::info("experiment run <name>")
-    );
-    println!(
-        "  Smoke test: {}",
-        style::info("experiment smoke")
-    );
-    println!(
-        "  Full suite: {}",
-        style::info("experiment run-all")
-    );
+    println!("  Run with: {}", style::info("experiment run <name>"));
+    println!("  Smoke test: {}", style::info("experiment smoke"));
+    println!("  Full suite: {}", style::info("experiment run-all"));
     Ok(())
 }
 
 pub fn run(root: &Path, name: &str) -> anyhow::Result<()> {
-    let exp = EXPERIMENTS
-        .iter()
-        .find(|e| e.name == name)
-        .ok_or_else(|| {
-            anyhow::anyhow!(
-                "Unknown experiment '{}'. Run 'experiment list' to see available experiments.",
-                name
-            )
-        })?;
+    let exp = EXPERIMENTS.iter().find(|e| e.name == name).ok_or_else(|| {
+        anyhow::anyhow!(
+            "Unknown experiment '{}'. Run 'experiment list' to see available experiments.",
+            name
+        )
+    })?;
 
     println!("{}", style::section(&format!("Experiment: {}", exp.name)));
     println!("  {} runs  {}", exp.runs, style::dim(exp.description));
@@ -132,14 +116,7 @@ pub fn smoke(root: &Path) -> anyhow::Result<()> {
 
     let status = shell::run_streaming(
         "cargo",
-        &[
-            "test",
-            "--test",
-            "paper_experiments",
-            "paper_smoke",
-            "--",
-            "--nocapture",
-        ],
+        &["test", "--test", "paper_experiments", "paper_smoke", "--", "--nocapture"],
         root,
     )?;
 

@@ -7,21 +7,21 @@ pub mod json;
 
 use bevy::prelude::*;
 
+use crate::analysis::AnalysisSet;
 use crate::analysis::cascade::{CascadeState, DelayRecord};
 use crate::analysis::fault_metrics::FaultMetrics;
 use crate::analysis::heatmap::HeatmapState;
 use crate::analysis::metrics::SimMetrics;
-use crate::analysis::AnalysisSet;
 use crate::core::agent::{AgentActionStats, AgentRegistry, LogicalAgent};
 use crate::core::grid::GridMap;
 use crate::core::seed::SeededRng;
 use crate::core::state::{SimState, SimulationConfig};
+use crate::core::task::ActiveScheduler;
+use crate::core::topology::ActiveTopology;
+use crate::fault::FaultSet;
 use crate::fault::breakdown::{Dead, FaultEvent};
 use crate::fault::config::{FaultConfig, FaultType};
 use crate::fault::heat::HeatState;
-use crate::fault::FaultSet;
-use crate::core::task::ActiveScheduler;
-use crate::core::topology::ActiveTopology;
 use crate::solver::ActiveSolver;
 use crate::ui::controls::UiState;
 
@@ -82,10 +82,7 @@ impl Plugin for ExportPlugin {
     }
 }
 
-fn log_fault_events(
-    mut fault_events: MessageReader<FaultEvent>,
-    mut fault_log: ResMut<FaultLog>,
-) {
+fn log_fault_events(mut fault_events: MessageReader<FaultEvent>, mut fault_log: ResMut<FaultLog>) {
     for event in fault_events.read() {
         fault_log.entries.push(FaultLogEntry {
             entity: event.entity,
@@ -219,8 +216,7 @@ fn process_export_requests(
             match csv::to_csv_tables(&snapshot) {
                 Ok(tables) => {
                     for (table_name, content) in &tables {
-                        let filename =
-                            format!("mafis_t{tick}_{trigger_name}_{table_name}.csv");
+                        let filename = format!("mafis_t{tick}_{trigger_name}_{table_name}.csv");
                         if let Err(e) = io::output_file(&filename, content) {
                             error!("Export failed: {e}");
                         }
@@ -232,10 +228,7 @@ fn process_export_requests(
     }
 }
 
-fn cleanup_export_state(
-    mut fault_log: ResMut<FaultLog>,
-    mut export_config: ResMut<ExportConfig>,
-) {
+fn cleanup_export_state(mut fault_log: ResMut<FaultLog>, mut export_config: ResMut<ExportConfig>) {
     fault_log.clear();
     export_config.last_periodic_tick = None;
 }

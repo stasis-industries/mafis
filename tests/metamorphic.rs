@@ -13,10 +13,10 @@ use bevy::math::IVec2;
 
 use mafis::analysis::baseline::place_agents;
 use mafis::core::grid::GridMap;
+use mafis::core::queue::ActiveQueuePolicy;
 use mafis::core::runner::SimulationRunner;
 use mafis::core::seed::SeededRng;
 use mafis::core::task::ActiveScheduler;
-use mafis::core::queue::ActiveQueuePolicy;
 use mafis::core::topology::{ActiveTopology, ZoneMap, assign_random_zones};
 use mafis::experiment::config::ExperimentConfig;
 use mafis::experiment::runner::run_single_experiment;
@@ -26,10 +26,8 @@ use mafis::fault::scenario::FaultSchedule;
 /// All 7 solvers — used for MR3 (collision freedom) and MR4 (determinism),
 /// which only require that the solver runs without panic and produces consistent
 /// results. They do NOT require meaningful throughput.
-const SOLVERS: &[&str] = &[
-    "pibt", "rhcr_pibt", "rhcr_pbs", "rhcr_priority_astar",
-    "token_passing", "rt_lacam", "tpts",
-];
+const SOLVERS: &[&str] =
+    &["pibt", "rhcr_pibt", "rhcr_pbs", "rhcr_priority_astar", "token_passing", "rt_lacam", "tpts"];
 
 /// Solvers expected to produce meaningful throughput on synthetic open grids
 /// (16x16 / 20x20 with random zone assignments). RHCR-PBS is excluded because
@@ -37,10 +35,8 @@ const SOLVERS: &[&str] = &[
 /// for unstructured open-space planning — it falls back to PIBT per-agent but
 /// still produces near-zero task completion in 200 ticks. PBS works correctly
 /// on structured topologies like warehouse_large (verified in verification.rs).
-const LIVENESS_SOLVERS: &[&str] = &[
-    "pibt", "rhcr_pibt", "rhcr_priority_astar",
-    "token_passing", "rt_lacam", "tpts",
-];
+const LIVENESS_SOLVERS: &[&str] =
+    &["pibt", "rhcr_pibt", "rhcr_priority_astar", "token_passing", "rt_lacam", "tpts"];
 
 const TICK_COUNT: u64 = 200;
 
@@ -105,8 +101,7 @@ fn mr1_agent_removal_preserves_liveness() {
         );
         eprintln!(
             "  MR1 {solver:<20} full(10)={:<4} reduced(9)={:<4} OK",
-            r_full.baseline_metrics.total_tasks,
-            r_reduced.baseline_metrics.total_tasks
+            r_full.baseline_metrics.total_tasks, r_reduced.baseline_metrics.total_tasks
         );
     }
 }
@@ -128,7 +123,7 @@ fn mr2_obstacle_addition_preserves_liveness() {
         // Modified: add 10 obstacles in corners (unlikely to block paths)
         let mut obstacles = HashSet::new();
         for i in 0..5 {
-            obstacles.insert(IVec2::new(15, i));     // top-right column
+            obstacles.insert(IVec2::new(15, i)); // top-right column
             obstacles.insert(IVec2::new(0, 15 - i)); // bottom-left column
         }
         let grid_obs = GridMap::with_obstacles(16, 16, obstacles);
@@ -160,8 +155,7 @@ fn mr2_obstacle_addition_preserves_liveness() {
         );
         eprintln!(
             "  MR2 {solver:<20} open={:<4} +obstacles={:<4} OK",
-            r_open.baseline_metrics.total_tasks,
-            r_obs.baseline_metrics.total_tasks
+            r_open.baseline_metrics.total_tasks, r_obs.baseline_metrics.total_tasks
         );
     }
 }
@@ -182,14 +176,17 @@ fn mr3_collision_free_across_seeds() {
             let mut rng = SeededRng::new(seed);
             let agents = place_agents(15, &grid, &zones, &mut rng);
 
-            let solver_box =
-                mafis::solver::lifelong_solver_from_name(solver, grid_area, 15)
-                    .expect("solver creation failed");
+            let solver_box = mafis::solver::lifelong_solver_from_name(solver, grid_area, 15)
+                .expect("solver creation failed");
             let scheduler = ActiveScheduler::from_name("random");
             let queue_policy = ActiveQueuePolicy::from_name("closest");
 
             let mut runner = SimulationRunner::new(
-                grid.clone(), zones.clone(), agents, solver_box, rng,
+                grid.clone(),
+                zones.clone(),
+                agents,
+                solver_box,
+                rng,
                 FaultConfig { enabled: false, ..Default::default() },
                 FaultSchedule::default(),
             );
@@ -199,21 +196,24 @@ fn mr3_collision_free_across_seeds() {
             for tick in 0..200 {
                 runner.tick(scheduler.scheduler(), queue_policy.policy());
 
-                let alive: Vec<IVec2> = runner.agents.iter()
-                    .filter(|a| a.alive)
-                    .map(|a| a.pos)
-                    .collect();
+                let alive: Vec<IVec2> =
+                    runner.agents.iter().filter(|a| a.alive).map(|a| a.pos).collect();
                 let unique: HashSet<IVec2> = alive.iter().copied().collect();
                 assert_eq!(
-                    unique.len(), alive.len(),
+                    unique.len(),
+                    alive.len(),
                     "MR3: {solver} seed={seed} tick={tick}: vertex collision"
                 );
 
                 // Edge swap check
                 for i in 0..runner.agents.len() {
-                    if !runner.agents[i].alive { continue; }
-                    for j in (i+1)..runner.agents.len() {
-                        if !runner.agents[j].alive { continue; }
+                    if !runner.agents[i].alive {
+                        continue;
+                    }
+                    for j in (i + 1)..runner.agents.len() {
+                        if !runner.agents[j].alive {
+                            continue;
+                        }
                         if runner.agents[i].pos == prev[j]
                             && runner.agents[j].pos == prev[i]
                             && runner.agents[i].pos != runner.agents[j].pos
@@ -244,20 +244,15 @@ fn mr4_determinism_on_custom_map() {
         let r2 = run_custom(solver, grid.clone(), zones.clone(), 12, 42);
 
         assert_eq!(
-            r1.baseline_metrics.total_tasks,
-            r2.baseline_metrics.total_tasks,
+            r1.baseline_metrics.total_tasks, r2.baseline_metrics.total_tasks,
             "MR4: {solver} not deterministic: tasks {} vs {}",
-            r1.baseline_metrics.total_tasks,
-            r2.baseline_metrics.total_tasks
+            r1.baseline_metrics.total_tasks, r2.baseline_metrics.total_tasks
         );
         assert!(
             (r1.baseline_metrics.avg_throughput - r2.baseline_metrics.avg_throughput).abs() < 1e-15,
             "MR4: {solver} throughput diverged"
         );
-        eprintln!(
-            "  MR4 {solver:<20} deterministic (tasks={})",
-            r1.baseline_metrics.total_tasks
-        );
+        eprintln!("  MR4 {solver:<20} deterministic (tasks={})", r1.baseline_metrics.total_tasks);
     }
 }
 
@@ -307,8 +302,7 @@ fn mr5_more_ticks_more_tasks() {
         );
         eprintln!(
             "  MR5 {solver:<20} 100t={:<4} 200t={:<4} OK",
-            result_short.baseline_metrics.total_tasks,
-            result_long.baseline_metrics.total_tasks
+            result_short.baseline_metrics.total_tasks, result_long.baseline_metrics.total_tasks
         );
     }
 }
@@ -337,10 +331,8 @@ fn mr6_agent_scale_monotonicity_throughput() {
     // RT-LaCAM excluded: budget-bounded config-space search produces only
     // 3-5 tasks on a 20x20 open grid at these scales — too low for a meaningful
     // monotonicity comparison. Verified separately in calibration and verification.
-    let mr6_solvers: Vec<&str> = LIVENESS_SOLVERS.iter()
-        .filter(|&&s| s != "rt_lacam")
-        .copied()
-        .collect();
+    let mr6_solvers: Vec<&str> =
+        LIVENESS_SOLVERS.iter().filter(|&&s| s != "rt_lacam").copied().collect();
 
     for solver in mr6_solvers {
         let r5 = run_custom(solver, grid.clone(), zones.clone(), 5, 42);
@@ -362,9 +354,6 @@ fn mr6_agent_scale_monotonicity_throughput() {
             "MR6 failed for {solver}: 10 agents on 20x20 grid produced zero throughput"
         );
 
-        eprintln!(
-            "  MR6 {solver:<20} 5-agents={:<4} 10-agents={:<4} OK",
-            tasks5, tasks10
-        );
+        eprintln!("  MR6 {solver:<20} 5-agents={:<4} 10-agents={:<4} OK", tasks5, tasks10);
     }
 }

@@ -30,8 +30,8 @@ pub fn find_project_root() -> Option<PathBuf> {
 fn spinner_style() -> ProgressStyle {
     ProgressStyle::default_spinner()
         .tick_strings(&[
-            "\u{28fe}", "\u{28fd}", "\u{28fb}", "\u{28bf}",
-            "\u{287f}", "\u{289f}", "\u{28af}", "\u{28b7}",
+            "\u{28fe}", "\u{28fd}", "\u{28fb}", "\u{28bf}", "\u{287f}", "\u{289f}", "\u{28af}",
+            "\u{28b7}",
         ])
         .template("{spinner:.yellow} {msg}  {elapsed:.dim}")
         .unwrap()
@@ -60,10 +60,7 @@ pub fn run_with_spinner(
     spinner.enable_steady_tick(std::time::Duration::from_millis(80));
 
     let start = Instant::now();
-    let output = Command::new(program)
-        .args(args)
-        .current_dir(cwd)
-        .output()?;
+    let output = Command::new(program).args(args).current_dir(cwd).output()?;
 
     let elapsed = start.elapsed();
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
@@ -99,8 +96,7 @@ pub fn run_with_step(
 ) -> io::Result<(ExitStatus, String, String)> {
     let label = format!(
         "{} {}",
-        format!("[{step}/{total}]")
-            .truecolor(style::DIM.0, style::DIM.1, style::DIM.2),
+        format!("[{step}/{total}]").truecolor(style::DIM.0, style::DIM.1, style::DIM.2),
         message,
     );
     run_with_spinner(&label, program, args, cwd)
@@ -108,10 +104,7 @@ pub fn run_with_step(
 
 /// Run a command and return its stdout, or an error.
 pub fn run_capture(program: &str, args: &[&str], cwd: &Path) -> io::Result<String> {
-    let output = Command::new(program)
-        .args(args)
-        .current_dir(cwd)
-        .output()?;
+    let output = Command::new(program).args(args).current_dir(cwd).output()?;
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 

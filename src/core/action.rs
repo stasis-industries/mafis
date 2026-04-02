@@ -10,12 +10,8 @@ pub enum Direction {
 }
 
 impl Direction {
-    pub const ALL: [Direction; 4] = [
-        Direction::North,
-        Direction::South,
-        Direction::East,
-        Direction::West,
-    ];
+    pub const ALL: [Direction; 4] =
+        [Direction::North, Direction::South, Direction::East, Direction::West];
 
     pub fn offset(self) -> IVec2 {
         match self {

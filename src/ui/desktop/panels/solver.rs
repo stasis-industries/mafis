@@ -1,10 +1,10 @@
 use bevy::prelude::*;
 
+use super::super::theme;
 use crate::constants;
 use crate::core::state::SimState;
 use crate::solver::SOLVER_NAMES;
 use crate::ui::controls::UiState;
-use super::super::theme;
 
 struct SolverInfo {
     optimality: &'static str,
@@ -75,11 +75,7 @@ fn solver_info(id: &str) -> SolverInfo {
     }
 }
 
-pub fn solver_panel(
-    ui: &mut egui::Ui,
-    ui_state: &mut UiState,
-    sim_state: SimState,
-) {
+pub fn solver_panel(ui: &mut egui::Ui, ui_state: &mut UiState, sim_state: SimState) {
     let idle = sim_state == SimState::Idle;
 
     // ── Solver dropdown ────────────────────────────────────────────
@@ -91,9 +87,9 @@ pub fn solver_panel(
             .map(|(_, label)| *label)
             .unwrap_or("Unknown");
 
-        egui::ComboBox::from_id_salt("solver_combo")
-            .selected_text(current_label)
-            .show_ui(ui, |ui| {
+        egui::ComboBox::from_id_salt("solver_combo").selected_text(current_label).show_ui(
+            ui,
+            |ui| {
                 for &(id, label) in SOLVER_NAMES {
                     let selected = ui_state.solver_name == id;
                     if ui.selectable_label(selected, label).clicked() && !selected && idle {
@@ -104,7 +100,8 @@ pub fn solver_panel(
                         ui_state.rhcr_fallback = None;
                     }
                 }
-            });
+            },
+        );
     });
 
     // ── Solver info card ───────────────────────────────────────────
@@ -177,28 +174,18 @@ pub fn solver_panel(
             // Fallback mode
             ui.horizontal(|ui| {
                 ui.label("Fallback");
-                let current = ui_state
-                    .rhcr_fallback
-                    .as_deref()
-                    .unwrap_or("auto")
-                    .to_owned();
-                egui::ComboBox::from_id_salt("rhcr_fallback")
-                    .selected_text(&current)
-                    .show_ui(ui, |ui| {
+                let current = ui_state.rhcr_fallback.as_deref().unwrap_or("auto").to_owned();
+                egui::ComboBox::from_id_salt("rhcr_fallback").selected_text(&current).show_ui(
+                    ui,
+                    |ui| {
                         for mode in &["auto", "per_agent", "full", "tiered"] {
-                            if ui
-                                .selectable_label(current == *mode, *mode)
-                                .clicked()
-                                && idle
-                            {
-                                ui_state.rhcr_fallback = if *mode == "auto" {
-                                    None
-                                } else {
-                                    Some(mode.to_string())
-                                };
+                            if ui.selectable_label(current == *mode, *mode).clicked() && idle {
+                                ui_state.rhcr_fallback =
+                                    if *mode == "auto" { None } else { Some(mode.to_string()) };
                             }
                         }
-                    });
+                    },
+                );
             });
 
             ui.weak("Auto-tuned for current grid and agent count.");

@@ -1,11 +1,11 @@
-use bevy::prelude::*;
 use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
+use bevy::prelude::*;
 use bevy_egui::EguiContexts;
 use egui::Color32;
 
+use crate::core::grid::GridMap;
 use crate::core::state::SimState;
 use crate::render::orbit_camera::{self, CameraMode, OrbitCamera};
-use crate::core::grid::GridMap;
 
 use super::state::DesktopUiState;
 use super::theme;

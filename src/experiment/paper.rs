@@ -15,27 +15,17 @@ use super::config::ExperimentMatrix;
 
 /// Number of seeds per config — 30 gives usable 95% CI.
 const SEEDS: &[u64] = &[
-    42, 123, 456, 789, 1024,
-    2048, 3141, 9999, 1337, 7777,
-    11, 22, 33, 44, 55,
-    101, 202, 303, 404, 505,
-    1111, 2222, 3333, 4444, 5555,
-    10000, 20000, 30000, 40000, 50000,
+    42, 123, 456, 789, 1024, 2048, 3141, 9999, 1337, 7777, 11, 22, 33, 44, 55, 101, 202, 303, 404,
+    505, 1111, 2222, 3333, 4444, 5555, 10000, 20000, 30000, 40000, 50000,
 ];
 
 /// Extended seeds — 50 for tighter CIs on the Braess experiment.
 const SEEDS_50: &[u64] = &[
-    42, 123, 456, 789, 1024,
-    2048, 3141, 9999, 1337, 7777,
-    11, 22, 33, 44, 55,
-    101, 202, 303, 404, 505,
-    1111, 2222, 3333, 4444, 5555,
-    10000, 20000, 30000, 40000, 50000,
+    42, 123, 456, 789, 1024, 2048, 3141, 9999, 1337, 7777, 11, 22, 33, 44, 55, 101, 202, 303, 404,
+    505, 1111, 2222, 3333, 4444, 5555, 10000, 20000, 30000, 40000, 50000,
     // 20 additional seeds for tighter confidence intervals
-    60000, 70000, 80000, 90000, 100000,
-    111, 222, 333, 444, 555,
-    666, 777, 888, 999, 1010,
-    2020, 3030, 4040, 5050, 6060,
+    60000, 70000, 80000, 90000, 100000, 111, 222, 333, 444, 555, 666, 777, 888, 999, 1010, 2020,
+    3030, 4040, 5050, 6060,
 ];
 
 /// Standard simulation length — 500 ticks gives ~100 tasks at steady state.
@@ -354,6 +344,91 @@ pub fn all_paper_experiments() -> Vec<(&'static str, ExperimentMatrix)> {
 }
 
 // ---------------------------------------------------------------------------
+// PAAMS 2026 — Demo Track + AREA Workshop
+// ---------------------------------------------------------------------------
+
+/// All 7 solvers used in PAAMS experiments.
+fn paams_solvers() -> Vec<String> {
+    vec![
+        "pibt".into(),
+        "rhcr_pibt".into(),
+        "rhcr_pbs".into(),
+        "rhcr_priority_astar".into(),
+        "token_passing".into(),
+        "rt_lacam".into(),
+        "tpts".into(),
+    ]
+}
+
+/// PAAMS experiments: Solver × Fault × Scale × Topology + Scheduler effect.
+///
+/// Design: per-topology matrices (agent counts vary per map capacity).
+/// Three density levels per topology: low / default / high.
+///
+/// E1: 7 solvers × 7 scenarios × 3 agent counts × 3 topologies × 30 seeds = 13,230 runs
+/// E2: 7 solvers × 7 scenarios × 2 schedulers × 1 topology × 30 seeds = 2,940 runs
+/// Total: ~16,170 runs (~3-5 hours on 8 cores)
+pub fn paams_experiments() -> Vec<(&'static str, ExperimentMatrix)> {
+    let solvers = paams_solvers();
+    let scenarios = paper_scenarios();
+
+    vec![
+        // E1a: warehouse_large (57×33) — 20/40/60 agents
+        (
+            "paams_warehouse_large",
+            ExperimentMatrix {
+                solvers: solvers.clone(),
+                topologies: vec!["warehouse_large".into()],
+                scenarios: scenarios.clone(),
+                schedulers: vec!["closest".into()],
+                agent_counts: vec![20, 40, 60],
+                seeds: SEEDS.to_vec(),
+                tick_count: TICK_COUNT,
+            },
+        ),
+        // E1b: kiva_warehouse (48×48) — 40/80/120 agents
+        (
+            "paams_kiva_warehouse",
+            ExperimentMatrix {
+                solvers: solvers.clone(),
+                topologies: vec!["kiva_warehouse".into()],
+                scenarios: scenarios.clone(),
+                schedulers: vec!["closest".into()],
+                agent_counts: vec![40, 80, 120],
+                seeds: SEEDS.to_vec(),
+                tick_count: TICK_COUNT,
+            },
+        ),
+        // E1c: compact_grid (26×26) — 12/25/40 agents
+        (
+            "paams_compact_grid",
+            ExperimentMatrix {
+                solvers: solvers.clone(),
+                topologies: vec!["compact_grid".into()],
+                scenarios: scenarios.clone(),
+                schedulers: vec!["closest".into()],
+                agent_counts: vec![12, 25, 40],
+                seeds: SEEDS.to_vec(),
+                tick_count: TICK_COUNT,
+            },
+        ),
+        // E2: Scheduler effect (warehouse_large, 40 agents)
+        (
+            "paams_scheduler_effect",
+            ExperimentMatrix {
+                solvers,
+                topologies: vec!["warehouse_large".into()],
+                scenarios,
+                schedulers: vec!["random".into(), "closest".into()],
+                agent_counts: vec![40],
+                seeds: SEEDS.to_vec(),
+                tick_count: TICK_COUNT,
+            },
+        ),
+    ]
+}
+
+// ---------------------------------------------------------------------------
 // Quick smoke test matrix (for CI / development)
 // ---------------------------------------------------------------------------
 
@@ -434,6 +509,15 @@ mod tests {
     }
 
     #[test]
+    fn paams_experiment_counts() {
+        let experiments = paams_experiments();
+        let total: usize = experiments.iter().map(|(_, m)| m.total_runs()).sum();
+        // E1: 7 solvers × 7 scenarios × 3 counts × 30 seeds × 3 topos = 13,230
+        // E2: 7 solvers × 7 scenarios × 2 schedulers × 30 seeds = 2,940
+        assert_eq!(total, 16170);
+    }
+
+    #[test]
     fn braess_resilience_count() {
         let m = braess_resilience();
         assert_eq!(m.total_runs(), 9800); // 7 x 4 x 7 x 50
@@ -473,11 +557,8 @@ mod tests {
 
         let total = matrix.total_runs();
         eprintln!("Running {} runs...", total);
-        let progress = Arc::new(Mutex::new(ExperimentProgress {
-            current: 0,
-            total,
-            label: String::new(),
-        }));
+        let progress =
+            Arc::new(Mutex::new(ExperimentProgress { current: 0, total, label: String::new() }));
         let result = run_matrix(&matrix, Some(&progress));
         eprintln!("Done in {}ms", result.wall_time_total_ms);
 
@@ -524,9 +605,8 @@ mod tests {
 
         use crate::experiment::runner::ExperimentProgress;
         use std::sync::{Arc, Mutex};
-        let progress = Arc::new(Mutex::new(ExperimentProgress {
-            current: 0, total, label: String::new(),
-        }));
+        let progress =
+            Arc::new(Mutex::new(ExperimentProgress { current: 0, total, label: String::new() }));
         let result = run_matrix(&matrix, Some(&progress));
         eprintln!("Done in {}ms", result.wall_time_total_ms);
 
@@ -546,7 +626,7 @@ mod tests {
     #[ignore]
     fn run_new_solver_resilience() {
         use crate::experiment::export::{write_runs_csv, write_summary_csv};
-        use crate::experiment::runner::{run_matrix, ExperimentProgress};
+        use crate::experiment::runner::{ExperimentProgress, run_matrix};
         use std::fs;
         use std::sync::{Arc, Mutex};
 
@@ -557,7 +637,7 @@ mod tests {
                 "token_passing".into(),
                 "rt_lacam".into(),
                 "tpts".into(),
-                ],
+            ],
             topologies: vec!["warehouse_large".into()],
             scenarios: vec![None, Some(burst_20()), Some(burst_50())],
             schedulers: vec!["closest".into()],
@@ -568,9 +648,8 @@ mod tests {
 
         let total = matrix.total_runs();
         eprintln!("New solver resilience: {} runs...", total);
-        let progress = Arc::new(Mutex::new(ExperimentProgress {
-            current: 0, total, label: String::new(),
-        }));
+        let progress =
+            Arc::new(Mutex::new(ExperimentProgress { current: 0, total, label: String::new() }));
         let result = run_matrix(&matrix, Some(&progress));
         eprintln!("Done in {}ms", result.wall_time_total_ms);
 
@@ -590,7 +669,10 @@ mod tests {
 
         // Print summary table
         eprintln!("\n=== Solver Resilience Results ===");
-        eprintln!("{:<15} {:<14} {:>6} {:>7} {:>7} {:>4}", "Solver", "Scenario", "FT", "TP", "Tasks", "n");
+        eprintln!(
+            "{:<15} {:<14} {:>6} {:>7} {:>7} {:>4}",
+            "Solver", "Scenario", "FT", "TP", "Tasks", "n"
+        );
         eprintln!("{}", "-".repeat(58));
         for s in &result.summaries {
             let ft_str = if s.fault_tolerance.mean.is_nan() {
@@ -600,8 +682,11 @@ mod tests {
             };
             eprintln!(
                 "  {:<15} {:<14} {:>5} {:>7.3} {:>5.0}   {:>2}",
-                s.solver_name, s.scenario_label,
-                ft_str, s.throughput.mean, s.total_tasks.mean,
+                s.solver_name,
+                s.scenario_label,
+                ft_str,
+                s.throughput.mean,
+                s.total_tasks.mean,
                 s.fault_tolerance.n
             );
         }
@@ -621,7 +706,7 @@ mod tests {
     #[ignore]
     fn run_solver_benchmark() {
         use crate::experiment::export::write_runs_csv;
-        use crate::experiment::runner::{run_matrix, ExperimentProgress};
+        use crate::experiment::runner::{ExperimentProgress, run_matrix};
         use std::collections::HashMap;
         use std::fs;
         use std::sync::{Arc, Mutex};
@@ -636,7 +721,7 @@ mod tests {
                 "token_passing".into(),
                 "rt_lacam".into(),
                 "tpts".into(),
-                ],
+            ],
             topologies: vec!["warehouse_large".into()],
             scenarios: vec![None],
             schedulers: vec!["random".into()],
@@ -647,9 +732,8 @@ mod tests {
 
         let total = matrix.total_runs();
         eprintln!("Solver benchmark: {} runs...", total);
-        let progress = Arc::new(Mutex::new(ExperimentProgress {
-            current: 0, total, label: String::new(),
-        }));
+        let progress =
+            Arc::new(Mutex::new(ExperimentProgress { current: 0, total, label: String::new() }));
         let result = run_matrix(&matrix, Some(&progress));
         eprintln!("Done in {}ms", result.wall_time_total_ms);
 

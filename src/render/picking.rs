@@ -80,9 +80,10 @@ fn detect_viewport_click(
 
     // Record press position
     if mouse_buttons.just_pressed(MouseButton::Left)
-        && let Ok(window) = windows.single() {
-            *press_pos = window.cursor_position();
-        }
+        && let Ok(window) = windows.single()
+    {
+        *press_pos = window.cursor_position();
+    }
 
     // Check release
     if mouse_buttons.just_released(MouseButton::Left) {
@@ -248,10 +249,8 @@ impl Plugin for PickingPlugin {
             .add_systems(
                 Update,
                 (
-                    detect_viewport_click
-                        .after(super::orbit_camera::orbit_mouse_input),
-                    update_hover_highlight
-                        .after(super::orbit_camera::orbit_mouse_input),
+                    detect_viewport_click.after(super::orbit_camera::orbit_mouse_input),
+                    update_hover_highlight.after(super::orbit_camera::orbit_mouse_input),
                 ),
             );
     }

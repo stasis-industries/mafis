@@ -24,7 +24,7 @@ All 7 solvers pass: collision-free verification (500 ticks), deterministic repla
 
 ## PIBT (Okumura et al., AAAI 2019)
 
-**Files:** `src/solver/pibt.rs`, `src/solver/pibt_core.rs`
+**Files:** `src/solver/pibt/solver.rs`, `src/solver/shared/pibt_core.rs`
 
 | Requirement | Status |
 |-------------|--------|
@@ -47,7 +47,7 @@ All 7 solvers pass: collision-free verification (500 ticks), deterministic repla
 
 ## RHCR (Li et al., AAAI 2021)
 
-**Files:** `src/solver/rhcr.rs`, `src/solver/pbs_planner.rs`, `src/solver/pibt_window_planner.rs`, `src/solver/priority_astar_planner.rs`
+**Files:** `src/solver/rhcr/solver.rs`, `src/solver/rhcr/pbs_planner.rs`, `src/solver/rhcr/pibt_planner.rs`, `src/solver/rhcr/priority_astar.rs`
 
 | Requirement | Status |
 |-------------|--------|
@@ -61,8 +61,8 @@ All 7 solvers pass: collision-free verification (500 ticks), deterministic repla
 
 **Three planner modes:**
 1. **PBS** (`pbs_planner.rs`, 10 tests): Priority-Based Search with node limit. Faithful to Li et al. Section 4.
-2. **PIBT-Window** (`pibt_window_planner.rs`, 1 test): Unrolls PIBT for H steps. Uses shared PibtCore.
-3. **Priority A*** (`priority_astar_planner.rs`, 2 tests): Sequential spacetime A* with priority ordering.
+2. **PIBT-Window** (`rhcr/pibt_planner.rs`, 1 test): Unrolls PIBT for H steps. Uses shared PibtCore.
+3. **Priority A*** (`rhcr/priority_astar.rs`, 2 tests): Sequential spacetime A* with priority ordering.
 
 **Extensions beyond paper:**
 - Three fallback modes when windowed planner fails (paper uses single PIBT fallback)
@@ -73,7 +73,7 @@ All 7 solvers pass: collision-free verification (500 ticks), deterministic repla
 
 ## Token Passing (Ma et al., AAMAS 2017)
 
-**Files:** `src/solver/token_passing.rs`, `src/solver/token_common.rs`
+**Files:** `src/solver/token/token_passing.rs`, `src/solver/token/common.rs`
 
 | Requirement | Status |
 |-------------|--------|
@@ -94,7 +94,7 @@ All 7 solvers pass: collision-free verification (500 ticks), deterministic repla
 
 ## TPTS (Ma et al., AAMAS 2017, Algorithm 2)
 
-**Files:** `src/solver/tpts.rs`, `src/solver/token_common.rs`
+**Files:** `src/solver/token/tpts.rs`, `src/solver/token/common.rs`
 
 | Requirement | Status |
 |-------------|--------|
@@ -115,7 +115,7 @@ cost estimate, suppressing beneficial swaps.
 
 ## RT-LaCAM (Liang et al., arXiv:2504.06091, SoCS 2025)
 
-**Files:** `src/solver/rt_lacam.rs`
+**Files:** `src/solver/rt_lacam/solver.rs`
 
 | Requirement | Status |
 |-------------|--------|

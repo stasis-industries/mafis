@@ -6,17 +6,15 @@
 //!
 //! Run: cargo test --release --test benchmarks -- --nocapture
 
-use mafis::core::topology::{parse_movingai_map, assign_random_zones};
+use mafis::core::topology::{assign_random_zones, parse_movingai_map};
 use mafis::experiment::config::ExperimentConfig;
 use mafis::experiment::runner::run_single_experiment;
 
 const TICK_COUNT: u64 = 300;
 const NUM_AGENTS: usize = 15;
 
-const SOLVERS: &[&str] = &[
-    "pibt", "rhcr_pibt", "rhcr_pbs", "rhcr_priority_astar",
-    "token_passing", "rt_lacam", "tpts",
-];
+const SOLVERS: &[&str] =
+    &["pibt", "rhcr_pibt", "rhcr_pbs", "rhcr_priority_astar", "token_passing", "rt_lacam", "tpts"];
 
 // ═══════════════════════════════════════════════════════════════════════
 // Inline MovingAI-format maps
@@ -131,8 +129,7 @@ fn run_on_map(
     agents: usize,
     seed: u64,
 ) -> mafis::experiment::runner::RunResult {
-    let (grid, mut zones) = parse_movingai_map(map_text)
-        .expect("failed to parse inline map");
+    let (grid, mut zones) = parse_movingai_map(map_text).expect("failed to parse inline map");
     assign_random_zones(&mut zones, 6, 6);
 
     let config = ExperimentConfig {
@@ -212,13 +209,14 @@ fn all_solvers_on_movingai_maps() {
 #[test]
 fn all_solvers_viable_on_warehouse() {
     for &solver in SOLVERS {
-        if solver == "rhcr_pbs" { continue; } // known PBS node limit
+        if solver == "rhcr_pbs" {
+            continue;
+        } // known PBS node limit
 
         let result = run_on_map(solver, WAREHOUSE_20X20, 10, 42);
         eprintln!(
             "  {solver:<25} warehouse tasks={:<4} tp={:.3}",
-            result.baseline_metrics.total_tasks,
-            result.baseline_metrics.avg_throughput
+            result.baseline_metrics.total_tasks, result.baseline_metrics.avg_throughput
         );
         assert!(
             result.baseline_metrics.total_tasks > 0,

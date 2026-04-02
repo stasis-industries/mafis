@@ -3,7 +3,7 @@ use std::collections::HashMap;
 
 use super::action::Direction;
 use super::grid::GridMap;
-use super::queue::{build_queue_lines, QueueLine};
+use super::queue::{QueueLine, build_queue_lines};
 
 // ---------------------------------------------------------------------------
 // ZoneType + ZoneMap
@@ -11,17 +11,16 @@ use super::queue::{build_queue_lines, QueueLine};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ZoneType {
-    Storage,     // obstacle (shelf) — not walkable
-    Pickup,      // walkable, adjacent to storage row
-    Delivery,    // delivery zone
-    Corridor,    // main horizontal aisle
-    CrossAisle,  // vertical aisle cutting through storage rows
-    Open,        // generic walkable (open floor topology)
-    Recharging,  // recharging station — walkable
+    Storage,    // obstacle (shelf) — not walkable
+    Pickup,     // walkable, adjacent to storage row
+    Delivery,   // delivery zone
+    Corridor,   // main horizontal aisle
+    CrossAisle, // vertical aisle cutting through storage rows
+    Open,       // generic walkable (open floor topology)
+    Recharging, // recharging station — walkable
 }
 
-#[derive(Resource, Debug, Clone)]
-#[derive(Default)]
+#[derive(Resource, Debug, Clone, Default)]
 pub struct ZoneMap {
     pub pickup_cells: Vec<IVec2>,
     pub delivery_cells: Vec<IVec2>,
@@ -32,7 +31,6 @@ pub struct ZoneMap {
     /// `queue_direction` gets a queue line extending in that direction.
     pub queue_lines: Vec<QueueLine>,
 }
-
 
 // ---------------------------------------------------------------------------
 // Topology trait
@@ -92,10 +90,7 @@ impl ActiveTopology {
     pub fn from_entry(entry: &TopologyEntry) -> Option<Self> {
         let (grid, zones) = TopologyRegistry::parse_entry(entry)?;
         let name = entry.id.clone();
-        Some(Self {
-            topology: Box::new(CustomMap { grid, zones }),
-            name,
-        })
+        Some(Self { topology: Box::new(CustomMap { grid, zones }), name })
     }
 
     /// Look up a topology by name from a pre-loaded registry.
@@ -169,10 +164,7 @@ impl Default for ActiveTopology {
         // WASM or empty registry: create a minimal 10×10 open grid
         let grid = GridMap::new(10, 10);
         let zones = ZoneMap::default();
-        Self {
-            topology: Box::new(CustomMap { grid, zones }),
-            name: "empty".to_string(),
-        }
+        Self { topology: Box::new(CustomMap { grid, zones }), name: "empty".to_string() }
     }
 }
 
@@ -241,7 +233,10 @@ impl TopologyRegistry {
             let walkable = if let Some(wc) = v.get("walkable_cells").and_then(|v| v.as_u64()) {
                 wc as usize
             } else if let Some(cells) = v.get("cells").and_then(|c| c.as_array()) {
-                let walls = cells.iter().filter(|c| c.get("type").and_then(|t| t.as_str()) == Some("wall")).count();
+                let walls = cells
+                    .iter()
+                    .filter(|c| c.get("type").and_then(|t| t.as_str()) == Some("wall"))
+                    .count();
                 (width * height) as usize - walls
             } else {
                 (width * height) as usize
@@ -249,7 +244,8 @@ impl TopologyRegistry {
 
             // Agent count: number_agents > suggested_agents (legacy) > robots array > 0
             let robots = v.get("robots").and_then(|r| r.as_array()).map(|a| a.len()).unwrap_or(0);
-            let num_agents = v.get("number_agents")
+            let num_agents = v
+                .get("number_agents")
                 .or_else(|| v.get("suggested_agents"))
                 .and_then(|v| v.as_u64())
                 .map(|n| n as usize)
@@ -293,7 +289,9 @@ impl TopologyRegistry {
                 let pos = IVec2::new(x, y);
 
                 match cell_type {
-                    "wall" => { obstacles.insert(pos); }
+                    "wall" => {
+                        obstacles.insert(pos);
+                    }
                     "pickup" => {
                         zones.pickup_cells.push(pos);
                         zones.zone_type.insert(pos, ZoneType::Pickup);
@@ -302,7 +300,8 @@ impl TopologyRegistry {
                         zones.delivery_cells.push(pos);
                         zones.zone_type.insert(pos, ZoneType::Delivery);
                         // Parse queue_direction if present
-                        if let Some(dir_str) = cell.get("queue_direction").and_then(|d| d.as_str()) {
+                        if let Some(dir_str) = cell.get("queue_direction").and_then(|d| d.as_str())
+                        {
                             let dir = match dir_str {
                                 "north" => Some(Direction::North),
                                 "south" => Some(Direction::South),
@@ -376,20 +375,17 @@ pub fn validate_connectivity(grid: &GridMap, zones: &ZoneMap) -> Result<(), Vec<
     }
 
     // Find the first walkable cell as BFS seed (prefer first pickup, then delivery, then any)
-    let seed = zones.pickup_cells.first()
-        .or(zones.delivery_cells.first())
-        .copied()
-        .or_else(|| {
-            for y in 0..grid.height {
-                for x in 0..grid.width {
-                    let pos = IVec2::new(x, y);
-                    if grid.is_walkable(pos) {
-                        return Some(pos);
-                    }
+    let seed = zones.pickup_cells.first().or(zones.delivery_cells.first()).copied().or_else(|| {
+        for y in 0..grid.height {
+            for x in 0..grid.width {
+                let pos = IVec2::new(x, y);
+                if grid.is_walkable(pos) {
+                    return Some(pos);
                 }
             }
-            None
-        });
+        }
+        None
+    });
 
     let seed = match seed {
         Some(s) => s,
@@ -429,11 +425,7 @@ pub fn validate_connectivity(grid: &GridMap, zones: &ZoneMap) -> Result<(), Vec<
         }
     }
 
-    if unreachable.is_empty() {
-        Ok(())
-    } else {
-        Err(unreachable)
-    }
+    if unreachable.is_empty() { Ok(()) } else { Err(unreachable) }
 }
 
 // ---------------------------------------------------------------------------
@@ -542,8 +534,7 @@ pub struct TopologyPlugin;
 
 impl Plugin for TopologyPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<ZoneMap>()
-            .init_resource::<ActiveTopology>();
+        app.init_resource::<ZoneMap>().init_resource::<ActiveTopology>();
 
         // Load topology registry from topologies/ on desktop
         #[cfg(not(target_arch = "wasm32"))]
@@ -675,11 +666,7 @@ mod tests {
         assert!(!registry.entries.is_empty(), "No topologies found in topologies/");
         for entry in &registry.entries {
             let result = TopologyRegistry::parse_entry(entry);
-            assert!(
-                result.is_some(),
-                "Topology '{}' failed connectivity validation",
-                entry.id,
-            );
+            assert!(result.is_some(), "Topology '{}' failed connectivity validation", entry.id,);
         }
     }
 

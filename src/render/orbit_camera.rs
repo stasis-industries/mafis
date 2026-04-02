@@ -1,8 +1,8 @@
 use std::f32::consts::{FRAC_PI_2, PI};
 
+use bevy::camera::ScalingMode;
 use bevy::input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll};
 use bevy::prelude::*;
-use bevy::camera::ScalingMode;
 
 #[cfg(not(target_arch = "wasm32"))]
 use bevy_egui::EguiContexts;
@@ -180,8 +180,7 @@ pub fn orbit_mouse_input(
     accumulated_motion: Res<AccumulatedMouseMotion>,
     accumulated_scroll: Res<AccumulatedMouseScroll>,
     mut orbit: ResMut<OrbitCamera>,
-    #[cfg(not(target_arch = "wasm32"))]
-    mut egui_contexts: EguiContexts,
+    #[cfg(not(target_arch = "wasm32"))] mut egui_contexts: EguiContexts,
 ) {
     // Skip camera input when mouse is over Egui UI panels
     #[cfg(not(target_arch = "wasm32"))]
@@ -197,36 +196,36 @@ pub fn orbit_mouse_input(
     let is_ortho = orbit.mode == CameraMode::Orthographic;
 
     // Left-mouse drag: orbit in 3D, pan in 2D
-    if mouse_buttons.pressed(MouseButton::Left)
-        && delta != Vec2::ZERO {
-            orbit.animating = false;
-            if is_ortho {
-                // Pan in orthographic mode
-                let pan_scale = orbit.ortho_scale * orbit.pan_sensitivity;
-                orbit.focus.x -= delta.x * pan_scale;
-                orbit.focus.z -= delta.y * pan_scale;
-            } else {
-                orbit.yaw -= delta.x * orbit.orbit_sensitivity;
-                orbit.pitch = (orbit.pitch + delta.y * orbit.orbit_sensitivity)
-                    .clamp(orbit.min_pitch, orbit.max_pitch);
-            }
+    if mouse_buttons.pressed(MouseButton::Left) && delta != Vec2::ZERO {
+        orbit.animating = false;
+        if is_ortho {
+            // Pan in orthographic mode
+            let pan_scale = orbit.ortho_scale * orbit.pan_sensitivity;
+            orbit.focus.x -= delta.x * pan_scale;
+            orbit.focus.z -= delta.y * pan_scale;
+        } else {
+            orbit.yaw -= delta.x * orbit.orbit_sensitivity;
+            orbit.pitch = (orbit.pitch + delta.y * orbit.orbit_sensitivity)
+                .clamp(orbit.min_pitch, orbit.max_pitch);
         }
+    }
 
     // Pan on middle or right drag (both modes)
     if (mouse_buttons.pressed(MouseButton::Middle) || mouse_buttons.pressed(MouseButton::Right))
-        && delta != Vec2::ZERO {
-            orbit.animating = false;
-            if is_ortho {
-                let pan_scale = orbit.ortho_scale * orbit.pan_sensitivity;
-                orbit.focus.x -= delta.x * pan_scale;
-                orbit.focus.z -= delta.y * pan_scale;
-            } else {
-                let pan_scale = orbit.distance * orbit.pan_sensitivity;
-                let (right, forward) = camera_planar_axes(orbit.yaw);
-                orbit.focus -= right * delta.x * pan_scale;
-                orbit.focus += forward * delta.y * pan_scale;
-            }
+        && delta != Vec2::ZERO
+    {
+        orbit.animating = false;
+        if is_ortho {
+            let pan_scale = orbit.ortho_scale * orbit.pan_sensitivity;
+            orbit.focus.x -= delta.x * pan_scale;
+            orbit.focus.z -= delta.y * pan_scale;
+        } else {
+            let pan_scale = orbit.distance * orbit.pan_sensitivity;
+            let (right, forward) = camera_planar_axes(orbit.yaw);
+            orbit.focus -= right * delta.x * pan_scale;
+            orbit.focus += forward * delta.y * pan_scale;
         }
+    }
 
     // Zoom on scroll
     let scroll_y = accumulated_scroll.delta.y;
@@ -251,10 +250,18 @@ fn keyboard_pan_input(
     let mut pan = Vec2::ZERO;
 
     // WASD — Bevy uses physical key positions, so this maps to ZQSD on AZERTY
-    if keys.pressed(KeyCode::KeyW) { pan.y += 1.0; }
-    if keys.pressed(KeyCode::KeyS) { pan.y -= 1.0; }
-    if keys.pressed(KeyCode::KeyA) { pan.x -= 1.0; }
-    if keys.pressed(KeyCode::KeyD) { pan.x += 1.0; }
+    if keys.pressed(KeyCode::KeyW) {
+        pan.y += 1.0;
+    }
+    if keys.pressed(KeyCode::KeyS) {
+        pan.y -= 1.0;
+    }
+    if keys.pressed(KeyCode::KeyA) {
+        pan.x -= 1.0;
+    }
+    if keys.pressed(KeyCode::KeyD) {
+        pan.x += 1.0;
+    }
 
     if pan == Vec2::ZERO {
         return;
@@ -311,10 +318,8 @@ fn apply_orbit_transform(
         CameraMode::Orthographic => {
             // Top-down: camera above the focus point looking straight down
             let height = orbit.ortho_scale * 2.0;
-            **camera = Transform::from_translation(
-                orbit.focus + Vec3::new(0.0, height, 0.001),
-            )
-            .looking_at(orbit.focus, -Vec3::Z);
+            **camera = Transform::from_translation(orbit.focus + Vec3::new(0.0, height, 0.001))
+                .looking_at(orbit.focus, -Vec3::Z);
         }
     }
 }
@@ -336,9 +341,7 @@ fn sync_camera_projection(
         }
         CameraMode::Orthographic => {
             let ortho = OrthographicProjection {
-                scaling_mode: ScalingMode::FixedVertical {
-                    viewport_height: orbit.ortho_scale,
-                },
+                scaling_mode: ScalingMode::FixedVertical { viewport_height: orbit.ortho_scale },
                 ..OrthographicProjection::default_3d()
             };
             match &mut **camera {
@@ -361,20 +364,17 @@ pub struct OrbitCameraPlugin;
 
 impl Plugin for OrbitCameraPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
-            Startup,
-            setup_orbit_camera.after(super::environment::setup_environment),
-        )
-        .add_systems(
-            Update,
-            (
-                orbit_mouse_input,
-                keyboard_pan_input,
-                animate_orbit_transition,
-                sync_camera_projection,
-                apply_orbit_transform,
-            )
-                .chain(),
-        );
+        app.add_systems(Startup, setup_orbit_camera.after(super::environment::setup_environment))
+            .add_systems(
+                Update,
+                (
+                    orbit_mouse_input,
+                    keyboard_pan_input,
+                    animate_orbit_transition,
+                    sync_camera_projection,
+                    apply_orbit_transform,
+                )
+                    .chain(),
+            );
     }
 }

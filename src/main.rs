@@ -21,11 +21,7 @@ fn main() {
 
     // Dark background for headless (egui dark theme), white for observatory
     #[cfg(feature = "headless")]
-    app.insert_resource(ClearColor(Color::srgb(
-        18.0 / 255.0,
-        18.0 / 255.0,
-        22.0 / 255.0,
-    )));
+    app.insert_resource(ClearColor(Color::srgb(18.0 / 255.0, 18.0 / 255.0, 22.0 / 255.0)));
     #[cfg(not(feature = "headless"))]
     app.insert_resource(ClearColor(Color::WHITE));
 

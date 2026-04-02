@@ -16,3 +16,20 @@ docs/papers
 
 results/
 **__pycache__
+
+# Environment & IDE
+.env
+.env.*
+.vscode/
+.idea/
+*.swp
+
+# Secrets & certificates
+*.pem
+*.key
+*.p12
+*.pfx
+
+# OS artifacts
+Thumbs.db
+Desktop.ini

@@ -37,10 +37,7 @@ pub const CHART_HEAT: Color32 = Color32::from_rgb(230, 44, 2);
 use super::ThemeApplied;
 
 /// Applies the web-matched theme once the EguiContext entity exists.
-pub fn apply_theme_once(
-    mut contexts: EguiContexts,
-    mut applied: ResMut<ThemeApplied>,
-) -> Result {
+pub fn apply_theme_once(mut contexts: EguiContexts, mut applied: ResMut<ThemeApplied>) -> Result {
     let ctx = match contexts.ctx_mut() {
         Ok(ctx) => ctx,
         Err(_) => return Ok(()),
@@ -52,37 +49,21 @@ pub fn apply_theme_once(
     // DM Mono — monospace values, controls, labels
     fonts.font_data.insert(
         "DMMono".to_owned(),
-        Arc::new(FontData::from_static(include_bytes!(
-            "../../../assets/fonts/DMMono-Regular.ttf"
-        ))),
+        Arc::new(FontData::from_static(include_bytes!("../../../assets/fonts/DMMono-Regular.ttf"))),
     );
 
     // Inter — body text, descriptions
     fonts.font_data.insert(
         "Inter".to_owned(),
-        Arc::new(FontData::from_static(include_bytes!(
-            "../../../assets/fonts/Inter-Variable.ttf"
-        ))),
+        Arc::new(FontData::from_static(include_bytes!("../../../assets/fonts/Inter-Variable.ttf"))),
     );
 
     // Proportional: Inter first, DM Mono as fallback
-    fonts
-        .families
-        .entry(FontFamily::Proportional)
-        .or_default()
-        .insert(0, "Inter".to_owned());
-    fonts
-        .families
-        .entry(FontFamily::Proportional)
-        .or_default()
-        .push("DMMono".to_owned());
+    fonts.families.entry(FontFamily::Proportional).or_default().insert(0, "Inter".to_owned());
+    fonts.families.entry(FontFamily::Proportional).or_default().push("DMMono".to_owned());
 
     // Monospace: DM Mono first
-    fonts
-        .families
-        .entry(FontFamily::Monospace)
-        .or_default()
-        .insert(0, "DMMono".to_owned());
+    fonts.families.entry(FontFamily::Monospace).or_default().insert(0, "DMMono".to_owned());
 
     ctx.set_fonts(fonts);
 

@@ -5,7 +5,7 @@ use clap::{Parser, Subcommand};
     name = "mafis",
     about = "MAFIS — Multi-Agent Fault Injection Simulator",
     version,
-    disable_help_subcommand = true,
+    disable_help_subcommand = true
 )]
 pub struct Cli {
     #[command(subcommand)]

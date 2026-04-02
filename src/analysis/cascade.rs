@@ -86,17 +86,12 @@ pub fn propagate_cascade(
                 event_max_depth = event_max_depth.max(depth);
 
                 // Insert or update DelayRecord (depth tracking only)
-                let record = cascade.records.entry(entity).or_insert(DelayRecord {
-                    fault_origin,
-                    depth: 0,
-                });
+                let record =
+                    cascade.records.entry(entity).or_insert(DelayRecord { fault_origin, depth: 0 });
                 record.fault_origin = fault_origin;
                 record.depth = record.depth.max(depth);
 
-                commands.entity(entity).insert(DelayRecord {
-                    fault_origin,
-                    depth: record.depth,
-                });
+                commands.entity(entity).insert(DelayRecord { fault_origin, depth: record.depth });
             }
 
             // Cap BFS depth to avoid runaway cascades at large agent counts
@@ -147,10 +142,7 @@ mod tests {
     #[test]
     fn delay_record_stores_depth() {
         let e = entity(1);
-        let record = DelayRecord {
-            fault_origin: e,
-            depth: 3,
-        };
+        let record = DelayRecord { fault_origin: e, depth: 3 };
         assert_eq!(record.depth, 3);
         assert_eq!(record.fault_origin, e);
     }
@@ -163,13 +155,7 @@ mod tests {
         let mut state = CascadeState {
             records: {
                 let mut m = HashMap::new();
-                m.insert(
-                    e,
-                    DelayRecord {
-                        fault_origin: e,
-                        depth: 1,
-                    },
-                );
+                m.insert(e, DelayRecord { fault_origin: e, depth: 1 });
                 m
             },
             max_depth: 5,

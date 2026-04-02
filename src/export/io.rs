@@ -48,8 +48,7 @@ pub fn output_file(filename: &str, content: &str) -> Result<(), String> {
     let _ = anchor.style().set_property("display", "none");
 
     let body = document.body().ok_or("No body element")?;
-    body.append_child(&anchor)
-        .map_err(|_| "Failed to append anchor".to_string())?;
+    body.append_child(&anchor).map_err(|_| "Failed to append anchor".to_string())?;
     anchor.click();
     let _ = body.remove_child(&anchor);
     let _ = Url::revoke_object_url(&url);

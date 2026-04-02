@@ -7,9 +7,9 @@
 //! Density and traffic data use flat `Vec` arrays indexed by `y * width + x`
 //! for cache-friendly O(1) access (no HashMap hashing overhead).
 
-use bevy::prelude::*;
 use bevy::asset::RenderAssetUsages;
 use bevy::image::ImageSampler;
+use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 
 use crate::analysis::dependency::ActionDependencyGraph;
@@ -133,7 +133,9 @@ pub struct HeatmapTilePool;
 
 impl HeatmapTilePool {
     pub fn clear(&mut self) {}
-    pub fn has_active(&self) -> bool { false }
+    pub fn has_active(&self) -> bool {
+        false
+    }
 }
 
 // ── Setup (Startup) ─────────────────────────────────────────────────
@@ -163,12 +165,7 @@ pub fn setup_heatmap_palette(
         ..default()
     });
 
-    commands.insert_resource(HeatmapTexture {
-        image_handle,
-        material_handle,
-        width: 0,
-        height: 0,
-    });
+    commands.insert_resource(HeatmapTexture { image_handle, material_handle, width: 0, height: 0 });
 }
 
 // ── Early resize (Loading) ──────────────────────────────────────────
@@ -224,10 +221,14 @@ pub fn accumulate_heatmap_density(
         let pos = agent.current_pos;
         for dx in -radius..=radius {
             let cx = pos.x + dx;
-            if cx < 0 || cx >= w { continue; }
+            if cx < 0 || cx >= w {
+                continue;
+            }
             for dy in -radius..=radius {
                 let cy = pos.y + dy;
-                if cy < 0 || cy >= h { continue; }
+                if cy < 0 || cy >= h {
+                    continue;
+                }
                 let dist = (dx.abs() + dy.abs()) as f32;
                 let weight = 1.0 / (1.0 + dist * 0.5);
                 let idx = (cy * w + cx) as usize;
@@ -348,10 +349,14 @@ pub fn replay_heatmap_density(
         let pos = snap.pos;
         for dx in -radius..=radius {
             let cx = pos.x + dx;
-            if cx < 0 || cx >= w { continue; }
+            if cx < 0 || cx >= w {
+                continue;
+            }
             for dy in -radius..=radius {
                 let cy = pos.y + dy;
-                if cy < 0 || cy >= h { continue; }
+                if cy < 0 || cy >= h {
+                    continue;
+                }
                 let dist = (dx.abs() + dy.abs()) as f32;
                 let weight = 1.0 / (1.0 + dist * 0.5);
                 let idx = (cy * w + cx) as usize;
@@ -415,7 +420,9 @@ pub fn update_heatmap_visuals(
             let inv_range = 1.0 / (max - DENSITY_MIN_THRESHOLD).max(0.001);
             let density = &heatmap.density;
             for (i, &val) in density.iter().enumerate() {
-                if val < DENSITY_MIN_THRESHOLD { continue; }
+                if val < DENSITY_MIN_THRESHOLD {
+                    continue;
+                }
                 let t = ((val - DENSITY_MIN_THRESHOLD) * inv_range).min(1.0);
                 let [r, g, b] = density_color_u8(t);
                 let px = i * 4;
@@ -430,7 +437,9 @@ pub fn update_heatmap_visuals(
             let inv_max = 1.0 / max;
             let traffic = &heatmap.traffic;
             for (i, &val) in traffic.iter().enumerate() {
-                if val == 0 { continue; }
+                if val == 0 {
+                    continue;
+                }
                 let t = (val as f32 * inv_max).min(1.0);
                 let [r, g, b] = traffic_color_u8(t);
                 let px = i * 4;
@@ -445,7 +454,9 @@ pub fn update_heatmap_visuals(
             let inv_max = 1.0 / max;
             let crit = &heatmap.criticality;
             for (i, &val) in crit.iter().enumerate() {
-                if val <= 0.0 { continue; }
+                if val <= 0.0 {
+                    continue;
+                }
                 let t = (val * inv_max).min(1.0);
                 let [r, g, b] = criticality_color_u8(t);
                 let px = i * 4;
@@ -501,10 +512,7 @@ pub fn update_heatmap_visuals(
 }
 
 /// Hide heatmap quad when toggled off.
-pub fn hide_heatmap_tiles(
-    mut commands: Commands,
-    quads: Query<Entity, With<HeatmapQuad>>,
-) {
+pub fn hide_heatmap_tiles(mut commands: Commands, quads: Query<Entity, With<HeatmapQuad>>) {
     for entity in &quads {
         commands.entity(entity).insert(Visibility::Hidden);
     }
@@ -531,9 +539,9 @@ pub fn despawn_heatmap_tiles(
 #[inline]
 fn density_color_u8(t: f32) -> [u8; 3] {
     [
-        (255.0 - t * 35.0) as u8,   // 255 → 220
-        (176.0 - t * 156.0) as u8,  // 176 → 20
-        (128.0 - t * 108.0) as u8,  // 128 → 20
+        (255.0 - t * 35.0) as u8,  // 255 → 220
+        (176.0 - t * 156.0) as u8, // 176 → 20
+        (128.0 - t * 108.0) as u8, // 128 → 20
     ]
 }
 
@@ -544,17 +552,17 @@ fn traffic_color_u8(t: f32) -> [u8; 3] {
         // Sky blue → medium blue
         let u = t * 2.0;
         [
-            (126.0 - u * 81.0) as u8,   // 126 → 45
-            (200.0 - u * 89.0) as u8,   // 200 → 111
-            (227.0 - u * 36.0) as u8,   // 227 → 191
+            (126.0 - u * 81.0) as u8, // 126 → 45
+            (200.0 - u * 89.0) as u8, // 200 → 111
+            (227.0 - u * 36.0) as u8, // 227 → 191
         ]
     } else {
         // Medium blue → deep blue
         let u = (t - 0.5) * 2.0;
         [
-            (45.0 - u * 35.0) as u8,    // 45 → 10
-            (111.0 - u * 75.0) as u8,   // 111 → 36
-            (191.0 - u * 77.0) as u8,   // 191 → 114
+            (45.0 - u * 35.0) as u8,  // 45 → 10
+            (111.0 - u * 75.0) as u8, // 111 → 36
+            (191.0 - u * 77.0) as u8, // 191 → 114
         ]
     }
 }
@@ -566,17 +574,17 @@ fn criticality_color_u8(t: f32) -> [u8; 3] {
         // light red (0xFF, 0x6B, 0x6B) → vivid red (0xDC, 0x20, 0x20)
         let u = t * 2.0;
         [
-            (255.0 - u * 35.0) as u8,   // 255 → 220
-            (107.0 - u * 75.0) as u8,   // 107 → 32
-            (107.0 - u * 75.0) as u8,   // 107 → 32
+            (255.0 - u * 35.0) as u8, // 255 → 220
+            (107.0 - u * 75.0) as u8, // 107 → 32
+            (107.0 - u * 75.0) as u8, // 107 → 32
         ]
     } else {
         // vivid red (0xDC, 0x20, 0x20) → deep crimson (0x8B, 0x00, 0x00)
         let u = (t - 0.5) * 2.0;
         [
-            (220.0 - u * 81.0) as u8,   // 220 → 139
-            (32.0 - u * 32.0) as u8,    // 32 → 0
-            (32.0 - u * 32.0) as u8,    // 32 → 0
+            (220.0 - u * 81.0) as u8, // 220 → 139
+            (32.0 - u * 32.0) as u8,  // 32 → 0
+            (32.0 - u * 32.0) as u8,  // 32 → 0
         ]
     }
 }

@@ -125,11 +125,11 @@ Several modules are shared across solvers:
 
 ```mermaid
 graph LR
-    PC["PibtCore\n(pibt_core.rs)"]
-    TC["Token + MasterConstraintIndex\n(token_common.rs)"]
-    GL["GuidanceLayer trait\n(guidance.rs)"]
-    HE["DistanceMapCache\n(heuristics.rs)"]
-    AS["spacetime A*\n(astar.rs)"]
+    PC["PibtCore\n(shared/pibt_core.rs)"]
+    TC["Token + MasterConstraintIndex\n(token/common.rs)"]
+    GL["GuidanceLayer trait\n(shared/guidance.rs)"]
+    HE["DistanceMapCache\n(shared/heuristics.rs)"]
+    AS["spacetime A*\n(shared/astar.rs)"]
 
     PIBT_S["PIBT"] --> PC
     PW_S["RHCR PIBT-Window"] --> PC
@@ -151,11 +151,11 @@ graph LR
     PBS_S["RHCR PBS"] --> HE
 ```
 
-- **PibtCore** (`pibt_core.rs`): the shared PIBT algorithm used by standalone PIBT, PIBT-Window, RHCR fallback, and RT-LaCAM's configuration generator.
-- **token_common** (`token_common.rs`): `Token` (path store for all agents) and `MasterConstraintIndex` (reference-counted constraints) shared by Token Passing and TPTS.
-- **DistanceMapCache** (`heuristics.rs`): cached BFS distance maps from goal cells. All solvers use this for heuristic guidance.
-- **spacetime A*** (`astar.rs`): used by Token Passing, TPTS, Priority A*, and PBS for individual agent pathfinding in (x, y, t) space.
-- **GuidanceLayer** (`guidance.rs`): trait for pre-computed cell biases + `GuidedSolver` wrapper. Designed for static meta-layers (like GGO).
+- **PibtCore** (`shared/pibt_core.rs`): the shared PIBT algorithm used by standalone PIBT, PIBT-Window, RHCR fallback, and RT-LaCAM's configuration generator.
+- **token/common** (`token/common.rs`): `Token` (path store for all agents) and `MasterConstraintIndex` (reference-counted constraints) shared by Token Passing and TPTS.
+- **DistanceMapCache** (`shared/heuristics.rs`): cached BFS distance maps from goal cells. All solvers use this for heuristic guidance.
+- **spacetime A*** (`shared/astar.rs`): used by Token Passing, TPTS, Priority A*, and PBS for individual agent pathfinding in (x, y, t) space.
+- **GuidanceLayer** (`shared/guidance.rs`): trait for pre-computed cell biases + `GuidedSolver` wrapper. Designed for static meta-layers (like GGO).
 
 ---
 

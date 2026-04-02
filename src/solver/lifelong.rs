@@ -12,8 +12,8 @@ use crate::core::seed::SeededRng;
 use crate::core::task::TaskLeg;
 use crate::core::topology::ZoneMap;
 
-use super::heuristics::DistanceMapCache;
-use super::traits::SolverInfo;
+use super::shared::heuristics::DistanceMapCache;
+use super::shared::traits::SolverInfo;
 
 // ---------------------------------------------------------------------------
 // Context passed to solvers each tick
@@ -78,18 +78,21 @@ pub trait LifelongSolver: Send + Sync + 'static {
 
     /// Save internal priority state for deterministic rewind.
     /// Default: no state to save.
-    fn save_priorities(&self) -> Vec<f32> { Vec::new() }
+    fn save_priorities(&self) -> Vec<f32> {
+        Vec::new()
+    }
 
     /// Restore internal priority state from a snapshot.
     /// Default: no-op (solver reinitializes on next step).
     fn restore_priorities(&mut self, _priorities: &[f32]) {}
 
-
     /// Drain pending goal overrides produced by the last `step()`.
     /// Solvers that swap goals (e.g. TPTS) return `(agent_index, new_goal)` pairs.
     /// The runner applies these to update `agent.goal` in the task system.
     /// Default: no overrides.
-    fn drain_goal_overrides(&mut self) -> Vec<(usize, IVec2)> { Vec::new() }
+    fn drain_goal_overrides(&mut self) -> Vec<(usize, IVec2)> {
+        Vec::new()
+    }
 }
 
 // ---------------------------------------------------------------------------

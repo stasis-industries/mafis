@@ -32,7 +32,10 @@ pub fn fault_panel(
     // ── Enable toggle ──────────────────────────────────────────────
     ui.horizontal(|ui| {
         let mut enabled = ui_state.fault_enabled;
-        if ui.add_enabled(idle, egui::Checkbox::new(&mut enabled, "Enable fault injection")).changed() {
+        if ui
+            .add_enabled(idle, egui::Checkbox::new(&mut enabled, "Enable fault injection"))
+            .changed()
+        {
             ui_state.fault_enabled = enabled;
         }
     });
@@ -49,16 +52,17 @@ pub fn fault_panel(
                 .map(|(_, label)| *label)
                 .unwrap_or("Unknown");
 
-            egui::ComboBox::from_id_salt("fault_scenario")
-                .selected_text(current_label)
-                .show_ui(ui, |ui| {
+            egui::ComboBox::from_id_salt("fault_scenario").selected_text(current_label).show_ui(
+                ui,
+                |ui| {
                     for &(id, label) in SCENARIO_TYPES {
                         let selected = ui_state.fault_scenario_type == id;
                         if ui.selectable_label(selected, label).clicked() && !selected && idle {
                             ui_state.fault_scenario_type = id.to_string();
                         }
                     }
-                });
+                },
+            );
         });
 
         ui.add_space(4.0);
@@ -72,7 +76,8 @@ pub fn fault_panel(
                         .suffix("%");
                     ui.add_enabled(idle, slider);
                 });
-                let abs = (ui_state.burst_kill_percent / 100.0 * ui_state.num_agents as f32).round() as usize;
+                let abs = (ui_state.burst_kill_percent / 100.0 * ui_state.num_agents as f32).round()
+                    as usize;
                 ui.weak(format!("= {} robots", abs));
                 ui.horizontal(|ui| {
                     ui.label("At tick");
@@ -129,7 +134,9 @@ pub fn fault_panel(
             ui.add(egui::DragValue::new(manual_y).range(0..=511));
         });
         if ui.button("WALL").on_hover_text("Place permanent obstacle at (X, Y)").clicked() {
-            output.manual_cmds.push(ManualFaultCommand::PlaceObstacle(IVec2::new(*manual_x, *manual_y)));
+            output
+                .manual_cmds
+                .push(ManualFaultCommand::PlaceObstacle(IVec2::new(*manual_x, *manual_y)));
         }
     }
 

@@ -11,7 +11,7 @@ use crate::core::grid::GridMap;
 #[cfg(not(any(test, feature = "headless")))]
 use crate::core::state::SimulationConfig;
 #[cfg(not(any(test, feature = "headless")))]
-use crate::render::environment::{grid_to_world, ObstacleMarker};
+use crate::render::environment::{ObstacleMarker, grid_to_world};
 
 #[cfg(not(any(test, feature = "headless")))]
 use super::breakdown::{Dead, FaultEvent, LatencyFault};
@@ -148,8 +148,13 @@ pub fn apply_rewind(
             };
 
             restore_world_state(
-                &mut commands, &mut res, &mut agents, &mut heat_query,
-                &obstacles, &mut meshes, &mut materials,
+                &mut commands,
+                &mut res,
+                &mut agents,
+                &mut heat_query,
+                &obstacles,
+                &mut meshes,
+                &mut materials,
                 &snapshot,
             );
 
@@ -263,8 +268,7 @@ fn restore_world_state(
             // same moves as the original run (not a forced Wait due to empty plan).
             agent.planned_path.clear();
             agent.planned_path.extend(
-                snap.planned_actions.iter()
-                    .map(|&b| crate::core::action::Action::from_u8(b))
+                snap.planned_actions.iter().map(|&b| crate::core::action::Action::from_u8(b)),
             );
 
             // Restore heat state (determines fault trigger thresholds)
@@ -294,7 +298,7 @@ fn restore_world_state(
         commands.entity(entity).despawn();
     }
     {
-        use crate::render::environment::{grid_to_world, ObstacleMarker};
+        use crate::render::environment::{ObstacleMarker, grid_to_world};
         const CELL_SIZE: f32 = 1.0;
         const OBSTACLE_HEIGHT: f32 = 0.45;
 
@@ -361,9 +365,7 @@ fn restore_world_state(
 
     // Set up replay cursor: find the first fault log entry after the snapshot tick.
     // The replay_manual_faults system will re-fire these at their original ticks.
-    let replay_idx = res.fault_log.entries
-        .iter()
-        .position(|e| e.tick > target_tick);
+    let replay_idx = res.fault_log.entries.iter().position(|e| e.tick > target_tick);
     res.fault_log.replay_from = replay_idx;
 }
 
@@ -398,8 +400,7 @@ fn restore_runner_state(
             agent.task_leg = snap.reconstruct_task_leg();
             agent.planned_path.clear();
             agent.planned_path.extend(
-                snap.planned_actions.iter()
-                    .map(|&b| crate::core::action::Action::from_u8(b)),
+                snap.planned_actions.iter().map(|&b| crate::core::action::Action::from_u8(b)),
             );
             agent.latency_remaining = 0; // transient, can't reconstruct duration
             agent.last_action = crate::core::action::Action::Wait;
@@ -501,9 +502,7 @@ pub fn replay_manual_faults(
                 if let Some(entity) = agent_registry.get_entity(AgentIndex(*agent_index)) {
                     // Use the agent's current position — after rewind the agent
                     // may have taken a different path and won't be at the stored pos.
-                    let kill_pos = agents_query.get(entity)
-                        .map(|a| a.current_pos)
-                        .unwrap_or(*pos);
+                    let kill_pos = agents_query.get(entity).map(|a| a.current_pos).unwrap_or(*pos);
 
                     commands.entity(entity).insert(Dead);
                     grid.set_obstacle(kill_pos);
@@ -515,18 +514,20 @@ pub fn replay_manual_faults(
 
                     // Also apply to runner
                     if let Some(ref mut sim) = sim
-                        && *agent_index < sim.runner.agents.len() {
-                            sim.runner.agents[*agent_index].alive = false;
-                            sim.runner.agents[*agent_index].planned_path.clear();
-                            sim.runner.grid_mut().set_obstacle(kill_pos);
-                        }
+                        && *agent_index < sim.runner.agents.len()
+                    {
+                        sim.runner.agents[*agent_index].alive = false;
+                        sim.runner.agents[*agent_index].planned_path.clear();
+                        sim.runner.grid_mut().set_obstacle(kill_pos);
+                    }
                 }
             }
             ManualFaultAction::PlaceObstacle(cell) => {
                 if grid.is_in_bounds(*cell) && grid.is_walkable(*cell) {
                     grid.set_obstacle(*cell);
 
-                    let m = obstacle_mesh.get_or_insert_with(|| meshes.add(Cuboid::new(0.9, 0.6, 0.9)));
+                    let m =
+                        obstacle_mesh.get_or_insert_with(|| meshes.add(Cuboid::new(0.9, 0.6, 0.9)));
                     let mt = obstacle_mat.get_or_insert_with(|| {
                         materials.add(StandardMaterial {
                             base_color: Color::srgb(0.35, 0.20, 0.18),
@@ -550,14 +551,16 @@ pub fn replay_manual_faults(
             }
             ManualFaultAction::InjectLatency { agent_id, duration } => {
                 if let Some(entity) = agent_registry.get_entity(AgentIndex(*agent_id))
-                    && agents_query.get(entity).is_ok() {
-                        commands.entity(entity).insert(LatencyFault { remaining: *duration });
-                    }
+                    && agents_query.get(entity).is_ok()
+                {
+                    commands.entity(entity).insert(LatencyFault { remaining: *duration });
+                }
                 // Also apply to runner
                 if let Some(ref mut sim) = sim
-                    && *agent_id < sim.runner.agents.len() {
-                        sim.runner.agents[*agent_id].latency_remaining = *duration;
-                    }
+                    && *agent_id < sim.runner.agents.len()
+                {
+                    sim.runner.agents[*agent_id].latency_remaining = *duration;
+                }
             }
         }
         new_replay_from = i + 1;
@@ -594,11 +597,11 @@ pub fn process_manual_faults(
     let mut obstacle_mat: Option<Handle<StandardMaterial>> = None;
 
     let spawn_obstacle_visual = |commands: &mut Commands,
-                                      meshes: &mut Assets<Mesh>,
-                                      materials: &mut Assets<StandardMaterial>,
-                                      mesh: &mut Option<Handle<Mesh>>,
-                                      mat: &mut Option<Handle<StandardMaterial>>,
-                                      cell: IVec2| {
+                                 meshes: &mut Assets<Mesh>,
+                                 materials: &mut Assets<StandardMaterial>,
+                                 mesh: &mut Option<Handle<Mesh>>,
+                                 mat: &mut Option<Handle<StandardMaterial>>,
+                                 cell: IVec2| {
         let m = mesh.get_or_insert_with(|| meshes.add(Cuboid::new(0.9, 0.6, 0.9)));
         let mt = mat.get_or_insert_with(|| {
             materials.add(StandardMaterial {
@@ -622,9 +625,7 @@ pub fn process_manual_faults(
     // batch, the state is still Finished/Paused but the cursor is already set.
     let is_replay = tick_history.replay_cursor.is_some();
     let effective_tick = if is_replay {
-        tick_history.current_snapshot()
-            .map(|s| s.tick)
-            .unwrap_or(sim_config.tick)
+        tick_history.current_snapshot().map(|s| s.tick).unwrap_or(sim_config.tick)
     } else {
         sim_config.tick
     };
@@ -634,10 +635,9 @@ pub fn process_manual_faults(
     let mut causality_applied = false;
 
     // Alive count for propagation rate denominator
-    let alive_count = sim.as_ref().map_or(
-        fault_metrics.initial_agent_count,
-        |s| s.runner.agents.iter().filter(|a| a.alive).count() as u32,
-    );
+    let alive_count = sim.as_ref().map_or(fault_metrics.initial_agent_count, |s| {
+        s.runner.agents.iter().filter(|a| a.alive).count() as u32
+    });
 
     for cmd in manual_cmds.read() {
         match cmd {
@@ -648,65 +648,84 @@ pub fn process_manual_faults(
                     FaultSource::Manual
                 };
                 if let Some(entity) = agent_registry.get_entity(AgentIndex(*id))
-                    && let Ok(agent) = agents_query.get(entity) {
-                        // During replay, ECS current_pos is stale (from last running tick).
-                        // Use snapshot position which matches what the user sees.
-                        let pos = if is_replay {
-                            tick_history.current_snapshot()
-                                .and_then(|snap| snap.agents.iter().find(|a| a.index == *id))
-                                .map(|a| a.pos)
-                                .unwrap_or(agent.current_pos)
-                        } else {
-                            agent.current_pos
-                        };
-                        commands.entity(entity).insert(Dead);
-                        grid.set_obstacle(pos);
-                        fault_events.write(FaultEvent {
-                            entity,
-                            fault_type: FaultType::Breakdown,
-                            source,
-                            tick: effective_tick,
-                            position: pos,
-                            paths_invalidated: 0, // manual faults: cascade handled by BFS
-                        });
-                        fault_metrics.register_manual_event(
-                            effective_tick, FaultType::Breakdown, source, pos, alive_count,
-                        );
-                        // Causality: changing the past invalidates the future.
-                        if is_replay && !causality_applied {
-                            fault_log.truncate_after_tick(effective_tick);
-                            tick_history.truncate_after_tick(effective_tick);
-                            if let Some(ref mut s) = sim { s.analysis.truncate_to_tick(effective_tick); }
-                            causality_applied = true;
+                    && let Ok(agent) = agents_query.get(entity)
+                {
+                    // During replay, ECS current_pos is stale (from last running tick).
+                    // Use snapshot position which matches what the user sees.
+                    let pos = if is_replay {
+                        tick_history
+                            .current_snapshot()
+                            .and_then(|snap| snap.agents.iter().find(|a| a.index == *id))
+                            .map(|a| a.pos)
+                            .unwrap_or(agent.current_pos)
+                    } else {
+                        agent.current_pos
+                    };
+                    commands.entity(entity).insert(Dead);
+                    grid.set_obstacle(pos);
+                    fault_events.write(FaultEvent {
+                        entity,
+                        fault_type: FaultType::Breakdown,
+                        source,
+                        tick: effective_tick,
+                        position: pos,
+                        paths_invalidated: 0, // manual faults: cascade handled by BFS
+                    });
+                    fault_metrics.register_manual_event(
+                        effective_tick,
+                        FaultType::Breakdown,
+                        source,
+                        pos,
+                        alive_count,
+                    );
+                    // Causality: changing the past invalidates the future.
+                    if is_replay && !causality_applied {
+                        fault_log.truncate_after_tick(effective_tick);
+                        tick_history.truncate_after_tick(effective_tick);
+                        if let Some(ref mut s) = sim {
+                            s.analysis.truncate_to_tick(effective_tick);
                         }
-                        fault_log.insert_sorted(ManualFaultEntry {
-                            tick: effective_tick,
-                            action: ManualFaultAction::KillAgent { agent_index: *id, pos },
-                            source,
-                        });
-                        // Also apply to runner so it persists through sync_runner_to_ecs
-                        if let Some(ref mut sim) = sim
-                            && *id < sim.runner.agents.len() {
-                                sim.runner.agents[*id].alive = false;
-                                sim.runner.agents[*id].planned_path.clear();
-                                sim.runner.grid_mut().set_obstacle(pos);
-                            }
+                        causality_applied = true;
                     }
+                    fault_log.insert_sorted(ManualFaultEntry {
+                        tick: effective_tick,
+                        action: ManualFaultAction::KillAgent { agent_index: *id, pos },
+                        source,
+                    });
+                    // Also apply to runner so it persists through sync_runner_to_ecs
+                    if let Some(ref mut sim) = sim
+                        && *id < sim.runner.agents.len()
+                    {
+                        sim.runner.agents[*id].alive = false;
+                        sim.runner.agents[*id].planned_path.clear();
+                        sim.runner.grid_mut().set_obstacle(pos);
+                    }
+                }
             }
             ManualFaultCommand::PlaceObstacle(cell) => {
                 if grid.is_in_bounds(*cell) && grid.is_walkable(*cell) {
                     grid.set_obstacle(*cell);
                     spawn_obstacle_visual(
-                        &mut commands, &mut meshes, &mut materials,
-                        &mut obstacle_mesh, &mut obstacle_mat, *cell,
+                        &mut commands,
+                        &mut meshes,
+                        &mut materials,
+                        &mut obstacle_mesh,
+                        &mut obstacle_mat,
+                        *cell,
                     );
                     fault_metrics.register_manual_event(
-                        effective_tick, FaultType::Breakdown, FaultSource::Manual, *cell, alive_count,
+                        effective_tick,
+                        FaultType::Breakdown,
+                        FaultSource::Manual,
+                        *cell,
+                        alive_count,
                     );
                     if is_replay && !causality_applied {
                         fault_log.truncate_after_tick(effective_tick);
                         tick_history.truncate_after_tick(effective_tick);
-                        if let Some(ref mut s) = sim { s.analysis.truncate_to_tick(effective_tick); }
+                        if let Some(ref mut s) = sim {
+                            s.analysis.truncate_to_tick(effective_tick);
+                        }
                         causality_applied = true;
                     }
                     fault_log.insert_sorted(ManualFaultEntry {
@@ -728,47 +747,55 @@ pub fn process_manual_faults(
                     FaultSource::Manual
                 };
                 if let Some(entity) = agent_registry.get_entity(AgentIndex(*agent_id))
-                    && agents_query.get(entity).is_ok() {
-                        let dur = if *duration == 0 {
-                            constants::DEFAULT_LATENCY_DURATION
-                        } else {
-                            *duration
-                        };
-                        commands.entity(entity).insert(LatencyFault { remaining: dur });
-                        if let Ok(agent) = agents_query.get(entity) {
-                            let pos = agent.current_pos;
-                            fault_events.write(FaultEvent {
-                                entity,
-                                fault_type: FaultType::Latency,
-                                source,
-                                tick: effective_tick,
-                                position: pos,
-                                paths_invalidated: 0,
-                            });
-                            fault_metrics.register_manual_event(
-                                effective_tick, FaultType::Latency, source, pos, alive_count,
-                            );
-                            if is_replay && !causality_applied {
-                                fault_log.truncate_after_tick(effective_tick);
-                                tick_history.truncate_after_tick(effective_tick);
-                                if let Some(ref mut s) = sim { s.analysis.truncate_to_tick(effective_tick); }
-                                causality_applied = true;
+                    && agents_query.get(entity).is_ok()
+                {
+                    let dur = if *duration == 0 {
+                        constants::DEFAULT_LATENCY_DURATION
+                    } else {
+                        *duration
+                    };
+                    commands.entity(entity).insert(LatencyFault { remaining: dur });
+                    if let Ok(agent) = agents_query.get(entity) {
+                        let pos = agent.current_pos;
+                        fault_events.write(FaultEvent {
+                            entity,
+                            fault_type: FaultType::Latency,
+                            source,
+                            tick: effective_tick,
+                            position: pos,
+                            paths_invalidated: 0,
+                        });
+                        fault_metrics.register_manual_event(
+                            effective_tick,
+                            FaultType::Latency,
+                            source,
+                            pos,
+                            alive_count,
+                        );
+                        if is_replay && !causality_applied {
+                            fault_log.truncate_after_tick(effective_tick);
+                            tick_history.truncate_after_tick(effective_tick);
+                            if let Some(ref mut s) = sim {
+                                s.analysis.truncate_to_tick(effective_tick);
                             }
-                            fault_log.insert_sorted(ManualFaultEntry {
-                                tick: effective_tick,
-                                action: ManualFaultAction::InjectLatency {
-                                    agent_id: *agent_id,
-                                    duration: dur,
-                                },
-                                source,
-                            });
+                            causality_applied = true;
                         }
-                        // Also apply to runner
-                        if let Some(ref mut sim) = sim
-                            && *agent_id < sim.runner.agents.len() {
-                                sim.runner.agents[*agent_id].latency_remaining = dur;
-                            }
+                        fault_log.insert_sorted(ManualFaultEntry {
+                            tick: effective_tick,
+                            action: ManualFaultAction::InjectLatency {
+                                agent_id: *agent_id,
+                                duration: dur,
+                            },
+                            source,
+                        });
                     }
+                    // Also apply to runner
+                    if let Some(ref mut sim) = sim
+                        && *agent_id < sim.runner.agents.len()
+                    {
+                        sim.runner.agents[*agent_id].latency_remaining = dur;
+                    }
+                }
             }
         }
     }
@@ -782,10 +809,7 @@ mod tests {
     fn manual_fault_command_variants_exist() {
         let _ = ManualFaultCommand::KillAgent(0);
         let _ = ManualFaultCommand::PlaceObstacle(IVec2::ZERO);
-        let _ = ManualFaultCommand::InjectLatency {
-            agent_id: 0,
-            duration: 10,
-        };
+        let _ = ManualFaultCommand::InjectLatency { agent_id: 0, duration: 10 };
     }
 
     #[test]

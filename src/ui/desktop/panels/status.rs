@@ -1,8 +1,8 @@
 use bevy::prelude::*;
 
+use super::super::theme;
 use crate::core::live_sim::LiveSim;
 use crate::core::state::{SimState, SimulationConfig};
-use super::super::theme;
 
 pub fn status_panel(
     ui: &mut egui::Ui,
@@ -50,17 +50,17 @@ pub fn status_panel(
         let mut loading = 0usize;
         let mut idle_count = 0usize;
         for a in &runner.agents {
-            if !a.alive { continue; }
+            if !a.alive {
+                continue;
+            }
             use crate::core::task::TaskLeg;
             match &a.task_leg {
                 TaskLeg::TravelLoaded { .. }
                 | TaskLeg::Unloading { .. }
                 | TaskLeg::TravelToQueue { .. }
                 | TaskLeg::Queuing { .. } => delivering += 1,
-                TaskLeg::TravelEmpty(_)
-                | TaskLeg::Loading(_) => loading += 1,
-                TaskLeg::Free
-                | TaskLeg::Charging => idle_count += 1,
+                TaskLeg::TravelEmpty(_) | TaskLeg::Loading(_) => loading += 1,
+                TaskLeg::Free | TaskLeg::Charging => idle_count += 1,
             }
         }
         if alive > 0 {
@@ -83,7 +83,10 @@ pub fn status_panel(
             );
             // Loading (amber)
             painter.rect_filled(
-                egui::Rect::from_min_size(r.min + egui::vec2(del_w, 0.0), egui::vec2(load_w, r.height())),
+                egui::Rect::from_min_size(
+                    r.min + egui::vec2(del_w, 0.0),
+                    egui::vec2(load_w, r.height()),
+                ),
                 0.0,
                 theme::STATE_PAUSED,
             );
@@ -122,7 +125,10 @@ pub fn status_panel(
         );
         if dead > 0 {
             painter.rect_filled(
-                egui::Rect::from_min_size(r.min + egui::vec2(alive_w, 0.0), egui::vec2(r.width() - alive_w, r.height())),
+                egui::Rect::from_min_size(
+                    r.min + egui::vec2(alive_w, 0.0),
+                    egui::vec2(r.width() - alive_w, r.height()),
+                ),
                 0.0,
                 theme::STATE_FAULT,
             );

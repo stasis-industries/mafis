@@ -15,5 +15,5 @@ pub mod stats;
 // Re-export key types for convenience.
 pub use config::{ExperimentConfig, ExperimentMatrix};
 #[cfg(not(target_arch = "wasm32"))]
-pub use runner::{run_matrix, ExperimentProgress};
-pub use runner::{run_single_experiment, MatrixResult, RunResult};
+pub use runner::{ExperimentProgress, run_matrix};
+pub use runner::{MatrixResult, RunResult, run_single_experiment};

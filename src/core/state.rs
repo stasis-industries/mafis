@@ -71,10 +71,7 @@ impl Default for SimulationConfig {
     }
 }
 
-fn track_previous_state(
-    state: Res<State<SimState>>,
-    mut prev: ResMut<PreviousSimState>,
-) {
+fn track_previous_state(state: Res<State<SimState>>, mut prev: ResMut<PreviousSimState>) {
     prev.0 = Some(*state.get());
 }
 

@@ -89,9 +89,7 @@ impl AgentRegistry {
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (AgentIndex, Entity)> + '_ {
-        self.index_to_entity
-            .iter()
-            .map(|(&i, &e)| (AgentIndex(i), e))
+        self.index_to_entity.iter().map(|(&i, &e)| (AgentIndex(i), e))
     }
 
     pub fn clear(&mut self) {

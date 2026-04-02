@@ -59,15 +59,7 @@ pub fn compute_stat_summary(values: &[f64]) -> Option<StatSummary> {
         (mean, mean)
     };
 
-    Some(StatSummary {
-        n,
-        mean,
-        std,
-        ci95_lo,
-        ci95_hi,
-        min,
-        max,
-    })
+    Some(StatSummary { n, mean, std, ci95_lo, ci95_hi, min, max })
 }
 
 /// Two-tailed t-critical value for 95% confidence (α=0.05).
@@ -169,7 +161,8 @@ pub fn bootstrap_ci(values: &[f64], n_resamples: usize, confidence: f64) -> (f64
         let mut sum = 0.0;
         for _ in 0..n {
             // LCG: state = state * 6364136223846793005 + 1442695040888963407
-            rng_state = rng_state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            rng_state =
+                rng_state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
             let idx = (rng_state >> 33) as usize % n;
             sum += values[idx];
         }
@@ -278,16 +271,8 @@ mod tests {
         // CI = [5.0 - 1.787, 5.0 + 1.787] = [3.213, 6.787]
         let vals = [2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0];
         let s = compute_stat_summary(&vals).unwrap();
-        assert!(
-            (s.ci95_lo - 3.21).abs() < 0.02,
-            "ci95_lo should be ~3.21, got {:.3}",
-            s.ci95_lo
-        );
-        assert!(
-            (s.ci95_hi - 6.79).abs() < 0.02,
-            "ci95_hi should be ~6.79, got {:.3}",
-            s.ci95_hi
-        );
+        assert!((s.ci95_lo - 3.21).abs() < 0.02, "ci95_lo should be ~3.21, got {:.3}", s.ci95_lo);
+        assert!((s.ci95_hi - 6.79).abs() < 0.02, "ci95_hi should be ~6.79, got {:.3}", s.ci95_hi);
     }
 
     // ── Cliff's delta tests ──────────────────────────────────────────
@@ -356,8 +341,7 @@ mod tests {
         let vals = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0];
         let mean = 5.5;
         let (lo, hi) = bootstrap_ci(&vals, 10_000, 0.95);
-        assert!(lo < mean && hi > mean,
-            "95% CI ({lo:.2}, {hi:.2}) should contain mean {mean}");
+        assert!(lo < mean && hi > mean, "95% CI ({lo:.2}, {hi:.2}) should contain mean {mean}");
     }
 
     #[test]
@@ -379,23 +363,14 @@ mod tests {
         let vals = [1.0, f64::NAN, 3.0, f64::NAN, 5.0];
         let s = compute_stat_summary(&vals).unwrap();
         assert_eq!(s.n, 3, "effective sample size should be 3");
-        assert!(
-            (s.mean - 3.0).abs() < 1e-10,
-            "mean of [1,3,5] should be 3.0"
-        );
+        assert!((s.mean - 3.0).abs() < 1e-10, "mean of [1,3,5] should be 3.0");
         // std of [1,3,5] = sqrt(((1-3)^2+(3-3)^2+(5-3)^2)/2) = sqrt(8/2) = 2.0
         assert!((s.std - 2.0).abs() < 1e-10, "std should be 2.0, got {}", s.std);
         // CI with t(df=2) = 4.303
         let margin = 4.303 * 2.0 / (3.0_f64).sqrt();
         let expected_lo = 3.0 - margin;
         let expected_hi = 3.0 + margin;
-        assert!(
-            (s.ci95_lo - expected_lo).abs() < 0.01,
-            "ci95_lo mismatch"
-        );
-        assert!(
-            (s.ci95_hi - expected_hi).abs() < 0.01,
-            "ci95_hi mismatch"
-        );
+        assert!((s.ci95_lo - expected_lo).abs() < 0.01, "ci95_lo mismatch");
+        assert!((s.ci95_hi - expected_hi).abs() < 0.01, "ci95_hi mismatch");
     }
 }

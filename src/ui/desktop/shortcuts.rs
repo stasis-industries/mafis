@@ -2,9 +2,9 @@ use bevy::prelude::*;
 use bevy_egui::input::EguiWantsInput;
 
 use crate::analysis::AnalysisConfig;
+use crate::core::grid::GridMap;
 use crate::core::state::{SimState, SimulationConfig, StepMode};
 use crate::render::orbit_camera::{self, CameraMode, OrbitCamera};
-use crate::core::grid::GridMap;
 
 pub fn handle_shortcuts(
     keys: Res<ButtonInput<KeyCode>>,
@@ -41,10 +41,7 @@ pub fn handle_shortcuts(
     }
 
     // R — reset
-    if keys.just_pressed(KeyCode::KeyR)
-        && state != SimState::Idle
-        && state != SimState::Loading
-    {
+    if keys.just_pressed(KeyCode::KeyR) && state != SimState::Idle && state != SimState::Loading {
         next_state.set(SimState::Idle);
     }
 

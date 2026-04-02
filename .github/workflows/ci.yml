@@ -11,8 +11,21 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
+  # ── Formatting check (~10s, no system deps needed) ──────────────────────────
+  fmt:
+    name: Formatting
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: cargo fmt --check
+        run: cargo fmt --check
+
+  # ── Type check, clippy, and tests ───────────────────────────────────────────
   test:
-    name: Check & Test
+    name: Check, Clippy & Test
     runs-on: ubuntu-latest
 
     steps:
@@ -22,6 +35,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
+          components: clippy
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
@@ -42,11 +56,30 @@ jobs:
       - name: cargo check (native)
         run: cargo check
 
-      # Step 2 — 118 unit tests covering core, solvers, analysis (~7s)
+      # Step 2 — lint with deny warnings + targeted allow-list
+      # collapsible_if: style preference, nested let-chains are often more readable
+      # needless_range_loop / only_used_in_recursion: legitimate patterns in solvers
+      - name: cargo clippy
+        run: |
+          cargo clippy -- -D warnings \
+            -A clippy::collapsible-if \
+            -A clippy::needless_range_loop \
+            -A clippy::only_used_in_recursion
+
+      # Step 3 — 500+ tests (~10s)
       - name: cargo test
         run: cargo test
 
-      # Step 3 — WASM compile check (no wasm-bindgen, no browser — just type safety)
-      # Catches WASM-specific errors (cfg guards, wasm32 API misuse) before a full build
+      # Step 4 — WASM compile check (catches wasm32-specific errors before a full build)
       - name: cargo check (wasm32)
         run: cargo check --target wasm32-unknown-unknown
+
+  # ── Security audit (runs in parallel, ~15s) ─────────────────────────────────
+  audit:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: rustsec/audit-check@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}

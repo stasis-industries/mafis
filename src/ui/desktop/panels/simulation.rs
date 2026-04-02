@@ -6,11 +6,7 @@ use crate::core::task::{ActiveScheduler, SCHEDULER_NAMES};
 use crate::core::topology::{ActiveTopology, CustomMap, TopologyRegistry};
 use crate::ui::controls::UiState;
 
-const DURATION_PRESETS: &[(&str, u64)] = &[
-    ("Short", 200),
-    ("Medium", 500),
-    ("Long", 1000),
-];
+const DURATION_PRESETS: &[(&str, u64)] = &[("Short", 200), ("Medium", 500), ("Long", 1000)];
 
 pub fn simulation_panel(
     ui: &mut egui::Ui,
@@ -53,7 +49,8 @@ pub fn simulation_panel(
             if let Ok(json_data) = std::fs::read_to_string(&path) {
                 if let Ok(v) = serde_json::from_str::<serde_json::Value>(&json_data) {
                     if let Some((grid, zones)) = TopologyRegistry::parse_json_value(&v) {
-                        let id = path.file_stem()
+                        let id = path
+                            .file_stem()
                             .and_then(|s| s.to_str())
                             .unwrap_or("imported")
                             .replace('-', "_");
@@ -63,7 +60,8 @@ pub fn simulation_panel(
                         ui_state.grid_height = grid.height;
 
                         // Use number_agents from JSON, fall back to suggested_agents/robots
-                        if let Some(n) = v.get("number_agents")
+                        if let Some(n) = v
+                            .get("number_agents")
                             .or_else(|| v.get("suggested_agents"))
                             .and_then(|v| v.as_u64())
                         {
@@ -112,10 +110,8 @@ pub fn simulation_panel(
     ui.horizontal(|ui| {
         ui.label("Agents");
         let mut n = ui_state.num_agents as u32;
-        let slider = egui::Slider::new(
-            &mut n,
-            constants::MIN_AGENTS as u32..=constants::MAX_AGENTS as u32,
-        );
+        let slider =
+            egui::Slider::new(&mut n, constants::MIN_AGENTS as u32..=constants::MAX_AGENTS as u32);
         if ui.add_enabled(idle, slider).changed() {
             ui_state.num_agents = n as usize;
         }
@@ -137,16 +133,14 @@ pub fn simulation_panel(
     ui.horizontal(|ui| {
         ui.label("Scheduler");
         let current = scheduler.name().to_string();
-        egui::ComboBox::from_id_salt("scheduler_combo")
-            .selected_text(&current)
-            .show_ui(ui, |ui| {
-                for &(id, label) in SCHEDULER_NAMES {
-                    let is_selected = current == id;
-                    if ui.selectable_label(is_selected, label).clicked() && !is_selected && idle {
-                        *scheduler = ActiveScheduler::from_name(id);
-                    }
+        egui::ComboBox::from_id_salt("scheduler_combo").selected_text(&current).show_ui(ui, |ui| {
+            for &(id, label) in SCHEDULER_NAMES {
+                let is_selected = current == id;
+                if ui.selectable_label(is_selected, label).clicked() && !is_selected && idle {
+                    *scheduler = ActiveScheduler::from_name(id);
                 }
-            });
+            }
+        });
     });
 
     ui.add_space(4.0);

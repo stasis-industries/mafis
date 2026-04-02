@@ -1,0 +1,4 @@
+# Bevy ECS systems and solver functions legitimately take many parameters.
+# These thresholds replace the crate-level #![allow(...)] in src/lib.rs.
+too-many-arguments-threshold = 12
+type-complexity-threshold = 500

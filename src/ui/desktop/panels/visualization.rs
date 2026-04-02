@@ -1,5 +1,5 @@
-use crate::analysis::heatmap::{HeatmapMode, HeatmapState};
 use crate::analysis::AnalysisConfig;
+use crate::analysis::heatmap::{HeatmapMode, HeatmapState};
 use crate::core::grid::GridMap;
 use crate::render::animator::RobotOpacity;
 use crate::render::graphics::GraphicsConfig;

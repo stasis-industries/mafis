@@ -25,25 +25,14 @@ pub fn find_from_pool(
         }
     }
     let valid: Vec<IVec2> = pool.iter().copied().filter(|p| !exclude.contains(p)).collect();
-    if valid.is_empty() {
-        None
-    } else {
-        Some(valid[rng.random_range(0..valid.len())])
-    }
+    if valid.is_empty() { None } else { Some(valid[rng.random_range(0..valid.len())]) }
 }
 
 /// Pick a random walkable cell on `grid` that is not in `exclude`.
 /// Falls back to collecting all valid cells and picking one.
-pub fn find_random_walkable(
-    grid: &GridMap,
-    rng: &mut impl Rng,
-    exclude: &HashSet<IVec2>,
-) -> IVec2 {
+pub fn find_random_walkable(grid: &GridMap, rng: &mut impl Rng, exclude: &HashSet<IVec2>) -> IVec2 {
     for _ in 0..200 {
-        let pos = IVec2::new(
-            rng.random_range(0..grid.width),
-            rng.random_range(0..grid.height),
-        );
+        let pos = IVec2::new(rng.random_range(0..grid.width), rng.random_range(0..grid.height));
         if grid.is_walkable(pos) && !exclude.contains(&pos) {
             return pos;
         }
@@ -58,9 +47,5 @@ pub fn find_random_walkable(
             }
         }
     }
-    if valid.is_empty() {
-        IVec2::ZERO
-    } else {
-        valid[rng.random_range(0..valid.len())]
-    }
+    if valid.is_empty() { IVec2::ZERO } else { valid[rng.random_range(0..valid.len())] }
 }

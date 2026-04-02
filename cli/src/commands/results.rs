@@ -1,7 +1,7 @@
 use std::path::Path;
 
-use comfy_table::presets::UTF8_FULL_CONDENSED;
 use comfy_table::Table;
+use comfy_table::presets::UTF8_FULL_CONDENSED;
 use owo_colors::OwoColorize;
 
 use crate::style;
@@ -12,20 +12,13 @@ pub fn list(root: &Path) -> anyhow::Result<()> {
     let results_dir = root.join("results");
     if !results_dir.exists() {
         println!("  No results directory found.");
-        println!(
-            "  Run {} to generate results.",
-            style::info("experiment smoke")
-        );
+        println!("  Run {} to generate results.", style::info("experiment smoke"));
         return Ok(());
     }
 
     let mut entries: Vec<_> = std::fs::read_dir(&results_dir)?
         .filter_map(|e| e.ok())
-        .filter(|e| {
-            e.path()
-                .extension()
-                .is_some_and(|ext| ext == "csv" || ext == "json")
-        })
+        .filter(|e| e.path().extension().is_some_and(|ext| ext == "csv" || ext == "json"))
         .collect();
 
     entries.sort_by_key(|e| e.file_name());
@@ -61,15 +54,9 @@ pub fn show(
     filter: Option<&str>,
 ) -> anyhow::Result<()> {
     let path = resolve_result_path(root, file)?;
-    let display_name = path
-        .file_name()
-        .unwrap_or_default()
-        .to_string_lossy();
+    let display_name = path.file_name().unwrap_or_default().to_string_lossy();
 
-    println!(
-        "{}",
-        style::section(&format!("Results: {display_name}"))
-    );
+    println!("{}", style::section(&format!("Results: {display_name}")));
 
     if path.extension().is_some_and(|e| e == "json") {
         let content = std::fs::read_to_string(&path)?;
@@ -91,17 +78,11 @@ pub fn show(
 
     // CSV
     let mut rdr = csv::Reader::from_path(&path)?;
-    let all_headers: Vec<String> = rdr
-        .headers()?
-        .iter()
-        .map(|h| h.to_string())
-        .collect();
+    let all_headers: Vec<String> = rdr.headers()?.iter().map(|h| h.to_string()).collect();
 
     // Determine which column indices to show
     let col_indices: Vec<usize> = if let Some(cols) = columns {
-        cols.iter()
-            .filter_map(|c| all_headers.iter().position(|h| h == c))
-            .collect()
+        cols.iter().filter_map(|c| all_headers.iter().position(|h| h == c)).collect()
     } else {
         (0..all_headers.len()).collect()
     };
@@ -111,9 +92,8 @@ pub fn show(
     }
 
     // Find filter column index
-    let filter_col = filter_pair.as_ref().and_then(|(key, _)| {
-        all_headers.iter().position(|h| h == key)
-    });
+    let filter_col =
+        filter_pair.as_ref().and_then(|(key, _)| all_headers.iter().position(|h| h == key));
 
     if filter_pair.is_some() && filter_col.is_none() {
         let key = &filter_pair.as_ref().unwrap().0;
@@ -123,10 +103,7 @@ pub fn show(
         ));
     }
 
-    let display_headers: Vec<&str> = col_indices
-        .iter()
-        .map(|&i| all_headers[i].as_str())
-        .collect();
+    let display_headers: Vec<&str> = col_indices.iter().map(|&i| all_headers[i].as_str()).collect();
 
     let mut table = Table::new();
     table.load_preset(UTF8_FULL_CONDENSED);
@@ -152,10 +129,8 @@ pub fn show(
             continue; // keep counting total
         }
 
-        let row: Vec<String> = col_indices
-            .iter()
-            .map(|&i| record.get(i).unwrap_or("").to_string())
-            .collect();
+        let row: Vec<String> =
+            col_indices.iter().map(|&i| record.get(i).unwrap_or("").to_string()).collect();
         table.add_row(row);
         shown += 1;
     }
@@ -164,10 +139,7 @@ pub fn show(
 
     let mut footer = format!("  {shown} rows shown");
     if limit > 0 && shown < total {
-        footer.push_str(&format!(
-            " (of {total} total, use {} for more)",
-            style::info("--limit 0")
-        ));
+        footer.push_str(&format!(" (of {total} total, use {} for more)", style::info("--limit 0")));
     }
     if let Some((ref key, ref val)) = filter_pair {
         footer.push_str(&format!(" [filter: {key}={val}]"));
@@ -186,14 +158,9 @@ pub fn summary(root: &Path) -> anyhow::Result<()> {
         return Ok(());
     }
 
-    let pattern = results_dir
-        .join("*_summary.csv")
-        .to_string_lossy()
-        .to_string();
+    let pattern = results_dir.join("*_summary.csv").to_string_lossy().to_string();
 
-    let files: Vec<_> = glob::glob(&pattern)?
-        .filter_map(|p| p.ok())
-        .collect();
+    let files: Vec<_> = glob::glob(&pattern)?.filter_map(|p| p.ok()).collect();
 
     if files.is_empty() {
         println!("  No summary CSV files found (searched for *_summary.csv).");
@@ -201,20 +168,12 @@ pub fn summary(root: &Path) -> anyhow::Result<()> {
     }
 
     for path in &files {
-        let name = path
-            .file_stem()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .to_string();
+        let name = path.file_stem().unwrap_or_default().to_string_lossy().to_string();
 
         println!("\n{}", style::section(&name));
 
         let mut rdr = csv::Reader::from_path(path)?;
-        let headers: Vec<String> = rdr
-            .headers()?
-            .iter()
-            .map(|h| h.to_string())
-            .collect();
+        let headers: Vec<String> = rdr.headers()?.iter().map(|h| h.to_string()).collect();
 
         let mut table = Table::new();
         table.load_preset(UTF8_FULL_CONDENSED);
@@ -239,10 +198,7 @@ pub fn compare(root: &Path, a: &str, b: &str) -> anyhow::Result<()> {
     let name_a = path_a.file_name().unwrap_or_default().to_string_lossy();
     let name_b = path_b.file_name().unwrap_or_default().to_string_lossy();
 
-    println!(
-        "{}",
-        style::section(&format!("Compare: {name_a} vs {name_b}"))
-    );
+    println!("{}", style::section(&format!("Compare: {name_a} vs {name_b}")));
 
     let records_a = read_csv_records(&path_a)?;
     let records_b = read_csv_records(&path_b)?;
@@ -268,16 +224,8 @@ pub fn compare(root: &Path, a: &str, b: &str) -> anyhow::Result<()> {
     for i in 0..max_rows.min(20) {
         let mut row = vec![format!("{}", i + 1)];
         for col in 0..headers.len() {
-            let val_a = records_a
-                .rows
-                .get(i)
-                .and_then(|r| r.get(col))
-                .map_or("", |s| s.as_str());
-            let val_b = records_b
-                .rows
-                .get(i)
-                .and_then(|r| r.get(col))
-                .map_or("", |s| s.as_str());
+            let val_a = records_a.rows.get(i).and_then(|r| r.get(col)).map_or("", |s| s.as_str());
+            let val_b = records_b.rows.get(i).and_then(|r| r.get(col)).map_or("", |s| s.as_str());
 
             row.push(val_a.to_string());
             row.push(val_b.to_string());
@@ -323,11 +271,7 @@ pub fn compare(root: &Path, a: &str, b: &str) -> anyhow::Result<()> {
     println!("{table}");
 
     if max_rows > 20 {
-        println!(
-            "\n  {} (showing first 20 of {})",
-            style::dim("truncated"),
-            max_rows
-        );
+        println!("\n  {} (showing first 20 of {})", style::dim("truncated"), max_rows);
     }
 
     Ok(())
@@ -416,10 +360,7 @@ fn resolve_result_path(root: &Path, file: &str) -> anyhow::Result<std::path::Pat
         return Ok(json);
     }
 
-    anyhow::bail!(
-        "File not found: '{}'. Run 'results list' to see available files.",
-        file
-    );
+    anyhow::bail!("File not found: '{}'. Run 'results list' to see available files.", file);
 }
 
 struct CsvData {
@@ -451,9 +392,7 @@ fn format_size(bytes: u64) -> String {
 fn format_time(time: Option<std::time::SystemTime>) -> String {
     match time {
         Some(t) => {
-            let duration = std::time::SystemTime::now()
-                .duration_since(t)
-                .unwrap_or_default();
+            let duration = std::time::SystemTime::now().duration_since(t).unwrap_or_default();
             let secs = duration.as_secs();
             if secs < 60 {
                 format!("{secs}s ago")

@@ -96,16 +96,20 @@ pub fn tick_agents_core(
             }
         }
         for i in 0..n {
-            if moves[i].2 == moves[i].0 { continue; }
+            if moves[i].2 == moves[i].0 {
+                continue;
+            }
             // Check if there's an agent at our target that wants to move to our source
             if let Some(&j) = source_map.get(&moves[i].2)
-                && j > i && moves[j].2 == moves[i].0 {
-                    // Edge swap detected: force the higher-index agent to wait
-                    moves[j].1 = Action::Wait;
-                    moves[j].2 = moves[j].0;
-                    moves[j].3 = true;
-                    changed = true;
-                }
+                && j > i
+                && moves[j].2 == moves[i].0
+            {
+                // Edge swap detected: force the higher-index agent to wait
+                moves[j].1 = Action::Wait;
+                moves[j].2 = moves[j].0;
+                moves[j].3 = true;
+                changed = true;
+            }
         }
 
         // Dead agent collisions
@@ -119,14 +123,7 @@ pub fn tick_agents_core(
         }
     }
 
-    moves
-        .iter()
-        .map(|m| ResolvedMove {
-            new_pos: m.2,
-            action: m.1,
-            was_forced: m.3,
-        })
-        .collect()
+    moves.iter().map(|m| ResolvedMove { new_pos: m.2, action: m.1, was_forced: m.3 }).collect()
 }
 
 pub struct SimulationPlugin;

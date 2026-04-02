@@ -24,18 +24,9 @@ pub fn dispatch(cmd: Command) -> anyhow::Result<()> {
         },
         Command::Results { action } => match action {
             ResultsCommand::List => results::list(&root),
-            ResultsCommand::Show {
-                file,
-                limit,
-                columns,
-                filter,
-            } => results::show(
-                &root,
-                &file,
-                limit,
-                columns.as_deref(),
-                filter.as_deref(),
-            ),
+            ResultsCommand::Show { file, limit, columns, filter } => {
+                results::show(&root, &file, limit, columns.as_deref(), filter.as_deref())
+            }
             ResultsCommand::Summary => results::summary(&root),
             ResultsCommand::Compare { a, b } => results::compare(&root, &a, &b),
             ResultsCommand::Clean => results::clean(&root),

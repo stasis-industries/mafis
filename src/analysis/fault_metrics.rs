@@ -224,9 +224,7 @@ impl FaultMetrics {
         }
         let sum: f32 = events
             .iter()
-            .map(|&(affected, alive)| {
-                if alive == 0 { 0.0 } else { affected as f32 / alive as f32 }
-            })
+            .map(|&(affected, alive)| if alive == 0 { 0.0 } else { affected as f32 / alive as f32 })
             .sum();
         sum / events.len() as f32
     }
@@ -279,7 +277,9 @@ pub fn register_fault_recovery(
             if record.fault_origin != entry.faulted_entity {
                 continue;
             }
-            if let std::collections::hash_map::Entry::Vacant(e) = fault_metrics.recovery_pending.entry(entity) {
+            if let std::collections::hash_map::Entry::Vacant(e) =
+                fault_metrics.recovery_pending.entry(entity)
+            {
                 e.insert(sim_config.tick);
                 fault_metrics.total_affected += 1;
             }
@@ -319,7 +319,10 @@ pub fn register_fault_recovery(
 // ---------------------------------------------------------------------------
 
 pub fn update_fault_metrics(
-    mut agents: Query<(Entity, &LogicalAgent, &LastAction, Option<&mut AgentActionStats>), Without<Dead>>,
+    mut agents: Query<
+        (Entity, &LogicalAgent, &LastAction, Option<&mut AgentActionStats>),
+        Without<Dead>,
+    >,
     all_agents: Query<Entity, With<LogicalAgent>>,
     sim_config: Res<SimulationConfig>,
     mut fault_metrics: ResMut<FaultMetrics>,
@@ -381,12 +384,13 @@ pub fn update_fault_metrics(
     for entity in pending_scratch.iter() {
         let fault_tick = fault_metrics.recovery_pending[entity];
         if let Ok((_, agent, _, _)) = agents.get(*entity)
-            && (agent.has_plan() || agent.has_reached_goal()) {
-                let recovery_duration = sim_config.tick.saturating_sub(fault_tick);
-                fault_metrics.recovery_times.push(recovery_duration);
-                fault_metrics.total_recovered += 1;
-                recovered_scratch.push(*entity);
-            }
+            && (agent.has_plan() || agent.has_reached_goal())
+        {
+            let recovery_duration = sim_config.tick.saturating_sub(fault_tick);
+            fault_metrics.recovery_times.push(recovery_duration);
+            fault_metrics.total_recovered += 1;
+            recovered_scratch.push(*entity);
+        }
     }
     for entity in recovered_scratch.iter() {
         fault_metrics.recovery_pending.remove(entity);
@@ -425,9 +429,7 @@ pub fn update_fault_metrics(
     // --- Survival rate (uses alive_count from main pass) ---
     if fault_metrics.initial_agent_count > 0 {
         let rate = alive_count as f32 / fault_metrics.initial_agent_count as f32;
-        fault_metrics
-            .survival_series
-            .push_back((sim_config.tick, rate));
+        fault_metrics.survival_series.push_back((sim_config.tick, rate));
         if fault_metrics.survival_series.len() > constants::MAX_SURVIVAL_ENTRIES {
             fault_metrics.survival_series.pop_front();
         }

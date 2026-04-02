@@ -25,17 +25,17 @@ pub mod visualization;
 
 #[cfg(not(feature = "headless"))]
 mod observatory_panels {
-    use bevy::prelude::*;
     use bevy::ecs::system::SystemParam;
+    use bevy::prelude::*;
     use bevy_egui::EguiContexts;
 
     use bevy::diagnostic::DiagnosticsStore;
 
+    use crate::analysis::AnalysisConfig;
     use crate::analysis::baseline::{BaselineDiff, BaselineStore};
     use crate::analysis::fault_metrics::FaultMetrics;
     use crate::analysis::heatmap::HeatmapState;
     use crate::analysis::scorecard::ResilienceScorecard;
-    use crate::analysis::AnalysisConfig;
     use crate::core::grid::GridMap;
     use crate::core::live_sim::LiveSim;
     use crate::core::state::{SimState, SimulationConfig};
@@ -47,7 +47,6 @@ mod observatory_panels {
     use crate::render::graphics::GraphicsConfig;
     use crate::render::orbit_camera::OrbitCamera;
     use crate::ui::controls::UiState;
-
 
     /// Bundled visualization resources to stay under Bevy's 16-param limit.
     #[derive(SystemParam)]
@@ -90,80 +89,72 @@ mod observatory_panels {
 
         let state = **sim_state;
 
-        egui::SidePanel::left("left_panel")
-            .default_width(340.0)
-            .min_width(280.0)
-            .show(ctx, |ui| {
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    egui::CollapsingHeader::new("Simulation")
-                        .default_open(true)
-                        .show(ui, |ui| {
-                            super::simulation::simulation_panel(
-                                ui,
-                                &mut ui_state,
-                                &mut config,
-                                state,
-                                &mut scheduler,
-                                &mut topology,
-                                &topo_registry,
-                            );
-                        });
+        egui::SidePanel::left("left_panel").default_width(340.0).min_width(280.0).show(ctx, |ui| {
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                egui::CollapsingHeader::new("Simulation").default_open(true).show(ui, |ui| {
+                    super::simulation::simulation_panel(
+                        ui,
+                        &mut ui_state,
+                        &mut config,
+                        state,
+                        &mut scheduler,
+                        &mut topology,
+                        &topo_registry,
+                    );
+                });
 
-                    ui.separator();
+                ui.separator();
 
-                    egui::CollapsingHeader::new("Solver & Scheduling")
-                        .default_open(true)
-                        .show(ui, |ui| {
-                            super::solver::solver_panel(ui, &mut ui_state, state);
-                        });
+                egui::CollapsingHeader::new("Solver & Scheduling").default_open(true).show(
+                    ui,
+                    |ui| {
+                        super::solver::solver_panel(ui, &mut ui_state, state);
+                    },
+                );
 
-                    ui.separator();
+                ui.separator();
 
-                    egui::CollapsingHeader::new("Fault Injection")
-                        .default_open(false)
-                        .show(ui, |ui| {
-                            let d = &mut *desktop;
-                            let output = super::fault::fault_panel(
-                                ui, &mut ui_state, state,
-                                &mut d.manual_fault_x,
-                                &mut d.manual_fault_y,
-                            );
-                            for cmd in output.manual_cmds {
-                                manual_cmds.write(cmd);
-                            }
-                        });
+                egui::CollapsingHeader::new("Fault Injection").default_open(false).show(ui, |ui| {
+                    let d = &mut *desktop;
+                    let output = super::fault::fault_panel(
+                        ui,
+                        &mut ui_state,
+                        state,
+                        &mut d.manual_fault_x,
+                        &mut d.manual_fault_y,
+                    );
+                    for cmd in output.manual_cmds {
+                        manual_cmds.write(cmd);
+                    }
+                });
 
-                    ui.separator();
+                ui.separator();
 
-                    egui::CollapsingHeader::new("Visualization")
-                        .default_open(false)
-                        .show(ui, |ui| {
-                            super::visualization::visualization_panel(
-                                ui,
-                                &mut vis.analysis_config,
-                                &mut vis.heatmap,
-                                &mut vis.graphics,
-                                &mut vis.orbit,
-                                &vis.grid,
-                                &mut vis.robot_opacity,
-                            );
-                        });
+                egui::CollapsingHeader::new("Visualization").default_open(false).show(ui, |ui| {
+                    super::visualization::visualization_panel(
+                        ui,
+                        &mut vis.analysis_config,
+                        &mut vis.heatmap,
+                        &mut vis.graphics,
+                        &mut vis.orbit,
+                        &vis.grid,
+                        &mut vis.robot_opacity,
+                    );
+                });
 
-                    ui.separator();
+                ui.separator();
 
-                    egui::CollapsingHeader::new("Data Export")
-                        .default_open(false)
-                        .show(ui, |ui| {
-                            let is_running = state == SimState::Running
-                                || state == SimState::Paused
-                                || state == SimState::Finished;
-                            let output = super::export::export_panel(ui, &mut export_config, is_running);
-                            if let Some(req) = output.export_request {
-                                export_requests.write(req);
-                            }
-                        });
+                egui::CollapsingHeader::new("Data Export").default_open(false).show(ui, |ui| {
+                    let is_running = state == SimState::Running
+                        || state == SimState::Paused
+                        || state == SimState::Finished;
+                    let output = super::export::export_panel(ui, &mut export_config, is_running);
+                    if let Some(req) = output.export_request {
+                        export_requests.write(req);
+                    }
                 });
             });
+        });
 
         Ok(())
     }
@@ -192,104 +183,86 @@ mod observatory_panels {
             Err(_) => return Ok(()),
         };
 
-        egui::SidePanel::right("right_panel")
-            .default_width(320.0)
-            .min_width(260.0)
-            .show(ctx, |ui| {
+        egui::SidePanel::right("right_panel").default_width(320.0).min_width(260.0).show(
+            ctx,
+            |ui| {
                 egui::ScrollArea::vertical().show(ui, |ui| {
-                    egui::CollapsingHeader::new("Status")
-                        .default_open(true)
-                        .show(ui, |ui| {
-                            super::status::status_panel(
-                                ui,
-                                &sim_state,
-                                &config,
-                                live_sim.as_deref(),
-                            );
-                        });
+                    egui::CollapsingHeader::new("Status").default_open(true).show(ui, |ui| {
+                        super::status::status_panel(ui, &sim_state, &config, live_sim.as_deref());
+                    });
 
                     ui.separator();
 
                     if scorecard.has_faults {
-                        egui::CollapsingHeader::new("Scorecard")
-                            .default_open(true)
-                            .show(ui, |ui| {
+                        egui::CollapsingHeader::new("Scorecard").default_open(true).show(
+                            ui,
+                            |ui| {
                                 super::scorecard::scorecard_panel(ui, &scorecard);
-                            });
+                            },
+                        );
                         ui.separator();
                     }
 
                     if live_sim.is_some() {
-                        egui::CollapsingHeader::new("Performance")
-                            .default_open(true)
-                            .show(ui, |ui| {
+                        egui::CollapsingHeader::new("Performance").default_open(true).show(
+                            ui,
+                            |ui| {
                                 super::performance::performance_panel(
                                     ui,
                                     live_sim.as_deref(),
                                     &baseline_store,
                                     &baseline_diff,
                                 );
-                            });
+                            },
+                        );
                         ui.separator();
                     }
 
                     if let Some(ref sim) = live_sim {
-                        egui::CollapsingHeader::new("Charts")
-                            .default_open(true)
-                            .show(ui, |ui| {
-                                let bl = baseline_store.record.as_ref();
+                        egui::CollapsingHeader::new("Charts").default_open(true).show(ui, |ui| {
+                            let bl = baseline_store.record.as_ref();
 
-                                ui.label("Throughput");
-                                charts::throughput::throughput_chart(
-                                    ui,
-                                    &sim.analysis,
-                                    bl,
-                                );
+                            ui.label("Throughput");
+                            charts::throughput::throughput_chart(ui, &sim.analysis, bl);
 
+                            ui.add_space(6.0);
+                            ui.label("Tasks");
+                            charts::tasks::tasks_chart(ui, &sim.analysis, bl);
+
+                            if !sim.analysis.heat_series.is_empty() {
                                 ui.add_space(6.0);
-                                ui.label("Tasks");
-                                charts::tasks::tasks_chart(
-                                    ui,
-                                    &sim.analysis,
-                                    bl,
-                                );
-
-                                if !sim.analysis.heat_series.is_empty() {
-                                    ui.add_space(6.0);
-                                    ui.label("Heat");
-                                    charts::heat::heat_chart(ui, &sim.analysis);
-                                }
-                            });
+                                ui.label("Heat");
+                                charts::heat::heat_chart(ui, &sim.analysis);
+                            }
+                        });
                         ui.separator();
                     }
 
                     if !fault_metrics.event_records.is_empty() {
-                        egui::CollapsingHeader::new("Fault Response")
-                            .default_open(true)
-                            .show(ui, |ui| {
+                        egui::CollapsingHeader::new("Fault Response").default_open(true).show(
+                            ui,
+                            |ui| {
                                 super::fault_response::fault_response_panel(ui, &fault_metrics);
-                            });
+                            },
+                        );
                         ui.separator();
                     }
 
-                    egui::CollapsingHeader::new("Agents")
-                        .default_open(false)
-                        .show(ui, |ui| {
-                            let output = super::agent_list::agent_list_panel(ui, live_sim.as_deref());
-                            for cmd in output.manual_cmds {
-                                manual_cmds.write(cmd);
-                            }
-                        });
+                    egui::CollapsingHeader::new("Agents").default_open(false).show(ui, |ui| {
+                        let output = super::agent_list::agent_list_panel(ui, live_sim.as_deref());
+                        for cmd in output.manual_cmds {
+                            manual_cmds.write(cmd);
+                        }
+                    });
 
                     ui.separator();
 
-                    egui::CollapsingHeader::new("Profiling")
-                        .default_open(false)
-                        .show(ui, |ui| {
-                            super::profiling::profiling_panel(ui, &diagnostics);
-                        });
+                    egui::CollapsingHeader::new("Profiling").default_open(false).show(ui, |ui| {
+                        super::profiling::profiling_panel(ui, &diagnostics);
+                    });
                 });
-            });
+            },
+        );
 
         Ok(())
     }

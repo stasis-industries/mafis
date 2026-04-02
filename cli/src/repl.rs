@@ -30,7 +30,6 @@ const EXPERIMENT_NAMES: &[&str] = &[
     "topology_large",
 ];
 
-
 // ---------------------------------------------------------------------------
 // Context-aware tab completion
 // ---------------------------------------------------------------------------
@@ -46,12 +45,7 @@ impl MafisHelper {
             commands: vec![
                 ("desktop", vec!["--debug"]),
                 ("experiment", vec!["list", "run", "smoke", "run-all"]),
-                (
-                    "results",
-                    vec![
-                        "list", "show", "summary", "compare", "clean", "open",
-                    ],
-                ),
+                ("results", vec!["list", "show", "summary", "compare", "clean", "open"]),
                 ("test", vec!["--release"]),
                 ("serve", vec!["--no-build", "--port"]),
                 ("build", vec!["--native"]),
@@ -74,16 +68,11 @@ impl MafisHelper {
         if let Ok(entries) = std::fs::read_dir(root.join("results")) {
             self.result_files = entries
                 .filter_map(|e| e.ok())
-                .filter(|e| {
-                    e.path()
-                        .extension()
-                        .is_some_and(|ext| ext == "csv" || ext == "json")
-                })
+                .filter(|e| e.path().extension().is_some_and(|ext| ext == "csv" || ext == "json"))
                 .map(|e| e.file_name().to_string_lossy().to_string())
                 .collect();
             self.result_files.sort();
         }
-
     }
 
     fn dynamic_completions(&self, cmd: &str, subcmd: &str) -> &[String] {
@@ -122,10 +111,7 @@ impl Completer for MafisHelper {
                 .iter()
                 .map(|(name, _)| *name)
                 .filter(|name| name.starts_with(prefix))
-                .map(|name| Pair {
-                    display: name.to_string(),
-                    replacement: name.to_string(),
-                })
+                .map(|name| Pair { display: name.to_string(), replacement: name.to_string() })
                 .collect();
             return Ok((0, matches));
         }
@@ -134,25 +120,14 @@ impl Completer for MafisHelper {
 
         // Level 2: subcommand (second word)
         if (parts.len() == 1 && completing_new) || (parts.len() == 2 && !completing_new) {
-            let prefix = if completing_new {
-                ""
-            } else {
-                parts[1]
-            };
-            let word_start = if completing_new {
-                pos
-            } else {
-                pos - prefix.len()
-            };
+            let prefix = if completing_new { "" } else { parts[1] };
+            let word_start = if completing_new { pos } else { pos - prefix.len() };
 
             if let Some((_, subs)) = self.commands.iter().find(|(name, _)| *name == cmd) {
                 let matches: Vec<Pair> = subs
                     .iter()
                     .filter(|s| s.starts_with(prefix))
-                    .map(|s| Pair {
-                        display: s.to_string(),
-                        replacement: s.to_string(),
-                    })
+                    .map(|s| Pair { display: s.to_string(), replacement: s.to_string() })
                     .collect();
                 return Ok((word_start, matches));
             }
@@ -162,16 +137,8 @@ impl Completer for MafisHelper {
 
         // Level 3+: dynamic argument completion
         let subcmd = if parts.len() >= 2 { parts[1] } else { "" };
-        let prefix = if completing_new {
-            ""
-        } else {
-            parts.last().copied().unwrap_or("")
-        };
-        let word_start = if completing_new {
-            pos
-        } else {
-            pos - prefix.len()
-        };
+        let prefix = if completing_new { "" } else { parts.last().copied().unwrap_or("") };
+        let word_start = if completing_new { pos } else { pos - prefix.len() };
 
         // Try dynamic completions first
         let dynamic = self.dynamic_completions(cmd, subcmd);
@@ -185,10 +152,7 @@ impl Completer for MafisHelper {
             let matches: Vec<Pair> = statics
                 .iter()
                 .filter(|s| s.starts_with(prefix))
-                .map(|s| Pair {
-                    display: s.to_string(),
-                    replacement: s.to_string(),
-                })
+                .map(|s| Pair { display: s.to_string(), replacement: s.to_string() })
                 .collect();
             return Ok((word_start, matches));
         }
@@ -201,10 +165,7 @@ fn complete_from_strings(items: &[String], prefix: &str) -> Vec<Pair> {
     items
         .iter()
         .filter(|s| s.starts_with(prefix))
-        .map(|s| Pair {
-            display: s.clone(),
-            replacement: s.clone(),
-        })
+        .map(|s| Pair { display: s.clone(), replacement: s.clone() })
         .collect()
 }
 
@@ -257,9 +218,7 @@ fn print_compact_help() {
 // ---------------------------------------------------------------------------
 
 fn history_path() -> PathBuf {
-    let dir = dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".mafis");
+    let dir = dirs::home_dir().unwrap_or_else(|| PathBuf::from(".")).join(".mafis");
     std::fs::create_dir_all(&dir).ok();
     dir.join("history.txt")
 }
@@ -322,10 +281,7 @@ pub fn run() -> anyhow::Result<()> {
 
     // Build prompt with branch indicator
     let prompt = if branch.is_empty() {
-        format!(
-            "{} ",
-            "mafis>".truecolor(style::BRAND.0, style::BRAND.1, style::BRAND.2)
-        )
+        format!("{} ", "mafis>".truecolor(style::BRAND.0, style::BRAND.1, style::BRAND.2))
     } else {
         format!(
             "{} {} ",

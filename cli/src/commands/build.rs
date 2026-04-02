@@ -10,8 +10,8 @@ use crate::style;
 fn preflight_wasm(root: &Path) -> anyhow::Result<()> {
     let mut missing = Vec::new();
 
-    let targets = shell::run_capture("rustup", &["target", "list", "--installed"], root)
-        .unwrap_or_default();
+    let targets =
+        shell::run_capture("rustup", &["target", "list", "--installed"], root).unwrap_or_default();
     if !targets.contains("wasm32-unknown-unknown") {
         missing.push(
             "wasm32-unknown-unknown target not installed. Fix: rustup target add wasm32-unknown-unknown"
@@ -20,9 +20,7 @@ fn preflight_wasm(root: &Path) -> anyhow::Result<()> {
     }
 
     if !shell::has_tool("wasm-bindgen") {
-        missing.push(
-            "wasm-bindgen not found. Fix: cargo install wasm-bindgen-cli".to_string(),
-        );
+        missing.push("wasm-bindgen not found. Fix: cargo install wasm-bindgen-cli".to_string());
     }
 
     if !missing.is_empty() {
@@ -107,15 +105,8 @@ pub fn desktop(root: &Path, debug: bool) -> anyhow::Result<()> {
     println!("{}", style::section("Desktop Experiment Runner"));
 
     if debug {
-        println!(
-            "  Mode: {} (fast compile, slower runtime)",
-            style::info("debug")
-        );
-        let status = shell::run_streaming(
-            "cargo",
-            &["run", "--features", "headless"],
-            root,
-        )?;
+        println!("  Mode: {} (fast compile, slower runtime)", style::info("debug"));
+        let status = shell::run_streaming("cargo", &["run", "--features", "headless"], root)?;
         if !status.success() {
             anyhow::bail!("desktop runner failed");
         }
@@ -146,17 +137,12 @@ pub fn serve(root: &Path, no_build: bool, port: u16) -> anyhow::Result<()> {
     println!("{}", style::section("Serve"));
 
     if !shell::has_tool("basic-http-server") {
-        anyhow::bail!(
-            "basic-http-server not found. Install with: cargo install basic-http-server"
-        );
+        anyhow::bail!("basic-http-server not found. Install with: cargo install basic-http-server");
     }
 
     let addr = format!("127.0.0.1:{port}");
     let url = format!("http://{addr}");
-    println!(
-        "  Serving at {}",
-        url.truecolor(style::INFO.0, style::INFO.1, style::INFO.2)
-    );
+    println!("  Serving at {}", url.truecolor(style::INFO.0, style::INFO.1, style::INFO.2));
     println!("  Press {} to stop.", style::info("Ctrl+C"));
     println!();
 

@@ -146,11 +146,7 @@ mod desktop_tests {
     fn dm_mono_font_file_is_valid_ttf() {
         let bytes = include_bytes!("../assets/fonts/DMMono-Regular.ttf");
         // TrueType files start with 0x00010000 or "true" (0x74727565)
-        assert!(
-            bytes.len() > 12,
-            "DMMono font file is too small ({} bytes)",
-            bytes.len(),
-        );
+        assert!(bytes.len() > 12, "DMMono font file is too small ({} bytes)", bytes.len(),);
         let header = u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
         assert!(
             header == 0x00010000 || header == 0x74727565,

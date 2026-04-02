@@ -36,9 +36,7 @@ impl Plugin for FaultPlugin {
                     FaultSet::Schedule.after(CoreSet::Tick),
                     FaultSet::Heat.after(FaultSet::Schedule),
                     FaultSet::FaultCheck.after(FaultSet::Heat),
-                    FaultSet::Replan
-                        .after(FaultSet::FaultCheck)
-                        .before(CoreSet::PostTick),
+                    FaultSet::Replan.after(FaultSet::FaultCheck).before(CoreSet::PostTick),
                 ),
             );
 
@@ -62,10 +60,8 @@ impl Plugin for FaultPlugin {
             app.add_systems(
                 Update,
                 (
-                    manual::process_manual_faults
-                        .after(crate::ui::BridgeSet),
-                    manual::apply_rewind
-                        .after(crate::ui::BridgeSet),
+                    manual::process_manual_faults.after(crate::ui::BridgeSet),
+                    manual::apply_rewind.after(crate::ui::BridgeSet),
                 ),
             );
         }

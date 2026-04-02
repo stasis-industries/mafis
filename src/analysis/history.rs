@@ -56,8 +56,7 @@ pub struct MetricsSnapshot {
     pub survival_rate: f32,
 }
 
-#[derive(Debug, Clone, Serialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Serialize, Default)]
 pub struct FullTickSnapshot {
     pub tick: u64,
     pub phase: String,
@@ -83,20 +82,17 @@ pub struct FullTickSnapshot {
     pub completion_ticks: std::collections::VecDeque<u64>,
 }
 
-
 // ---------------------------------------------------------------------------
 // TickHistory resource
 // ---------------------------------------------------------------------------
 
-#[derive(Resource, Debug)]
-#[derive(Default)]
+#[derive(Resource, Debug, Default)]
 pub struct TickHistory {
     pub snapshots: VecDeque<FullTickSnapshot>,
     pub replay_cursor: Option<usize>,
     pub recording: bool,
     prev_fault_count: u32,
 }
-
 
 impl TickHistory {
     pub fn clear(&mut self) {
@@ -108,8 +104,7 @@ impl TickHistory {
 
     /// Get the snapshot at the current replay cursor.
     pub fn current_snapshot(&self) -> Option<&FullTickSnapshot> {
-        self.replay_cursor
-            .and_then(|idx| self.snapshots.get(idx))
+        self.replay_cursor.and_then(|idx| self.snapshots.get(idx))
     }
 
     /// Convert a tick number to the nearest snapshot index.
@@ -132,15 +127,12 @@ impl TickHistory {
         if current_idx == 0 {
             return None;
         }
-        (0..current_idx)
-            .rev()
-            .find(|&i| self.snapshots[i].fault_event_count > 0)
+        (0..current_idx).rev().find(|&i| self.snapshots[i].fault_event_count > 0)
     }
 
     /// Find the index of the next fault event after `current_idx`.
     pub fn next_fault_index(&self, current_idx: usize) -> Option<usize> {
-        ((current_idx + 1)..self.snapshots.len())
-            .find(|&i| self.snapshots[i].fault_event_count > 0)
+        ((current_idx + 1)..self.snapshots.len()).find(|&i| self.snapshots[i].fault_event_count > 0)
     }
 
     /// Remove all snapshots after the given tick.
@@ -156,13 +148,11 @@ impl TickHistory {
         }
         // Reset cursor if it's beyond the truncation point
         if let Some(cursor) = self.replay_cursor
-            && cursor >= self.snapshots.len() {
-                self.replay_cursor = if self.snapshots.is_empty() {
-                    None
-                } else {
-                    Some(self.snapshots.len() - 1)
-                };
-            }
+            && cursor >= self.snapshots.len()
+        {
+            self.replay_cursor =
+                if self.snapshots.is_empty() { None } else { Some(self.snapshots.len() - 1) };
+        }
     }
 }
 
@@ -182,18 +172,12 @@ impl AgentSnapshot {
             "travel_loaded" if self.task_leg_data.len() >= 2 => {
                 let f = self.task_leg_data[0];
                 let t = self.task_leg_data[1];
-                TaskLeg::TravelLoaded {
-                    from: IVec2::new(f[0], f[1]),
-                    to: IVec2::new(t[0], t[1]),
-                }
+                TaskLeg::TravelLoaded { from: IVec2::new(f[0], f[1]), to: IVec2::new(t[0], t[1]) }
             }
             "unloading" if self.task_leg_data.len() >= 2 => {
                 let f = self.task_leg_data[0];
                 let t = self.task_leg_data[1];
-                TaskLeg::Unloading {
-                    from: IVec2::new(f[0], f[1]),
-                    to: IVec2::new(t[0], t[1]),
-                }
+                TaskLeg::Unloading { from: IVec2::new(f[0], f[1]), to: IVec2::new(t[0], t[1]) }
             }
             "travel_to_queue" if self.task_leg_data.len() >= 2 => {
                 let f = self.task_leg_data[0];
@@ -252,15 +236,13 @@ pub fn record_tick_snapshot(
     // If we resumed from an earlier tick, the buffer still has future snapshots.
     // Don't overwrite or truncate — only record when we pass the last snapshot.
     if let Some(last) = history.snapshots.back()
-        && sim_config.tick <= last.tick {
-            return;
-        }
+        && sim_config.tick <= last.tick
+    {
+        return;
+    }
 
-    let latest_survival = fault_metrics
-        .survival_series
-        .back()
-        .map(|(_, rate)| *rate)
-        .unwrap_or(1.0);
+    let latest_survival =
+        fault_metrics.survival_series.back().map(|(_, rate)| *rate).unwrap_or(1.0);
 
     let new_faults = cascade.fault_count.saturating_sub(history.prev_fault_count);
     history.prev_fault_count = cascade.fault_count;
@@ -272,37 +254,34 @@ pub fn record_tick_snapshot(
             TaskLeg::Free => ("free", vec![]),
             TaskLeg::TravelEmpty(p) => ("travel_empty", vec![[p.x, p.y]]),
             TaskLeg::Loading(p) => ("loading", vec![[p.x, p.y]]),
-            TaskLeg::TravelLoaded { from, to } => (
-                "travel_loaded",
-                vec![[from.x, from.y], [to.x, to.y]],
-            ),
-            TaskLeg::Unloading { from, to } => (
-                "unloading",
-                vec![[from.x, from.y], [to.x, to.y]],
-            ),
+            TaskLeg::TravelLoaded { from, to } => {
+                ("travel_loaded", vec![[from.x, from.y], [to.x, to.y]])
+            }
+            TaskLeg::Unloading { from, to } => ("unloading", vec![[from.x, from.y], [to.x, to.y]]),
             TaskLeg::Charging => ("charging", vec![]),
-            TaskLeg::TravelToQueue { from, to, line_index } => (
-                "travel_to_queue",
-                vec![[from.x, from.y], [to.x, to.y], [*line_index as i32, 0]],
-            ),
-            TaskLeg::Queuing { from, to, line_index } => (
-                "queuing",
-                vec![[from.x, from.y], [to.x, to.y], [*line_index as i32, 0]],
-            ),
+            TaskLeg::TravelToQueue { from, to, line_index } => {
+                ("travel_to_queue", vec![[from.x, from.y], [to.x, to.y], [*line_index as i32, 0]])
+            }
+            TaskLeg::Queuing { from, to, line_index } => {
+                ("queuing", vec![[from.x, from.y], [to.x, to.y], [*line_index as i32, 0]])
+            }
         };
         // Read planned path from runner (zero-copy) when available,
         // fall back to ECS planned_path (rewind/legacy).
-        let runner_path = sim.as_ref()
-            .and_then(|s| s.runner.agents.get(index.0))
-            .map(|sa| &sa.planned_path);
+        let runner_path =
+            sim.as_ref().and_then(|s| s.runner.agents.get(index.0)).map(|sa| &sa.planned_path);
 
         let (plan_len, actions): (usize, Vec<u8>) = if let Some(rp) = runner_path {
             (rp.len(), rp.iter().map(|&a| crate::core::action::Action::to_u8(a)).collect())
         } else {
-            (agent.planned_path.len(), agent.planned_path.iter().map(|&a| crate::core::action::Action::to_u8(a)).collect())
+            (
+                agent.planned_path.len(),
+                agent.planned_path.iter().map(|&a| crate::core::action::Action::to_u8(a)).collect(),
+            )
         };
 
-        let op_age = sim.as_ref()
+        let op_age = sim
+            .as_ref()
             .and_then(|s| s.runner.agents.get(index.0))
             .map(|sa| sa.operational_age)
             .unwrap_or(0);
@@ -335,7 +314,8 @@ pub fn record_tick_snapshot(
         },
         fault_event_count: new_faults,
         rng_word_pos: rng.rng.get_word_pos(),
-        fault_rng_word_pos: sim.as_ref()
+        fault_rng_word_pos: sim
+            .as_ref()
             .map(|s| s.runner.fault_rng().rng.get_word_pos())
             .unwrap_or(0),
         lifelong_tasks_completed: lifelong.tasks_completed,

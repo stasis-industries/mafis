@@ -15,7 +15,6 @@ const LERP_SPEED: f32 = 18.0;
 #[derive(Component)]
 pub struct RobotVisual;
 
-
 // ---------------------------------------------------------------------------
 // RobotOpacity — user-controllable robot mesh transparency
 // ---------------------------------------------------------------------------
@@ -74,10 +73,7 @@ impl MaterialPalette {
     }
 }
 
-fn setup_material_palette(
-    mut commands: Commands,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-) {
+fn setup_material_palette(mut commands: Commands, mut materials: ResMut<Assets<StandardMaterial>>) {
     // Build 7 × 4 task-heat palette
     let task_heat = std::array::from_fn::<_, TASK_STATES, _>(|state| {
         let (br, bg, bb) = TASK_BASE_COLORS[state];
@@ -90,12 +86,7 @@ fn setup_material_palette(
             let glow = dwell_boost + t * 3.5;
             materials.add(StandardMaterial {
                 base_color: Color::srgb(br, bg, bb),
-                emissive: LinearRgba::new(
-                    glow * br * 1.2,
-                    glow * bg * 0.8,
-                    glow * bb * 0.5,
-                    1.0,
-                ),
+                emissive: LinearRgba::new(glow * br * 1.2, glow * bg * 0.8, glow * bb * 0.5, 1.0),
                 perceptual_roughness: 0.35,
                 metallic: 0.25,
                 ..default()
@@ -180,10 +171,9 @@ fn spawn_robot_visuals(
             ));
         });
 
-        commands.entity(entity).insert((
-            Transform::from_xyz(world_pos.x, 0.0, world_pos.z),
-            Visibility::default(),
-        ));
+        commands
+            .entity(entity)
+            .insert((Transform::from_xyz(world_pos.x, 0.0, world_pos.z), Visibility::default()));
     }
 }
 
@@ -196,7 +186,10 @@ fn lerp_robots(
     // Snap instantly in step mode or when paused/replay (eliminates visual lag
     // between heatmap and robot positions when stepping one tick at a time).
     let snap = step_mode.pending
-        || matches!(*state.get(), crate::core::state::SimState::Paused | crate::core::state::SimState::Replay);
+        || matches!(
+            *state.get(),
+            crate::core::state::SimState::Paused | crate::core::state::SimState::Replay
+        );
 
     for (agent, mut transform) in &mut agents {
         let target = grid_to_world(agent.current_pos);
@@ -237,32 +230,33 @@ fn update_robot_colors(
 
     for (children, agent_index, agent, _transform, heat_state, is_dead, has_latency) in &agents {
         // Priority: selected > dead > latency > task_state (always, with heat glow)
-        let target_handle: &Handle<StandardMaterial> = if selection.agent_index == Some(agent_index.0) {
-            &palette.selected_robot
-        } else if is_dead {
-            &palette.dead
-        } else if has_latency {
-            &palette.latency_robot
-        } else {
-            // Update color immediately — task state changes should be
-            // visible right away, not delayed by lerp animation.
+        let target_handle: &Handle<StandardMaterial> =
+            if selection.agent_index == Some(agent_index.0) {
+                &palette.selected_robot
+            } else if is_dead {
+                &palette.dead
+            } else if has_latency {
+                &palette.latency_robot
+            } else {
+                // Update color immediately — task state changes should be
+                // visible right away, not delayed by lerp animation.
 
-            // Task color is always primary — heat modulates glow level
-            let state_idx = agent.task_leg.palette_index();
-            let heat_level = if fault_config.enabled {
-                if let Some(hs) = heat_state {
-                    // heat is already 0-1 Weibull CDF stress indicator
-                    let t = hs.heat.clamp(0.0, 1.0);
-                    (t * heat_max_idx).round() as usize
+                // Task color is always primary — heat modulates glow level
+                let state_idx = agent.task_leg.palette_index();
+                let heat_level = if fault_config.enabled {
+                    if let Some(hs) = heat_state {
+                        // heat is already 0-1 Weibull CDF stress indicator
+                        let t = hs.heat.clamp(0.0, 1.0);
+                        (t * heat_max_idx).round() as usize
+                    } else {
+                        0
+                    }
                 } else {
                     0
-                }
-            } else {
-                0
+                };
+                let heat_level = heat_level.min(HEAT_LEVELS - 1);
+                &palette.task_heat[state_idx][heat_level]
             };
-            let heat_level = heat_level.min(HEAT_LEVELS - 1);
-            &palette.task_heat[state_idx][heat_level]
-        };
 
         for child in children.iter() {
             // Read-only check first to avoid marking the component dirty in
@@ -295,11 +289,7 @@ fn apply_robot_opacity(
     }
 
     let alpha = opacity.opacity;
-    let mode = if alpha < 1.0 {
-        AlphaMode::Blend
-    } else {
-        AlphaMode::Opaque
-    };
+    let mode = if alpha < 1.0 { AlphaMode::Blend } else { AlphaMode::Opaque };
 
     // Helper closure to update a single handle
     let mut update = |handle: &Handle<StandardMaterial>| {

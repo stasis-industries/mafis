@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Fig 1 — MAFIS Architecture (Paper-Ready Prototype)</title>
+<style>
+  body {
+    font-family: "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+    background: #f5f5f0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 40px;
+  }
+  .note {
+    font-size: 12px;
+    color: #888;
+    max-width: 520px;
+    text-align: center;
+    margin-bottom: 24px;
+    line-height: 1.6;
+  }
+  svg text { font-family: "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif; }
+</style>
+</head>
+<body>
+
+<div class="note">
+  LNCS single-column width = ~12cm (~454pt). This prototype is sized to fit.
+  Black/white friendly — no color dependencies. All labels readable at print scale.
+</div>
+
+<svg width="454" height="520" viewBox="0 0 454 520">
+
+  <!-- ============================================= -->
+  <!-- LAYER 3: Web Interface                        -->
+  <!-- ============================================= -->
+  <rect x="1" y="1" width="452" height="120" rx="4" fill="white" stroke="#333" stroke-width="1.5" />
+  <text x="16" y="22" font-size="9" font-weight="700" fill="#555" letter-spacing="0.1em">WEB INTERFACE</text>
+  <text x="438" y="22" text-anchor="end" font-size="8" fill="#999">HTML / CSS / JS</text>
+
+  <!-- 3D Viewport (largest box) -->
+  <rect x="16" y="34" width="180" height="72" rx="3" fill="#f0f0f0" stroke="#888" stroke-dasharray="3,2" />
+  <text x="106" y="62" text-anchor="middle" font-size="11" fill="#444">3D Viewport</text>
+  <text x="106" y="76" text-anchor="middle" font-size="9" fill="#888">(Bevy WASM canvas)</text>
+  <text x="106" y="90" text-anchor="middle" font-size="9" fill="#888">heatmap, agent colors</text>
+
+  <!-- Charts -->
+  <rect x="208" y="34" width="108" height="72" rx="3" fill="#f0f0f0" stroke="#888" stroke-dasharray="3,2" />
+  <text x="262" y="58" text-anchor="middle" font-size="11" fill="#444">Charts</text>
+  <text x="262" y="72" text-anchor="middle" font-size="9" fill="#888">throughput, FT,</text>
+  <text x="262" y="84" text-anchor="middle" font-size="9" fill="#888">survival (uPlot)</text>
+
+  <!-- Controls + Scorecard -->
+  <rect x="328" y="34" width="110" height="32" rx="3" fill="#f0f0f0" stroke="#888" stroke-dasharray="3,2" />
+  <text x="383" y="54" text-anchor="middle" font-size="10" fill="#444">Controls</text>
+
+  <rect x="328" y="74" width="110" height="32" rx="3" fill="#f0f0f0" stroke="#888" stroke-dasharray="3,2" />
+  <text x="383" y="94" text-anchor="middle" font-size="10" fill="#444">Scorecard</text>
+
+  <!-- ============================================= -->
+  <!-- ARROW: Web <-> Bridge                         -->
+  <!-- ============================================= -->
+  <!-- Down arrow (state) -->
+  <line x1="200" y1="121" x2="200" y2="168" stroke="#333" stroke-width="1.2" />
+  <polygon points="195,164 200,172 205,164" fill="#333" />
+  <!-- Up arrow (commands) -->
+  <line x1="254" y1="168" x2="254" y2="121" stroke="#333" stroke-width="1.2" />
+  <polygon points="249,125 254,117 259,125" fill="#333" />
+
+  <!-- Labels on arrows -->
+  <text x="148" y="148" text-anchor="end" font-size="9" fill="#555">JSON state</text>
+  <text x="148" y="160" text-anchor="end" font-size="8" fill="#999">(100ms poll)</text>
+  <text x="306" y="148" font-size="9" fill="#555">commands</text>
+  <text x="306" y="160" font-size="8" fill="#999">(send_command)</text>
+
+  <!-- ============================================= -->
+  <!-- LAYER 2: WASM Bridge                          -->
+  <!-- ============================================= -->
+  <rect x="1" y="172" width="452" height="52" rx="4" fill="white" stroke="#333" stroke-width="1.5" />
+  <text x="16" y="192" font-size="9" font-weight="700" fill="#555" letter-spacing="0.1em">WASM BRIDGE</text>
+  <text x="438" y="192" text-anchor="end" font-size="8" fill="#999">src/ui/bridge.rs</text>
+
+  <text x="227" y="212" text-anchor="middle" font-size="10" fill="#444">get_simulation_state() &rarr; JSON    |    send_command(cmd)    |    adaptive sync</text>
+
+  <!-- ============================================= -->
+  <!-- ARROW: Bridge <-> ECS                         -->
+  <!-- ============================================= -->
+  <line x1="227" y1="224" x2="227" y2="260" stroke="#333" stroke-width="1.2" />
+  <polygon points="222,256 227,264 232,256" fill="#333" />
+  <text x="240" y="246" font-size="8" fill="#999">ECS resources</text>
+
+  <!-- ============================================= -->
+  <!-- LAYER 1: Bevy ECS Simulation                  -->
+  <!-- ============================================= -->
+  <rect x="1" y="264" width="452" height="248" rx="4" fill="white" stroke="#333" stroke-width="1.5" />
+  <text x="16" y="284" font-size="9" font-weight="700" fill="#555" letter-spacing="0.1em">SIMULATION CORE</text>
+  <text x="438" y="284" text-anchor="end" font-size="8" fill="#999">Bevy ECS / FixedUpdate</text>
+
+  <!-- Tick Pipeline (horizontal flow) -->
+  <!-- Box: Agents + Scheduler -->
+  <rect x="16" y="298" width="130" height="56" rx="3" fill="white" stroke="#555" stroke-width="1" />
+  <text x="81" y="316" text-anchor="middle" font-size="10" font-weight="600" fill="#333">Agents + Scheduler</text>
+  <text x="81" y="330" text-anchor="middle" font-size="9" fill="#888">task assignment</text>
+  <text x="81" y="342" text-anchor="middle" font-size="9" fill="#888">state machine (6 states)</text>
+
+  <!-- Arrow right -->
+  <line x1="146" y1="326" x2="162" y2="326" stroke="#333" stroke-width="1" />
+  <polygon points="158,322 166,326 158,330" fill="#333" />
+
+  <!-- Box: Solver -->
+  <rect x="166" y="298" width="120" height="56" rx="3" fill="white" stroke="#555" stroke-width="1" />
+  <text x="226" y="316" text-anchor="middle" font-size="10" font-weight="600" fill="#333">Solver</text>
+  <text x="226" y="330" text-anchor="middle" font-size="9" fill="#888">7 lifelong algorithms</text>
+  <text x="226" y="342" text-anchor="middle" font-size="9" fill="#888">4 paradigms</text>
+
+  <!-- Arrow right -->
+  <line x1="286" y1="326" x2="302" y2="326" stroke="#333" stroke-width="1" />
+  <polygon points="298,322 306,326 298,330" fill="#333" />
+
+  <!-- Box: Fault Pipeline -->
+  <rect x="306" y="298" width="132" height="56" rx="3" fill="white" stroke="#555" stroke-width="1" />
+  <text x="372" y="316" text-anchor="middle" font-size="10" font-weight="600" fill="#333">Fault Pipeline</text>
+  <text x="372" y="330" text-anchor="middle" font-size="9" fill="#888">3 categories</text>
+  <text x="372" y="342" text-anchor="middle" font-size="9" fill="#888">7 scenarios, Weibull</text>
+
+  <!-- Tick flow label -->
+  <text x="227" y="372" text-anchor="middle" font-size="8" fill="#999" letter-spacing="0.06em">TICK PIPELINE (chained, deterministic)</text>
+
+  <!-- Arrow down from Fault Pipeline to Analysis -->
+  <line x1="372" y1="354" x2="372" y2="386" stroke="#333" stroke-width="1" />
+  <polygon points="367,382 372,390 377,382" fill="#333" />
+
+  <!-- Box: Analysis Engine -->
+  <rect x="106" y="390" width="240" height="56" rx="3" fill="white" stroke="#555" stroke-width="1" />
+  <text x="226" y="408" text-anchor="middle" font-size="10" font-weight="600" fill="#333">Analysis Engine</text>
+  <text x="226" y="422" text-anchor="middle" font-size="9" fill="#888">ADG &rarr; cascade BFS &rarr; 12 differential metrics</text>
+  <text x="226" y="434" text-anchor="middle" font-size="9" fill="#888">resilience scorecard (FT, NRR, FUR, CT)</text>
+
+  <!-- Arrow from Analysis back up to bridge (output) -->
+  <line x1="106" y1="418" x2="56" y2="418" stroke="#333" stroke-width="1" stroke-dasharray="3,2" />
+  <line x1="56" y1="418" x2="56" y2="224" stroke="#333" stroke-width="1" stroke-dasharray="3,2" />
+  <polygon points="51,228 56,220 61,228" fill="#333" />
+  <text x="44" y="320" text-anchor="end" font-size="8" fill="#999" transform="rotate(-90 44 320)">metrics to bridge</text>
+
+  <!-- Deterministic seed annotation -->
+  <rect x="16" y="460" width="422" height="28" rx="3" fill="#f8f8f5" stroke="#ccc" stroke-dasharray="4,2" />
+  <text x="227" y="478" text-anchor="middle" font-size="9" fill="#666">All randomness via SeededRng &mdash; same seed + config = identical simulation (deterministic replay)</text>
+
+</svg>
+
+</body>
+</html>

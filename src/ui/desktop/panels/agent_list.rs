@@ -1,10 +1,10 @@
 use egui::Color32;
 
+use super::super::theme;
 use crate::constants::AGGREGATE_THRESHOLD;
 use crate::core::live_sim::LiveSim;
 use crate::core::runner::SimAgent;
 use crate::fault::manual::ManualFaultCommand;
-use super::super::theme;
 
 pub struct AgentListOutput {
     pub manual_cmds: Vec<ManualFaultCommand>,
@@ -36,71 +36,74 @@ pub fn agent_list_panel(ui: &mut egui::Ui, live_sim: Option<&LiveSim>) -> AgentL
 }
 
 fn per_agent_view(ui: &mut egui::Ui, agents: &[SimAgent], output: &mut AgentListOutput) {
-    egui::ScrollArea::vertical()
-        .max_height(250.0)
-        .show(ui, |ui| {
-            egui::Grid::new("agent_table")
-                .striped(true)
-                .min_col_width(24.0)
-                .show(ui, |ui| {
-                    // Header
-                    ui.strong("ID");
-                    ui.strong("Pos");
-                    ui.strong("Goal");
-                    ui.strong("Heat");
-                    ui.strong("State");
-                    ui.strong(""); // Actions column
-                    ui.end_row();
+    egui::ScrollArea::vertical().max_height(250.0).show(ui, |ui| {
+        egui::Grid::new("agent_table").striped(true).min_col_width(24.0).show(ui, |ui| {
+            // Header
+            ui.strong("ID");
+            ui.strong("Pos");
+            ui.strong("Goal");
+            ui.strong("Heat");
+            ui.strong("State");
+            ui.strong(""); // Actions column
+            ui.end_row();
 
-                    for (i, a) in agents.iter().enumerate() {
-                        ui.monospace(format!("{i}"));
-                        ui.monospace(format!("{},{}", a.pos.x, a.pos.y));
-                        ui.monospace(format!("{},{}", a.goal.x, a.goal.y));
+            for (i, a) in agents.iter().enumerate() {
+                ui.monospace(format!("{i}"));
+                ui.monospace(format!("{},{}", a.pos.x, a.pos.y));
+                ui.monospace(format!("{},{}", a.goal.x, a.goal.y));
 
-                        // Heat with color
-                        let heat_color = if a.heat > 60.0 {
-                            theme::STATE_FAULT
-                        } else if a.heat > 30.0 {
-                            theme::STATE_PAUSED
-                        } else {
-                            theme::STATE_IDLE
-                        };
-                        ui.colored_label(heat_color, format!("{:.0}", a.heat));
+                // Heat with color
+                let heat_color = if a.heat > 60.0 {
+                    theme::STATE_FAULT
+                } else if a.heat > 30.0 {
+                    theme::STATE_PAUSED
+                } else {
+                    theme::STATE_IDLE
+                };
+                ui.colored_label(heat_color, format!("{:.0}", a.heat));
 
-                        // State
-                        if !a.alive {
-                            ui.colored_label(theme::STATE_FAULT, "DEAD");
-                        } else if a.latency_remaining > 0 {
-                            ui.colored_label(Color32::from_rgb(143, 58, 222), format!("LAT {}", a.latency_remaining));
-                        } else {
-                            ui.weak("OK");
+                // State
+                if !a.alive {
+                    ui.colored_label(theme::STATE_FAULT, "DEAD");
+                } else if a.latency_remaining > 0 {
+                    ui.colored_label(
+                        Color32::from_rgb(143, 58, 222),
+                        format!("LAT {}", a.latency_remaining),
+                    );
+                } else {
+                    ui.weak("OK");
+                }
+
+                // Action buttons (only for alive agents)
+                if a.alive {
+                    ui.horizontal(|ui| {
+                        let kill_btn = egui::Button::new(
+                            egui::RichText::new("K").color(theme::STATE_FAULT).small(),
+                        )
+                        .min_size(egui::vec2(20.0, 16.0));
+                        if ui.add(kill_btn).on_hover_text("Kill this agent").clicked() {
+                            output.manual_cmds.push(ManualFaultCommand::KillAgent(i));
                         }
 
-                        // Action buttons (only for alive agents)
-                        if a.alive {
-                            ui.horizontal(|ui| {
-                                let kill_btn = egui::Button::new(
-                                    egui::RichText::new("K").color(theme::STATE_FAULT).small()
-                                ).min_size(egui::vec2(20.0, 16.0));
-                                if ui.add(kill_btn).on_hover_text("Kill this agent").clicked() {
-                                    output.manual_cmds.push(ManualFaultCommand::KillAgent(i));
-                                }
-
-                                let slow_btn = egui::Button::new(
-                                    egui::RichText::new("S").color(Color32::from_rgb(143, 58, 222)).small()
-                                ).min_size(egui::vec2(20.0, 16.0));
-                                if ui.add(slow_btn).on_hover_text("Inject latency (20 ticks)").clicked() {
-                                    output.manual_cmds.push(ManualFaultCommand::InjectLatency { agent_id: i, duration: 20 });
-                                }
+                        let slow_btn = egui::Button::new(
+                            egui::RichText::new("S").color(Color32::from_rgb(143, 58, 222)).small(),
+                        )
+                        .min_size(egui::vec2(20.0, 16.0));
+                        if ui.add(slow_btn).on_hover_text("Inject latency (20 ticks)").clicked() {
+                            output.manual_cmds.push(ManualFaultCommand::InjectLatency {
+                                agent_id: i,
+                                duration: 20,
                             });
-                        } else {
-                            ui.label("");
                         }
+                    });
+                } else {
+                    ui.label("");
+                }
 
-                        ui.end_row();
-                    }
-                });
+                ui.end_row();
+            }
         });
+    });
 }
 
 fn aggregate_view(ui: &mut egui::Ui, agents: &[SimAgent]) {
@@ -154,7 +157,12 @@ fn aggregate_view(ui: &mut egui::Ui, agents: &[SimAgent]) {
         for (i, &count) in counts.iter().enumerate() {
             let frac = count as f32 / max_count as f32;
             let bar = egui::ProgressBar::new(frac)
-                .text(format!("{}-{}: {}", (i as f32 * bucket_size) as u32, ((i + 1) as f32 * bucket_size) as u32, count))
+                .text(format!(
+                    "{}-{}: {}",
+                    (i as f32 * bucket_size) as u32,
+                    ((i + 1) as f32 * bucket_size) as u32,
+                    count
+                ))
                 .desired_width(ui.available_width());
             ui.add(bar);
         }

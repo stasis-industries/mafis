@@ -8,10 +8,7 @@ pub struct HeatState {
 
 impl Default for HeatState {
     fn default() -> Self {
-        Self {
-            heat: 0.0,
-            total_moves: 0,
-        }
+        Self { heat: 0.0, total_moves: 0 }
     }
 }
 

@@ -6,8 +6,8 @@ abstract: >-
   A fault resilience observatory for lifelong multi-agent path finding (MAPF).
   Measures how multi-agent warehouse robotics systems degrade, recover, and
   adapt under real-world fault conditions in real-time 3D WebAssembly simulation.
-version: 0.1.0
-date-released: "2025-01-01"
+version: 0.5.0
+date-released: "2026-04-01"
 url: "https://stasis-website.vercel.app"
 repository-code: "https://github.com/stasis-industries/mafis"
 license: MIT
@@ -24,5 +24,6 @@ keywords:
   - PIBT
   - RHCR
 authors:
-  - name: "Stasis industries"
-    website: "https://stasis-website.vercel.app"
+  - family-names: Truong
+    given-names: Teddy
+    website: "https://github.com/onsraa"

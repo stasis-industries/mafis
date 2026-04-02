@@ -89,11 +89,12 @@ pub fn drive_simulation(
 
     // Fast-forward: if resuming from a rewound tick, restore normal speed
     if let Some(target) = resume_target.target_tick
-        && sim.runner.tick >= target {
-            resume_target.target_tick = None;
-            *fixed_time = Time::<Fixed>::from_hz(config.tick_hz);
-            return;
-        }
+        && sim.runner.tick >= target
+    {
+        resume_target.target_tick = None;
+        *fixed_time = Time::<Fixed>::from_hz(config.tick_hz);
+        return;
+    }
 
     if step_mode.pending {
         step_mode.pending = false;
@@ -109,10 +110,11 @@ pub fn drive_simulation(
 
     // Legacy max_ticks (used by export/tests)
     if let Some(max) = config.max_ticks
-        && sim.runner.tick >= max {
-            next_state.set(SimState::Finished);
-            return;
-        }
+        && sim.runner.tick >= max
+    {
+        next_state.set(SimState::Finished);
+        return;
+    }
 
     // In lifelong mode, all_at_goal never triggers finish (agents get new goals).
     if result.all_at_goal && !sim.runner.agents.is_empty() {
@@ -133,11 +135,7 @@ pub fn drive_simulation(
 pub fn sync_runner_to_ecs(
     sim: Res<LiveSim>,
     registry: Res<AgentRegistry>,
-    mut agents: Query<(
-        &AgentIndex,
-        &mut LogicalAgent,
-        Option<&mut HeatState>,
-    )>,
+    mut agents: Query<(&AgentIndex, &mut LogicalAgent, Option<&mut HeatState>)>,
     mut config: ResMut<SimulationConfig>,
     mut lifelong: ResMut<LifelongConfig>,
     mut grid: ResMut<GridMap>,
@@ -209,9 +207,7 @@ pub fn sync_runner_to_ecs(
         // Latency state
         if sa.latency_remaining > 0 {
             if latency_query.get(entity).is_err() {
-                commands
-                    .entity(entity)
-                    .insert(LatencyFault { remaining: sa.latency_remaining });
+                commands.entity(entity).insert(LatencyFault { remaining: sa.latency_remaining });
             }
         } else if latency_query.get(entity).is_ok() {
             commands.entity(entity).remove::<LatencyFault>();

@@ -43,11 +43,7 @@ pub struct ResilienceBaseline {
 
 impl Default for ResilienceBaseline {
     fn default() -> Self {
-        Self {
-            baseline_throughput: 0.0,
-            baseline_idle_ratio: 0.0,
-            warmup_complete: false,
-        }
+        Self { baseline_throughput: 0.0, baseline_idle_ratio: 0.0, warmup_complete: false }
     }
 }
 
@@ -65,8 +61,7 @@ pub struct PhasePlugin;
 
 impl Plugin for PhasePlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<SimulationPhase>()
-            .init_resource::<ResilienceBaseline>();
+        app.init_resource::<SimulationPhase>().init_resource::<ResilienceBaseline>();
     }
 }
 

@@ -1,7 +1,7 @@
+use super::super::theme;
 use crate::analysis::TimeSeriesAccessor;
 use crate::analysis::baseline::{BaselineDiff, BaselineStore};
 use crate::core::live_sim::LiveSim;
-use super::super::theme;
 
 pub fn performance_panel(
     ui: &mut egui::Ui,
@@ -27,11 +27,7 @@ pub fn performance_panel(
         if let Some(ref baseline) = baseline_store.record {
             let bl_tp = baseline.avg_throughput;
             let delta = tp - bl_tp;
-            let color = if delta >= 0.0 {
-                theme::ZONE_GOOD
-            } else {
-                theme::ZONE_POOR
-            };
+            let color = if delta >= 0.0 { theme::ZONE_GOOD } else { theme::ZONE_POOR };
             ui.label("");
             ui.colored_label(color, format!("{delta:+.2} vs baseline"));
             ui.end_row();
@@ -45,11 +41,7 @@ pub fn performance_panel(
         if let Some(ref baseline) = baseline_store.record {
             let bl_tasks = baseline.tasks_at(sim.runner.tick);
             let delta = sim.runner.tasks_completed as i64 - bl_tasks as i64;
-            let color = if delta >= 0 {
-                theme::ZONE_GOOD
-            } else {
-                theme::ZONE_POOR
-            };
+            let color = if delta >= 0 { theme::ZONE_GOOD } else { theme::ZONE_POOR };
             ui.label("");
             ui.colored_label(color, format!("{delta:+} vs baseline"));
             ui.end_row();
@@ -70,11 +62,7 @@ pub fn performance_panel(
 
         // Gap
         if baseline_diff.gap != 0 {
-            let gap_color = if baseline_diff.gap > 0 {
-                theme::ZONE_POOR
-            } else {
-                theme::ZONE_GOOD
-            };
+            let gap_color = if baseline_diff.gap > 0 { theme::ZONE_POOR } else { theme::ZONE_GOOD };
             ui.label("Gap");
             ui.colored_label(gap_color, format!("{}", baseline_diff.gap));
             ui.end_row();

@@ -96,9 +96,8 @@ pub fn build_adg(
 
         // Read planned path from runner (zero-copy) when available,
         // fall back to ECS planned_path (rewind/legacy).
-        let runner_path = sim.as_ref()
-            .and_then(|s| s.runner.agents.get(idx_b.0))
-            .map(|sa| &sa.planned_path);
+        let runner_path =
+            sim.as_ref().and_then(|s| s.runner.agents.get(idx_b.0)).map(|sa| &sa.planned_path);
 
         let path_iter: Box<dyn Iterator<Item = _>> = if let Some(rp) = runner_path {
             Box::new(rp.iter().take(constants::ADG_LOOKAHEAD))
@@ -110,10 +109,12 @@ pub fn build_adg(
             pos = action.apply(pos);
 
             if let Some(&entity_a) = adg.occupation.get(&pos)
-                && entity_a != entity_b && seen_edges.insert(entity_a) {
-                    adg.dependents.entry(entity_a).or_default().push(entity_b);
-                    adg.dependencies.entry(entity_b).or_default().push(entity_a);
-                }
+                && entity_a != entity_b
+                && seen_edges.insert(entity_a)
+            {
+                adg.dependents.entry(entity_a).or_default().push(entity_b);
+                adg.dependencies.entry(entity_b).or_default().push(entity_a);
+            }
         }
     }
 }
@@ -143,18 +144,27 @@ pub fn compute_betweenness_criticality(
     let agent_count = agents.iter().len();
 
     // Guard: interval and agent limit
-    if constants::BETWEENNESS_INTERVAL == 0 { return; }
-    if agent_count > constants::BETWEENNESS_AGENT_LIMIT { return; }
-    if !sim_config.tick.is_multiple_of(constants::BETWEENNESS_INTERVAL) { return; }
+    if constants::BETWEENNESS_INTERVAL == 0 {
+        return;
+    }
+    if agent_count > constants::BETWEENNESS_AGENT_LIMIT {
+        return;
+    }
+    if !sim_config.tick.is_multiple_of(constants::BETWEENNESS_INTERVAL) {
+        return;
+    }
 
     betweenness.scores.clear();
     betweenness.last_tick = sim_config.tick;
 
     // Collect all entities in the ADG
     let entities: Vec<Entity> = agents.iter().collect();
-    if entities.is_empty() { return; }
+    if entities.is_empty() {
+        return;
+    }
 
-    let entity_to_idx: HashMap<Entity, usize> = entities.iter().enumerate().map(|(i, &e)| (e, i)).collect();
+    let entity_to_idx: HashMap<Entity, usize> =
+        entities.iter().enumerate().map(|(i, &e)| (e, i)).collect();
     let n = entities.len();
 
     let mut cb = vec![0.0f32; n]; // betweenness accumulator
@@ -171,7 +181,9 @@ pub fn compute_betweenness_criticality(
     for s_idx in 0..n {
         // Reset buffers (O(n) clear instead of O(n) alloc)
         stack.clear();
-        for p in predecessors.iter_mut() { p.clear(); }
+        for p in predecessors.iter_mut() {
+            p.clear();
+        }
         sigma.fill(0.0);
         dist.fill(-1);
         delta.fill(0.0);

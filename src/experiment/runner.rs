@@ -17,8 +17,8 @@ use crate::fault::config::FaultConfig;
 use crate::fault::scenario::FaultSchedule;
 
 use super::config::{ExperimentConfig, ExperimentMatrix};
-use super::metrics::{compute_run_metrics, RunMetrics};
-use super::stats::{compute_stat_summary, StatSummary};
+use super::metrics::{RunMetrics, compute_run_metrics};
+use super::stats::{StatSummary, compute_stat_summary};
 
 /// Result of a single experiment run (paired baseline + faulted).
 #[derive(Debug, Clone)]
@@ -105,19 +105,11 @@ pub fn run_single_experiment(config: &ExperimentConfig) -> RunResult {
     let baseline_record;
     let baseline_metrics;
     {
-        let solver = crate::solver::lifelong_solver_from_name(
-            &config.solver_name,
-            grid_area,
-            actual_agents,
-        )
-        .unwrap_or_else(|| {
-            Box::new(crate::solver::pibt::PibtLifelongSolver::new())
-        });
+        let solver =
+            crate::solver::lifelong_solver_from_name(&config.solver_name, grid_area, actual_agents)
+                .unwrap_or_else(|| Box::new(crate::solver::pibt::PibtLifelongSolver::new()));
 
-        let fault_config = FaultConfig {
-            enabled: false,
-            ..Default::default()
-        };
+        let fault_config = FaultConfig { enabled: false, ..Default::default() };
 
         let mut runner = SimulationRunner::new(
             grid.clone(),
@@ -162,14 +154,9 @@ pub fn run_single_experiment(config: &ExperimentConfig) -> RunResult {
     // ── Run faulted (same topology + agents, faults enabled) ────────
     let faulted_metrics;
     {
-        let solver = crate::solver::lifelong_solver_from_name(
-            &config.solver_name,
-            grid_area,
-            actual_agents,
-        )
-        .unwrap_or_else(|| {
-            Box::new(crate::solver::pibt::PibtLifelongSolver::new())
-        });
+        let solver =
+            crate::solver::lifelong_solver_from_name(&config.solver_name, grid_area, actual_agents)
+                .unwrap_or_else(|| Box::new(crate::solver::pibt::PibtLifelongSolver::new()));
 
         let (fault_config, fault_schedule) = match &config.scenario {
             Some(scenario) => {
@@ -177,13 +164,9 @@ pub fn run_single_experiment(config: &ExperimentConfig) -> RunResult {
                 let fs = scenario.generate_schedule(config.tick_count, config.num_agents);
                 (fc, fs)
             }
-            None => (
-                FaultConfig {
-                    enabled: false,
-                    ..Default::default()
-                },
-                FaultSchedule::default(),
-            ),
+            None => {
+                (FaultConfig { enabled: false, ..Default::default() }, FaultSchedule::default())
+            }
         };
 
         let mut runner = SimulationRunner::new(
@@ -219,11 +202,7 @@ pub fn run_single_experiment(config: &ExperimentConfig) -> RunResult {
         );
     }
 
-    RunResult {
-        config: config.clone(),
-        baseline_metrics,
-        faulted_metrics,
-    }
+    RunResult { config: config.clone(), baseline_metrics, faulted_metrics }
 }
 
 /// Shared progress state for tracking experiment execution.
@@ -256,40 +235,39 @@ pub fn run_matrix(
 
     let counter = AtomicUsize::new(0);
     let progress_ref = progress.cloned();
-    let runs: Vec<RunResult> = configs.par_iter().map(|config| {
-        let i = counter.fetch_add(1, Ordering::Relaxed) + 1;
-        let label = format!(
-            "{} / {} / {} / {} agents / seed {}",
-            config.solver_name,
-            config.topology_name,
-            config.scenario_label(),
-            config.num_agents,
-            config.seed,
-        );
-        eprintln!("[{i}/{total}] {label}");
+    let runs: Vec<RunResult> = configs
+        .par_iter()
+        .map(|config| {
+            let i = counter.fetch_add(1, Ordering::Relaxed) + 1;
+            let label = format!(
+                "{} / {} / {} / {} agents / seed {}",
+                config.solver_name,
+                config.topology_name,
+                config.scenario_label(),
+                config.num_agents,
+                config.seed,
+            );
+            eprintln!("[{i}/{total}] {label}");
 
-        let result = run_single_experiment(config);
+            let result = run_single_experiment(config);
 
-        if let Some(ref p) = progress_ref
-            && let Ok(mut prog) = p.lock() {
+            if let Some(ref p) = progress_ref
+                && let Ok(mut prog) = p.lock()
+            {
                 prog.current = i;
                 prog.label = label;
             }
 
-        result
-    }).collect();
+            result
+        })
+        .collect();
 
     // Compute statistical summaries grouped by (solver, topology, scenario, scheduler, agents)
     let summaries = compute_summaries(&runs);
 
     let wall_time_total_ms = wall_start.elapsed().as_millis() as u64;
 
-    MatrixResult {
-        matrix: matrix.clone(),
-        runs,
-        summaries,
-        wall_time_total_ms,
-    }
+    MatrixResult { matrix: matrix.clone(), runs, summaries, wall_time_total_ms }
 }
 
 /// Group runs by config identity (ignoring seed) and compute stats.
@@ -318,20 +296,31 @@ pub fn compute_summaries(runs: &[RunResult]) -> Vec<ConfigSummary> {
             let n = group.len();
 
             // Extract faulted metrics for each seed
-            let throughputs: Vec<f64> = group.iter().map(|r| r.faulted_metrics.avg_throughput).collect();
-            let tasks: Vec<f64> = group.iter().map(|r| r.faulted_metrics.total_tasks as f64).collect();
-            let idle_ratios: Vec<f64> = group.iter().map(|r| r.faulted_metrics.idle_ratio).collect();
+            let throughputs: Vec<f64> =
+                group.iter().map(|r| r.faulted_metrics.avg_throughput).collect();
+            let tasks: Vec<f64> =
+                group.iter().map(|r| r.faulted_metrics.total_tasks as f64).collect();
+            let idle_ratios: Vec<f64> =
+                group.iter().map(|r| r.faulted_metrics.idle_ratio).collect();
             let fts: Vec<f64> = group.iter().map(|r| r.faulted_metrics.fault_tolerance).collect();
             let nrrs: Vec<f64> = group.iter().map(|r| r.faulted_metrics.nrr).collect();
             let cts: Vec<f64> = group.iter().map(|r| r.faulted_metrics.critical_time).collect();
-            let deficit_recs: Vec<f64> = group.iter().map(|r| r.faulted_metrics.deficit_recovery).collect();
-            let tp_recs: Vec<f64> = group.iter().map(|r| r.faulted_metrics.throughput_recovery).collect();
-            let prop_rates: Vec<f64> = group.iter().map(|r| r.faulted_metrics.propagation_rate).collect();
-            let survival_rates: Vec<f64> = group.iter().map(|r| r.faulted_metrics.survival_rate).collect();
-            let impacted_areas: Vec<f64> = group.iter().map(|r| r.faulted_metrics.impacted_area).collect();
-            let deficits: Vec<f64> = group.iter().map(|r| r.faulted_metrics.deficit_integral as f64).collect();
-            let solver_us: Vec<f64> = group.iter().map(|r| r.faulted_metrics.solver_step_time_avg_us).collect();
-            let wall_times: Vec<f64> = group.iter().map(|r| r.faulted_metrics.wall_time_ms as f64).collect();
+            let deficit_recs: Vec<f64> =
+                group.iter().map(|r| r.faulted_metrics.deficit_recovery).collect();
+            let tp_recs: Vec<f64> =
+                group.iter().map(|r| r.faulted_metrics.throughput_recovery).collect();
+            let prop_rates: Vec<f64> =
+                group.iter().map(|r| r.faulted_metrics.propagation_rate).collect();
+            let survival_rates: Vec<f64> =
+                group.iter().map(|r| r.faulted_metrics.survival_rate).collect();
+            let impacted_areas: Vec<f64> =
+                group.iter().map(|r| r.faulted_metrics.impacted_area).collect();
+            let deficits: Vec<f64> =
+                group.iter().map(|r| r.faulted_metrics.deficit_integral as f64).collect();
+            let solver_us: Vec<f64> =
+                group.iter().map(|r| r.faulted_metrics.solver_step_time_avg_us).collect();
+            let wall_times: Vec<f64> =
+                group.iter().map(|r| r.faulted_metrics.wall_time_ms as f64).collect();
 
             ConfigSummary {
                 solver_name: first.solver_name.clone(),
@@ -414,8 +403,12 @@ pub fn wasm_experiment_finish() -> String {
         let mut buf = Vec::new();
         let result = MatrixResult {
             matrix: ExperimentMatrix {
-                solvers: vec![], topologies: vec![], scenarios: vec![],
-                schedulers: vec![], agent_counts: vec![], seeds: vec![],
+                solvers: vec![],
+                topologies: vec![],
+                scenarios: vec![],
+                schedulers: vec![],
+                agent_counts: vec![],
+                seeds: vec![],
                 tick_count: 0,
             },
             runs: runs.clone(),
@@ -462,14 +455,14 @@ fn parse_config_json(json: &str) -> Option<ExperimentConfig> {
                     enabled: true,
                     scenario_type: FaultScenarioType::WearBased,
                     wear_heat_rate: rate,
-                    wear_threshold: s.get("threshold").and_then(|t| t.as_f64()).unwrap_or(80.0) as f32,
+                    wear_threshold: s.get("threshold").and_then(|t| t.as_f64()).unwrap_or(80.0)
+                        as f32,
                     ..Default::default()
                 };
                 // Custom Weibull parameters override the preset
-                if let (Some(beta), Some(eta)) = (
-                    s.get("beta").and_then(|b| b.as_f64()),
-                    s.get("eta").and_then(|e| e.as_f64()),
-                ) {
+                if let (Some(beta), Some(eta)) =
+                    (s.get("beta").and_then(|b| b.as_f64()), s.get("eta").and_then(|e| e.as_f64()))
+                {
                     scenario.custom_weibull = Some((beta as f32, eta as f32));
                 }
                 Some(scenario)
@@ -478,21 +471,28 @@ fn parse_config_json(json: &str) -> Option<ExperimentConfig> {
                 enabled: true,
                 scenario_type: FaultScenarioType::ZoneOutage,
                 zone_at_tick: s.get("at_tick").and_then(|t| t.as_u64()).unwrap_or(100),
-                zone_latency_duration: s.get("duration").and_then(|d| d.as_u64()).unwrap_or(50) as u32,
+                zone_latency_duration: s.get("duration").and_then(|d| d.as_u64()).unwrap_or(50)
+                    as u32,
                 ..Default::default()
             }),
             "intermittent" => Some(FaultScenario {
                 enabled: true,
                 scenario_type: FaultScenarioType::IntermittentFault,
                 intermittent_mtbf_ticks: s.get("mtbf").and_then(|t| t.as_u64()).unwrap_or(80),
-                intermittent_recovery_ticks: s.get("recovery").and_then(|r| r.as_u64()).unwrap_or(15) as u32,
+                intermittent_recovery_ticks: s
+                    .get("recovery")
+                    .and_then(|r| r.as_u64())
+                    .unwrap_or(15) as u32,
                 ..Default::default()
             }),
             "permanent_zone" | "perm_zone" => Some(FaultScenario {
                 enabled: true,
                 scenario_type: FaultScenarioType::PermanentZoneOutage,
                 perm_zone_at_tick: s.get("at_tick").and_then(|t| t.as_u64()).unwrap_or(100),
-                perm_zone_block_percent: s.get("block_percent").and_then(|p| p.as_f64()).unwrap_or(100.0) as f32,
+                perm_zone_block_percent: s
+                    .get("block_percent")
+                    .and_then(|p| p.as_f64())
+                    .unwrap_or(100.0) as f32,
                 ..Default::default()
             }),
             "none" | _ => None,
@@ -500,9 +500,7 @@ fn parse_config_json(json: &str) -> Option<ExperimentConfig> {
     });
 
     // Parse optional inline custom map
-    let custom_map = v.get("custom_map").and_then(|cm| {
-        parse_custom_map_data(cm)
-    });
+    let custom_map = v.get("custom_map").and_then(|cm| parse_custom_map_data(cm));
 
     Some(ExperimentConfig {
         solver_name: solver,
@@ -522,7 +520,9 @@ fn parse_config_json(json: &str) -> Option<ExperimentConfig> {
 /// parsing, same queue_direction handling, same corridor classification.
 /// Any divergence causes experiment vs observatory non-determinism.
 #[cfg(target_arch = "wasm32")]
-fn parse_custom_map_data(v: &serde_json::Value) -> Option<(crate::core::grid::GridMap, crate::core::topology::ZoneMap)> {
+fn parse_custom_map_data(
+    v: &serde_json::Value,
+) -> Option<(crate::core::grid::GridMap, crate::core::topology::ZoneMap)> {
     // Delegate to the canonical parser to guarantee parity.
     crate::core::topology::TopologyRegistry::parse_json_value(v)
 }
@@ -548,10 +548,7 @@ mod tests {
         let result = run_single_experiment(&config);
         assert!(result.baseline_metrics.total_tasks > 0);
         // No faults → faulted should match baseline
-        assert_eq!(
-            result.baseline_metrics.total_tasks,
-            result.faulted_metrics.total_tasks
-        );
+        assert_eq!(result.baseline_metrics.total_tasks, result.faulted_metrics.total_tasks);
         assert!((result.faulted_metrics.fault_tolerance - 1.0).abs() < 1e-6);
     }
 
@@ -640,10 +637,10 @@ mod tests {
     /// Regression test for missing queue_lines in parse_custom_map_data.
     #[test]
     fn experiment_matches_manual_runner() {
+        use crate::analysis::baseline::place_agents;
+        use crate::core::queue::ActiveQueuePolicy;
         use crate::core::runner::SimulationRunner;
         use crate::core::task::ActiveScheduler;
-        use crate::core::queue::ActiveQueuePolicy;
-        use crate::analysis::baseline::place_agents;
 
         let seed = 42u64;
         let num_agents = 10;
@@ -677,12 +674,15 @@ mod tests {
         let mut rng = SeededRng::new(seed);
         let agents = place_agents(num_agents, &grid, &zones, &mut rng);
 
-        let solver = crate::solver::lifelong_solver_from_name(
-            solver_name, grid_area, num_agents,
-        ).unwrap();
+        let solver =
+            crate::solver::lifelong_solver_from_name(solver_name, grid_area, num_agents).unwrap();
 
         let mut runner = SimulationRunner::new(
-            grid, zones, agents, solver, rng,
+            grid,
+            zones,
+            agents,
+            solver,
+            rng,
             crate::fault::config::FaultConfig { enabled: false, ..Default::default() },
             FaultSchedule::default(),
         );
@@ -693,11 +693,9 @@ mod tests {
 
         // Both paths must produce the same task count
         assert_eq!(
-            experiment_result.faulted_metrics.total_tasks,
-            runner.tasks_completed,
+            experiment_result.faulted_metrics.total_tasks, runner.tasks_completed,
             "experiment runner ({}) vs manual runner ({}) task count mismatch",
-            experiment_result.faulted_metrics.total_tasks,
-            runner.tasks_completed,
+            experiment_result.faulted_metrics.total_tasks, runner.tasks_completed,
         );
     }
 
@@ -744,11 +742,9 @@ mod tests {
 
         // Both baselines must produce the same task count
         assert_eq!(
-            experiment_result.baseline_metrics.total_tasks,
-            observatory_baseline.total_tasks,
+            experiment_result.baseline_metrics.total_tasks, observatory_baseline.total_tasks,
             "experiment baseline ({}) vs observatory baseline ({}) task count mismatch",
-            experiment_result.baseline_metrics.total_tasks,
-            observatory_baseline.total_tasks,
+            experiment_result.baseline_metrics.total_tasks, observatory_baseline.total_tasks,
         );
 
         // Also verify tick-by-tick throughput series lengths match
@@ -800,11 +796,9 @@ mod tests {
         let observatory_baseline = run_headless(&baseline_config);
 
         assert_eq!(
-            experiment_result.baseline_metrics.total_tasks,
-            observatory_baseline.total_tasks,
+            experiment_result.baseline_metrics.total_tasks, observatory_baseline.total_tasks,
             "token_passing + compact_grid: experiment baseline ({}) vs observatory baseline ({}) diverged",
-            experiment_result.baseline_metrics.total_tasks,
-            observatory_baseline.total_tasks,
+            experiment_result.baseline_metrics.total_tasks, observatory_baseline.total_tasks,
         );
     }
 
@@ -812,10 +806,10 @@ mod tests {
     /// with burst_20pct on token_passing + compact_grid (matches user's report).
     #[test]
     fn experiment_faulted_parity_token_passing_burst() {
+        use crate::analysis::baseline::place_agents;
+        use crate::core::queue::ActiveQueuePolicy;
         use crate::core::runner::SimulationRunner;
         use crate::core::task::ActiveScheduler;
-        use crate::core::queue::ActiveQueuePolicy;
-        use crate::analysis::baseline::place_agents;
 
         let seed = 42u64;
         let num_agents = 20;
@@ -858,28 +852,24 @@ mod tests {
         let mut rng = SeededRng::new(seed);
         let agents = place_agents(actual_agents, &grid, &zones, &mut rng);
 
-        let solver = crate::solver::lifelong_solver_from_name(
-            solver_name, grid_area, actual_agents,
-        ).unwrap();
+        let solver =
+            crate::solver::lifelong_solver_from_name(solver_name, grid_area, actual_agents)
+                .unwrap();
 
         let fault_config = scenario.to_fault_config();
         let fault_schedule = scenario.generate_schedule(tick_count, num_agents);
 
-        let mut runner = SimulationRunner::new(
-            grid, zones, agents, solver, rng,
-            fault_config, fault_schedule,
-        );
+        let mut runner =
+            SimulationRunner::new(grid, zones, agents, solver, rng, fault_config, fault_schedule);
 
         for _ in 0..tick_count {
             runner.tick(scheduler.scheduler(), queue_policy.policy());
         }
 
         assert_eq!(
-            experiment_result.faulted_metrics.total_tasks,
-            runner.tasks_completed,
+            experiment_result.faulted_metrics.total_tasks, runner.tasks_completed,
             "faulted parity: experiment ({}) vs manual runner ({}) — token_passing burst_20pct",
-            experiment_result.faulted_metrics.total_tasks,
-            runner.tasks_completed,
+            experiment_result.faulted_metrics.total_tasks, runner.tasks_completed,
         );
     }
 

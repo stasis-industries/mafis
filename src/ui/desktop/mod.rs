@@ -21,9 +21,9 @@ use self::state::DesktopUiState;
 #[cfg(not(feature = "headless"))]
 use crate::core::state::SimulationConfig;
 #[cfg(not(feature = "headless"))]
-use crate::core::topology::ActiveTopology;
-#[cfg(not(feature = "headless"))]
 use crate::core::task::ActiveScheduler;
+#[cfg(not(feature = "headless"))]
+use crate::core::topology::ActiveTopology;
 #[cfg(not(feature = "headless"))]
 use crate::ui::controls::UiState;
 
@@ -60,8 +60,7 @@ impl Plugin for DesktopUiPlugin {
             app.add_systems(
                 EguiPrimaryContextPass,
                 (
-                    theme::apply_theme_once
-                        .run_if(|applied: Res<ThemeApplied>| !applied.0),
+                    theme::apply_theme_once.run_if(|applied: Res<ThemeApplied>| !applied.0),
                     experiment_fullpage_ui,
                 ),
             )
@@ -81,28 +80,23 @@ impl Plugin for DesktopUiPlugin {
                 .add_systems(
                     EguiPrimaryContextPass,
                     (
-                        theme::apply_theme_once
-                            .run_if(|applied: Res<ThemeApplied>| !applied.0),
+                        theme::apply_theme_once.run_if(|applied: Res<ThemeApplied>| !applied.0),
                         toolbar::toolbar_ui,
-                        timeline::timeline_ui
-                            .after(toolbar::toolbar_ui)
-                            .run_if(|d: Res<DesktopUiState>| !d.experiment_fullpage && d.show_timeline),
+                        timeline::timeline_ui.after(toolbar::toolbar_ui).run_if(
+                            |d: Res<DesktopUiState>| !d.experiment_fullpage && d.show_timeline,
+                        ),
                         panels::left_panel_ui
                             .after(timeline::timeline_ui)
                             .run_if(|d: Res<DesktopUiState>| !d.experiment_fullpage),
                         panels::right_panel_ui
                             .after(timeline::timeline_ui)
                             .run_if(|d: Res<DesktopUiState>| !d.experiment_fullpage),
-                        experiment_fullpage_ui
-                            .after(toolbar::toolbar_ui),
+                        experiment_fullpage_ui.after(toolbar::toolbar_ui),
                     ),
                 )
                 .add_systems(
                     Update,
-                    (
-                        shortcuts::handle_shortcuts.in_set(BridgeSet),
-                        process_experiment_commands,
-                    ),
+                    (shortcuts::handle_shortcuts.in_set(BridgeSet), process_experiment_commands),
                 );
         }
     }
@@ -202,8 +196,12 @@ fn experiment_fullpage_ui(
                 commands.remove_resource::<ExperimentHandle>();
             }
             ExperimentCommand::SimulateIn3D {
-                solver, topology: topo, scheduler: sched,
-                num_agents, seed, tick_count,
+                solver,
+                topology: topo,
+                scheduler: sched,
+                num_agents,
+                seed,
+                tick_count,
             } => {
                 desktop.experiment_fullpage = false;
                 ui_state.solver_name = solver;
@@ -212,7 +210,9 @@ fn experiment_fullpage_ui(
                 ui_state.seed = seed;
                 config.duration = tick_count;
                 if let Some(entry) = topo_registry.entries.iter().find(|e| e.id == topo) {
-                    if let Some((grid, zones)) = crate::core::topology::TopologyRegistry::parse_entry(entry) {
+                    if let Some((grid, zones)) =
+                        crate::core::topology::TopologyRegistry::parse_entry(entry)
+                    {
                         topology.set(Box::new(crate::core::topology::CustomMap { grid, zones }));
                     }
                 } else {

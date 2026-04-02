@@ -1,7 +1,7 @@
 use std::f32::consts::PI;
 
-use bevy::prelude::*;
 use bevy::mesh::{Indices, PrimitiveTopology};
+use bevy::prelude::*;
 
 use crate::constants;
 use crate::core::action::Direction;
@@ -11,11 +11,7 @@ const CELL_SIZE: f32 = 1.0;
 const OBSTACLE_HEIGHT: f32 = 0.45;
 
 pub fn grid_to_world(grid_pos: IVec2) -> Vec3 {
-    Vec3::new(
-        grid_pos.x as f32 * CELL_SIZE,
-        0.0,
-        grid_pos.y as f32 * CELL_SIZE,
-    )
+    Vec3::new(grid_pos.x as f32 * CELL_SIZE, 0.0, grid_pos.y as f32 * CELL_SIZE)
 }
 
 #[derive(Component)]
@@ -37,11 +33,7 @@ pub fn setup_environment(
 
     // Primary directional light (soft overhead)
     commands.spawn((
-        DirectionalLight {
-            illuminance: 8_000.0,
-            shadows_enabled: false,
-            ..default()
-        },
+        DirectionalLight { illuminance: 8_000.0, shadows_enabled: false, ..default() },
         Transform::from_rotation(
             Quat::from_rotation_x(-PI / 3.0) * Quat::from_rotation_y(-PI / 6.0),
         ),
@@ -69,11 +61,7 @@ pub fn setup_environment(
     let cam_distance = grid_width.max(grid_height) * 1.2;
     commands.spawn((
         Camera3d::default(),
-        AmbientLight {
-            color: Color::WHITE,
-            brightness: 450.0,
-            affects_lightmapped_meshes: true,
-        },
+        AmbientLight { color: Color::WHITE, brightness: 450.0, affects_lightmapped_meshes: true },
         Transform::from_xyz(
             center_x + cam_distance * 0.5,
             cam_distance * 0.8,
@@ -108,8 +96,7 @@ pub fn spawn_floor_and_lines(
     ));
 
     // Grid lines — skip at large grids (258 entities at 128×128 = invisible noise)
-    if grid.width <= constants::GRID_LINE_THRESHOLD
-        && grid.height <= constants::GRID_LINE_THRESHOLD
+    if grid.width <= constants::GRID_LINE_THRESHOLD && grid.height <= constants::GRID_LINE_THRESHOLD
     {
         let line_material = materials.add(StandardMaterial {
             base_color: Color::srgb(0.93, 0.93, 0.95),
@@ -259,8 +246,7 @@ pub fn spawn_queue_arrows(
         commands.spawn((
             Mesh3d(arrow_mesh.clone()),
             MeshMaterial3d(arrow_mat.clone()),
-            Transform::from_xyz(world.x, 0.015, world.z)
-                .with_rotation(Quat::from_rotation_y(yaw)),
+            Transform::from_xyz(world.x, 0.015, world.z).with_rotation(Quat::from_rotation_y(yaw)),
             EnvironmentMarker,
         ));
 
@@ -284,9 +270,9 @@ fn make_arrow_mesh() -> Mesh {
     //   left wing (-0.1, -0.15)
     //   right wing (-0.1, 0.15)
     let positions = vec![
-        [0.22, 0.0, 0.0],     // tip
-        [-0.08, 0.0, -0.16],  // left wing
-        [-0.08, 0.0, 0.16],   // right wing
+        [0.22, 0.0, 0.0],    // tip
+        [-0.08, 0.0, -0.16], // left wing
+        [-0.08, 0.0, 0.16],  // right wing
     ];
     let normals = vec![[0.0, 1.0, 0.0]; 3]; // all face up
     let uvs = vec![[0.5, 0.0], [0.0, 1.0], [1.0, 1.0]];
@@ -301,10 +287,10 @@ fn make_arrow_mesh() -> Mesh {
 
 fn direction_to_yaw(dir: Direction) -> f32 {
     match dir {
-        Direction::East => 0.0,                // +X
-        Direction::North => -PI / 2.0,         // +Z (grid +Y maps to world +Z)
-        Direction::West => PI,                 // -X
-        Direction::South => PI / 2.0,          // -Z
+        Direction::East => 0.0,        // +X
+        Direction::North => -PI / 2.0, // +Z (grid +Y maps to world +Z)
+        Direction::West => PI,         // -X
+        Direction::South => PI / 2.0,  // -Z
     }
 }
 
@@ -315,11 +301,7 @@ pub fn spawn_obstacles(
     materials: &mut Assets<StandardMaterial>,
     grid: &GridMap,
 ) {
-    let obstacle_mesh = meshes.add(Cuboid::new(
-        CELL_SIZE * 0.9,
-        OBSTACLE_HEIGHT,
-        CELL_SIZE * 0.9,
-    ));
+    let obstacle_mesh = meshes.add(Cuboid::new(CELL_SIZE * 0.9, OBSTACLE_HEIGHT, CELL_SIZE * 0.9));
     let obstacle_material = materials.add(StandardMaterial {
         base_color: Color::srgb(0.45, 0.47, 0.52),
         perceptual_roughness: 0.55,

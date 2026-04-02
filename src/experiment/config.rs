@@ -36,7 +36,10 @@ impl ExperimentConfig {
                     format!("zone_{}t", s.zone_latency_duration)
                 }
                 FaultScenarioType::IntermittentFault => {
-                    format!("intermittent_{}m{}r", s.intermittent_mtbf_ticks, s.intermittent_recovery_ticks)
+                    format!(
+                        "intermittent_{}m{}r",
+                        s.intermittent_mtbf_ticks, s.intermittent_recovery_ticks
+                    )
                 }
                 FaultScenarioType::PermanentZoneOutage => {
                     format!("perm_zone_{}pct", s.perm_zone_block_percent as u32)

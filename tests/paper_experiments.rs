@@ -8,7 +8,7 @@
 
 use mafis::experiment::export;
 use mafis::experiment::paper;
-use mafis::experiment::runner::{run_matrix, MatrixResult, RunResult};
+use mafis::experiment::runner::{MatrixResult, RunResult, run_matrix};
 use std::fs;
 
 const OUTPUT_DIR: &str = "results";
@@ -32,11 +32,7 @@ fn paper_smoke() {
     }
 
     // Determinism: same seed should produce same baseline
-    let seed_42: Vec<&RunResult> = result
-        .runs
-        .iter()
-        .filter(|r| r.config.seed == 42)
-        .collect();
+    let seed_42: Vec<&RunResult> = result.runs.iter().filter(|r| r.config.seed == 42).collect();
     assert_eq!(seed_42.len(), 1);
 }
 
@@ -184,6 +180,45 @@ fn braess_resilience() {
     eprintln!("─── braess_resilience ({} runs) ───", matrix.total_runs());
     let result = run_matrix(&matrix, None);
     write_experiment_results("braess_resilience", &result);
+}
+
+/// PAAMS 2026 full experiment matrix — ~16,170 runs (~3-5 hours on 8 cores).
+/// Run with: cargo test --release --test paper_experiments paams_full -- --ignored --nocapture
+#[test]
+#[ignore]
+fn paams_full() {
+    ensure_output_dir();
+
+    let experiments = paper::paams_experiments();
+    let total_runs: usize = experiments.iter().map(|(_, m)| m.total_runs()).sum();
+    eprintln!("=== PAAMS 2026 Experiments ===");
+    eprintln!("Total experiments: {}", experiments.len());
+    eprintln!("Total runs: {total_runs}");
+    eprintln!();
+
+    let mut all_runs: Vec<RunResult> = Vec::new();
+    let overall_start = std::time::Instant::now();
+
+    for (name, matrix) in &experiments {
+        eprintln!("─── {name} ({} runs) ───", matrix.total_runs());
+        let result = run_matrix(matrix, None);
+        write_experiment_results(&format!("{name}"), &result);
+        all_runs.extend(result.runs);
+        eprintln!();
+    }
+
+    let total_wall = overall_start.elapsed();
+    eprintln!("=== PAAMS experiments complete ===");
+    eprintln!("Total runs: {}", all_runs.len());
+    eprintln!("Total wall time: {:.1}s", total_wall.as_secs_f64());
+    eprintln!("Avg per run: {:.0}ms", total_wall.as_millis() as f64 / all_runs.len() as f64);
+
+    // Write combined output
+    {
+        let mut f = fs::File::create(format!("{OUTPUT_DIR}/paams_all_runs.csv")).unwrap();
+        export::write_runs_csv(&mut f, &all_runs).unwrap();
+        eprintln!("Wrote {OUTPUT_DIR}/paams_all_runs.csv ({} rows)", all_runs.len() * 2);
+    }
 }
 
 fn write_experiment_results(name: &str, result: &MatrixResult) {

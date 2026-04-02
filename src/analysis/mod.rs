@@ -30,7 +30,9 @@ pub trait TimeSeriesAccessor {
     /// Tick 1 = first recorded tick (index 0). Tick 0 returns 0.0.
     fn throughput_at(&self, tick: u64) -> f64 {
         let s = self.throughput_series();
-        if s.is_empty() { return 0.0; }
+        if s.is_empty() {
+            return 0.0;
+        }
         let idx = tick.saturating_sub(1) as usize; // tick is 1-based
         let idx = idx.min(s.len() - 1);
         s[idx]
@@ -40,7 +42,9 @@ pub trait TimeSeriesAccessor {
     /// Tick 1 = first recorded tick (index 0). Tick 0 returns 0.
     fn tasks_at(&self, tick: u64) -> u64 {
         let s = self.tasks_completed_series();
-        if s.is_empty() { return 0; }
+        if s.is_empty() {
+            return 0;
+        }
         let idx = tick.saturating_sub(1) as usize; // tick is 1-based
         let idx = idx.min(s.len() - 1);
         s[idx]
@@ -50,7 +54,9 @@ pub trait TimeSeriesAccessor {
     /// Tick 1 = first recorded tick (index 0). Tick 0 returns 0.
     fn idle_at(&self, tick: u64) -> usize {
         let s = self.idle_count_series();
-        if s.is_empty() { return 0; }
+        if s.is_empty() {
+            return 0;
+        }
         let idx = tick.saturating_sub(1) as usize; // tick is 1-based
         let idx = idx.min(s.len() - 1);
         s[idx]
@@ -60,7 +66,9 @@ pub trait TimeSeriesAccessor {
     /// Tick 1 = first recorded tick (index 0). Tick 0 returns 0.0.
     fn wait_ratio_at(&self, tick: u64) -> f32 {
         let s = self.wait_ratio_series();
-        if s.is_empty() { return 0.0; }
+        if s.is_empty() {
+            return 0.0;
+        }
         let idx = tick.saturating_sub(1) as usize; // tick is 1-based
         let idx = idx.min(s.len() - 1);
         s[idx]
@@ -80,13 +88,11 @@ pub enum AnalysisSet {
     Metrics,
 }
 
-#[derive(Resource, Debug, Clone)]
-#[derive(Default)]
+#[derive(Resource, Debug, Clone, Default)]
 pub struct AnalysisConfig {
     pub heatmap_visible: bool,
     pub path_visible: bool,
 }
-
 
 /// Per-metric toggles — when disabled, the corresponding Rust computation is skipped.
 #[derive(Resource, Debug, Clone)]
@@ -138,8 +144,11 @@ impl MetricsConfig {
 
     /// Any fault-resilience metric enabled?
     pub fn any_fault(&self) -> bool {
-        self.fault_mttr || self.recovery_rate || self.cascade_spread
-            || self.throughput || self.idle_ratio
+        self.fault_mttr
+            || self.recovery_rate
+            || self.cascade_spread
+            || self.throughput
+            || self.idle_ratio
     }
 
     /// Any metric at all?
@@ -185,10 +194,16 @@ impl Plugin for AnalysisPlugin {
                     dependency::build_adg
                         .in_set(AnalysisSet::BuildGraph)
                         .run_if(in_state(SimState::Running))
-                        .run_if(|m: Res<MetricsConfig>, config: Res<AnalysisConfig>, hm: Res<heatmap::HeatmapState>| {
-                            m.any_cascade() || m.any_fault()
-                                || (config.heatmap_visible && hm.mode == heatmap::HeatmapMode::Criticality)
-                        }),
+                        .run_if(
+                            |m: Res<MetricsConfig>,
+                             config: Res<AnalysisConfig>,
+                             hm: Res<heatmap::HeatmapState>| {
+                                m.any_cascade()
+                                    || m.any_fault()
+                                    || (config.heatmap_visible
+                                        && hm.mode == heatmap::HeatmapMode::Criticality)
+                            },
+                        ),
                     cascade::propagate_cascade
                         .in_set(AnalysisSet::Cascade)
                         .run_if(in_state(SimState::Running))
@@ -328,10 +343,17 @@ mod tests {
     #[test]
     fn metrics_config_none() {
         let m = MetricsConfig {
-            aet: false, makespan: false, mttr: false,
-            fault_count: false, cascade_depth: false, cascade_cost: false,
-            fault_mttr: false, recovery_rate: false, cascade_spread: false,
-            throughput: false, idle_ratio: false,
+            aet: false,
+            makespan: false,
+            mttr: false,
+            fault_count: false,
+            cascade_depth: false,
+            cascade_cost: false,
+            fault_mttr: false,
+            recovery_rate: false,
+            cascade_spread: false,
+            throughput: false,
+            idle_ratio: false,
         };
         assert!(!m.any());
         assert!(!m.any_core());

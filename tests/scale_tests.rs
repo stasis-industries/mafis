@@ -156,7 +156,11 @@ fn edge_max_density_no_crash() {
 
     let solver = mafis::solver::lifelong_solver_from_name("pibt", grid_area, 64).unwrap();
     let mut runner = SimulationRunner::new(
-        grid, zones, agents, solver, rng_after,
+        grid,
+        zones,
+        agents,
+        solver,
+        rng_after,
         FaultConfig { enabled: false, ..Default::default() },
         FaultSchedule::default(),
     );
@@ -200,7 +204,11 @@ fn edge_no_pickup_cells_no_crash() {
 
     let solver = mafis::solver::lifelong_solver_from_name("pibt", 100, 5).unwrap();
     let mut runner = SimulationRunner::new(
-        grid, zones, agents, solver, rng_after,
+        grid,
+        zones,
+        agents,
+        solver,
+        rng_after,
         FaultConfig { enabled: false, ..Default::default() },
         FaultSchedule::default(),
     );
@@ -242,7 +250,11 @@ fn edge_no_delivery_cells_no_crash() {
 
     let solver = mafis::solver::lifelong_solver_from_name("pibt", 100, 5).unwrap();
     let mut runner = SimulationRunner::new(
-        grid, zones, agents, solver, rng_after,
+        grid,
+        zones,
+        agents,
+        solver,
+        rng_after,
         FaultConfig { enabled: false, ..Default::default() },
         FaultSchedule::default(),
     );

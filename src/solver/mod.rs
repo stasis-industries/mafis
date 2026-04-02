@@ -1,28 +1,28 @@
-pub mod astar;
-pub mod heuristics;
+pub mod shared;
 pub mod lifelong;
-pub mod pbs_planner;
 pub mod pibt;
-pub mod pibt_core;
-pub mod pibt_window_planner;
-pub mod priority_astar_planner;
 pub mod rhcr;
-pub mod token_common;
-pub mod token_passing;
-pub mod traits;
-pub mod windowed;
-pub mod guidance;
+pub mod token;
 pub mod rt_lacam;
-pub mod tpts;
+
+// ---------------------------------------------------------------------------
+// Backward-compatible re-exports — external callers keep working
+// ---------------------------------------------------------------------------
+
+// `crate::solver::heuristics::*` still works
+pub use shared::heuristics;
+// `crate::solver::traits::*` still works
+pub use shared::traits;
+// `crate::solver::pibt::PibtLifelongSolver` etc. still work (via pibt/mod.rs re-exports)
 
 use bevy::prelude::*;
 
+use self::lifelong::LifelongSolver;
 use self::pibt::{PibtLifelongSolver, default_active_solver};
 use self::rhcr::{RhcrConfig, RhcrMode, RhcrSolver};
-use self::token_passing::TokenPassingSolver;
 use self::rt_lacam::RtLaCAMSolver;
-use self::tpts::TptsSolver;
-use self::lifelong::LifelongSolver;
+use self::token::TokenPassingSolver;
+use self::token::TptsSolver;
 
 // ---------------------------------------------------------------------------
 // Solver registry

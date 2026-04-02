@@ -1,8 +1,8 @@
 #[cfg(target_arch = "wasm32")]
 pub mod bridge;
+pub mod controls;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod desktop;
-pub mod controls;
 
 use bevy::prelude::*;
 

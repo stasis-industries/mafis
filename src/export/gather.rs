@@ -12,9 +12,9 @@ use crate::fault::config::FaultConfig;
 use crate::fault::heat::HeatState;
 use crate::ui::controls::UiState;
 
+use super::FaultLog;
 use super::config::ExportTrigger;
 use super::data::*;
-use super::FaultLog;
 
 type AgentQueryItem<'a> = (
     Entity,
@@ -52,11 +52,8 @@ pub fn gather_snapshot(
         seed: rng.seed(),
     };
 
-    let mut obstacle_positions: Vec<[i32; 2]> = grid
-        .obstacles()
-        .iter()
-        .map(|p| [p.x, p.y])
-        .collect();
+    let mut obstacle_positions: Vec<[i32; 2]> =
+        grid.obstacles().iter().map(|p| [p.x, p.y]).collect();
     obstacle_positions.sort();
 
     let config = ExportSimConfig {
@@ -84,14 +81,9 @@ pub fn gather_snapshot(
     let mut agents: Vec<ExportAgent> = agent_data
         .iter()
         .map(|(entity, agent, heat, delay, action_stats, is_dead)| {
-            let agent_index = registry
-                .get_index(*entity)
-                .map(|ai| ai.0)
-                .unwrap_or(0);
+            let agent_index = registry.get_index(*entity).map(|ai| ai.0).unwrap_or(0);
 
-            let (heat_val, moves) = heat
-                .map(|h| (h.heat, h.total_moves))
-                .unwrap_or((0.0, 0));
+            let (heat_val, moves) = heat.map(|h| (h.heat, h.total_moves)).unwrap_or((0.0, 0));
 
             let depth = delay.map(|d| d.depth).unwrap_or(0);
 
@@ -115,10 +107,7 @@ pub fn gather_snapshot(
         .fault_log
         .iter()
         .map(|entry| {
-            let agent_index = registry
-                .get_index(entry.faulted_entity)
-                .map(|ai| ai.0)
-                .unwrap_or(0);
+            let agent_index = registry.get_index(entry.faulted_entity).map(|ai| ai.0).unwrap_or(0);
 
             let fault_type = fault_log
                 .entries
@@ -142,14 +131,10 @@ pub fn gather_snapshot(
     let faults: Vec<ExportFault> = faults
         .into_iter()
         .map(|mut f| {
-            if let Some(fl) = fault_log
-                .entries
-                .iter()
-                .find(|fl| {
-                    registry.get_index(fl.entity).map(|ai| ai.0) == Some(f.agent_index)
-                        && fl.tick == f.tick
-                })
-            {
+            if let Some(fl) = fault_log.entries.iter().find(|fl| {
+                registry.get_index(fl.entity).map(|ai| ai.0) == Some(f.agent_index)
+                    && fl.tick == f.tick
+            }) {
                 f.position = [fl.position.x, fl.position.y];
             }
             f

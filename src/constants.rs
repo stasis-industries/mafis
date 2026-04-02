@@ -80,10 +80,10 @@ pub const ADG_LOOKAHEAD: usize = 3;
 /// Empirically tuned to keep ADG computation under ~1ms/tick at each bracket.
 /// At 500 agents on a 32x21 grid, stride 8 samples 12.5% of ticks (sufficient
 /// for detecting cascading delays without dominating frame time).
-pub const ADG_STRIDE_SMALL: u64 = 1;   // ≤100 agents: every tick
-pub const ADG_STRIDE_MED: u64 = 3;     // 101–300 agents: every 3 ticks
-pub const ADG_STRIDE_LARGE: u64 = 5;   // 301–500 agents: every 5 ticks
-pub const ADG_STRIDE_XLARGE: u64 = 8;  // 500+ agents: every 8 ticks
+pub const ADG_STRIDE_SMALL: u64 = 1; // ≤100 agents: every tick
+pub const ADG_STRIDE_MED: u64 = 3; // 101–300 agents: every 3 ticks
+pub const ADG_STRIDE_LARGE: u64 = 5; // 301–500 agents: every 5 ticks
+pub const ADG_STRIDE_XLARGE: u64 = 8; // 500+ agents: every 8 ticks
 
 /// Agent count thresholds for ADG stride tiers.
 pub const ADG_TIER_SMALL: usize = 100;

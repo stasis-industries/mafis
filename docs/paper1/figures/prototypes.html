@@ -1,0 +1,707 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>MAFIS Paper Figures — All Prototypes</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: "IBM Plex Sans", "Helvetica Neue", sans-serif;
+    background: #f5f5f0;
+    color: #1a1a1a;
+    padding: 40px;
+    max-width: 900px;
+    margin: 0 auto;
+  }
+  h1 { font-size: 14px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #666; margin-bottom: 12px; }
+  .paper-label {
+    display: inline-block; font-size: 11px; font-weight: 700; letter-spacing: 0.1em;
+    text-transform: uppercase; padding: 4px 12px; margin-bottom: 32px;
+  }
+  .paper-a { background: #e8f0fe; color: #1a56db; }
+  .paper-b { background: #fef3e2; color: #b45309; }
+  .figure-block {
+    background: white; border: 1px solid #ddd; padding: 32px; margin-bottom: 48px;
+  }
+  .figure-label { font-size: 11px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: #888; margin-bottom: 6px; }
+  .figure-title { font-size: 15px; font-weight: 500; color: #1a1a1a; margin-bottom: 4px; }
+  .figure-caption { font-size: 12px; color: #666; margin-bottom: 20px; line-height: 1.5; }
+  .figure-used-in {
+    display: inline-block; font-size: 10px; font-weight: 600; letter-spacing: 0.08em;
+    text-transform: uppercase; padding: 2px 8px; margin-bottom: 20px; margin-right: 6px;
+  }
+  .tag-a { background: #e8f0fe; color: #1a56db; }
+  .tag-b { background: #fef3e2; color: #b45309; }
+  svg text { font-family: "IBM Plex Sans", "Helvetica Neue", sans-serif; }
+  .divider { border: none; border-top: 2px solid #ddd; margin: 48px 0; }
+</style>
+</head>
+<body>
+
+<h1>MAFIS — Paper Figure Prototypes (7 figures)</h1>
+<span class="paper-label paper-a">Paper A — Demo Track</span>
+<span class="paper-label paper-b">Paper B — AREA Workshop</span>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<!-- FIGURE 1: System Architecture                               -->
+<!-- ═══════════════════════════════════════════════════════════ -->
+<div class="figure-block">
+  <div class="figure-label">Figure 1</div>
+  <div class="figure-title">MAFIS System Architecture</div>
+  <div class="figure-caption">Three-layer design: ECS simulation core, WASM bridge with JSON serialization, and web interface with 3D viewport and charts.</div>
+  <span class="figure-used-in tag-a">Paper A §2</span>
+
+  <svg width="720" height="340" viewBox="0 0 720 340">
+    <!-- Layer 3: Web Interface -->
+    <rect x="30" y="20" width="660" height="80" rx="3" fill="#1e3a5f" />
+    <text x="50" y="42" font-size="10" font-weight="600" fill="#7baed6" letter-spacing="0.08em">WEB INTERFACE  (HTML / CSS / JS)</text>
+    <rect x="50" y="52" width="130" height="36" rx="2" fill="none" stroke="#4a7fa8" />
+    <text x="115" y="74" text-anchor="middle" font-size="11" fill="white">uPlot Charts</text>
+    <rect x="195" y="52" width="130" height="36" rx="2" fill="none" stroke="#4a7fa8" />
+    <text x="260" y="74" text-anchor="middle" font-size="11" fill="white">3D Viewport</text>
+    <rect x="340" y="52" width="130" height="36" rx="2" fill="none" stroke="#4a7fa8" />
+    <text x="405" y="74" text-anchor="middle" font-size="11" fill="white">Controls</text>
+    <rect x="485" y="52" width="90" height="36" rx="2" fill="none" stroke="#4a7fa8" />
+    <text x="530" y="74" text-anchor="middle" font-size="11" fill="white">Scorecard</text>
+    <rect x="590" y="52" width="80" height="36" rx="2" fill="none" stroke="#4a7fa8" />
+    <text x="630" y="74" text-anchor="middle" font-size="11" fill="white">Export</text>
+
+    <!-- Arrow: Web ↔ Bridge -->
+    <line x1="360" y1="100" x2="360" y2="130" stroke="#999" stroke-width="1.5" />
+    <polygon points="355,126 360,134 365,126" fill="#999" />
+    <text x="370" y="115" font-size="9.5" fill="#888">JSON (100ms poll)</text>
+    <text x="370" y="126" font-size="9.5" fill="#888">send_command()</text>
+
+    <!-- Layer 2: WASM Bridge -->
+    <rect x="30" y="134" width="660" height="56" rx="3" fill="#2d4a22" />
+    <text x="50" y="153" font-size="10" font-weight="600" fill="#7dba5a" letter-spacing="0.08em">WASM BRIDGE  (src/ui/bridge.rs)</text>
+    <rect x="50" y="160" width="185" height="22" rx="2" fill="none" stroke="#4a7a30" />
+    <text x="142" y="175" text-anchor="middle" font-size="10" fill="white">get_simulation_state() → JSON</text>
+    <rect x="250" y="160" width="170" height="22" rx="2" fill="none" stroke="#4a7a30" />
+    <text x="335" y="175" text-anchor="middle" font-size="10" fill="white">send_command(cmd: &amp;str)</text>
+    <rect x="435" y="160" width="135" height="22" rx="2" fill="none" stroke="#4a7a30" />
+    <text x="502" y="175" text-anchor="middle" font-size="10" fill="white">sync_state_to_js</text>
+    <rect x="585" y="160" width="85" height="22" rx="2" fill="none" stroke="#4a7a30" />
+    <text x="627" y="175" text-anchor="middle" font-size="10" fill="white">Adaptive</text>
+
+    <!-- Arrow: Bridge ↔ ECS -->
+    <line x1="360" y1="190" x2="360" y2="218" stroke="#999" stroke-width="1.5" />
+    <polygon points="355,214 360,222 365,214" fill="#999" />
+    <text x="370" y="208" font-size="9.5" fill="#888">ECS resources</text>
+
+    <!-- Layer 1: Bevy ECS -->
+    <rect x="30" y="222" width="660" height="98" rx="3" fill="#3b1f1f" />
+    <text x="50" y="242" font-size="10" font-weight="600" fill="#c97a6a" letter-spacing="0.08em">BEVY ECS SIMULATION  (FixedUpdate @ 20 Hz)</text>
+
+    <!-- Core loop boxes -->
+    <rect x="50" y="254" width="95" height="52" rx="2" fill="none" stroke="#7a3a2a" />
+    <text x="97" y="272" text-anchor="middle" font-size="11" fill="white">Agents</text>
+    <text x="97" y="286" text-anchor="middle" font-size="9" fill="#c97a6a">TaskLeg, pos</text>
+    <text x="97" y="298" text-anchor="middle" font-size="9" fill="#c97a6a">SeededRng</text>
+
+    <rect x="160" y="254" width="95" height="52" rx="2" fill="none" stroke="#7a3a2a" />
+    <text x="207" y="272" text-anchor="middle" font-size="11" fill="white">Solver</text>
+    <text x="207" y="286" text-anchor="middle" font-size="9" fill="#c97a6a">7 lifelong</text>
+    <text x="207" y="298" text-anchor="middle" font-size="9" fill="#c97a6a">4 paradigms</text>
+
+    <rect x="270" y="254" width="95" height="52" rx="2" fill="none" stroke="#7a3a2a" />
+    <text x="317" y="272" text-anchor="middle" font-size="11" fill="white">Faults</text>
+    <text x="317" y="286" text-anchor="middle" font-size="9" fill="#c97a6a">heat → detect</text>
+    <text x="317" y="298" text-anchor="middle" font-size="9" fill="#c97a6a">→ replan</text>
+
+    <rect x="380" y="254" width="95" height="52" rx="2" fill="none" stroke="#7a3a2a" />
+    <text x="427" y="272" text-anchor="middle" font-size="11" fill="white">Analysis</text>
+    <text x="427" y="286" text-anchor="middle" font-size="9" fill="#c97a6a">ADG, cascade</text>
+    <text x="427" y="298" text-anchor="middle" font-size="9" fill="#c97a6a">12 metrics</text>
+
+    <rect x="490" y="254" width="95" height="52" rx="2" fill="none" stroke="#7a3a2a" />
+    <text x="537" y="272" text-anchor="middle" font-size="11" fill="white">Scheduler</text>
+    <text x="537" y="286" text-anchor="middle" font-size="9" fill="#c97a6a">Random</text>
+    <text x="537" y="298" text-anchor="middle" font-size="9" fill="#c97a6a">Closest</text>
+
+    <rect x="600" y="254" width="70" height="52" rx="2" fill="none" stroke="#7a3a2a" />
+    <text x="635" y="272" text-anchor="middle" font-size="11" fill="white">Render</text>
+    <text x="635" y="286" text-anchor="middle" font-size="9" fill="#c97a6a">3D, heatmap</text>
+    <text x="635" y="298" text-anchor="middle" font-size="9" fill="#c97a6a">palette</text>
+
+    <!-- Flow arrows inside ECS -->
+    <line x1="145" y1="280" x2="158" y2="280" stroke="#c97a6a" stroke-width="1" marker-end="url(#arrow-red)" />
+    <line x1="255" y1="280" x2="268" y2="280" stroke="#c97a6a" stroke-width="1" />
+    <line x1="365" y1="280" x2="378" y2="280" stroke="#c97a6a" stroke-width="1" />
+
+  </svg>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<!-- FIGURE 2: Fault Measurement Pipeline                        -->
+<!-- ═══════════════════════════════════════════════════════════ -->
+<div class="figure-block">
+  <div class="figure-label">Figure 2</div>
+  <div class="figure-title">Fault Measurement Pipeline</div>
+  <div class="figure-caption">How a fault event propagates through the measurement system: detection → ADG cascade BFS → path invalidation → differential metrics → scorecard. This is the core methodological contribution of Paper B.</div>
+  <span class="figure-used-in tag-b">Paper B §3</span>
+
+  <svg width="720" height="380" viewBox="0 0 720 380">
+
+    <!-- Row 1: Fault Event -->
+    <rect x="250" y="20" width="220" height="44" rx="3" fill="#dc2626" />
+    <text x="360" y="38" text-anchor="middle" font-size="12" font-weight="600" fill="white">Fault Event</text>
+    <text x="360" y="52" text-anchor="middle" font-size="10" fill="#fca5a5">agent dies / latency injected / zone blocked</text>
+
+    <!-- Arrow down -->
+    <line x1="360" y1="64" x2="360" y2="88" stroke="#666" stroke-width="1.5" />
+    <polygon points="355,84 360,92 365,84" fill="#666" />
+
+    <!-- Row 2: Two parallel branches -->
+    <!-- Left: ADG Cascade -->
+    <rect x="80" y="92" width="240" height="64" rx="3" fill="#f5f5f0" stroke="#999" />
+    <text x="200" y="112" text-anchor="middle" font-size="11" font-weight="600" fill="#333">ADG Cascade BFS</text>
+    <text x="200" y="126" text-anchor="middle" font-size="10" fill="#666">Build Action Dependency Graph</text>
+    <text x="200" y="140" text-anchor="middle" font-size="10" fill="#666">BFS from dead agent → dependents (depth ≤ 10)</text>
+
+    <!-- Right: Path Invalidation -->
+    <rect x="400" y="92" width="240" height="64" rx="3" fill="#f5f5f0" stroke="#999" />
+    <text x="520" y="112" text-anchor="middle" font-size="11" font-weight="600" fill="#333">Path Invalidation</text>
+    <text x="520" y="126" text-anchor="middle" font-size="10" fill="#666">Count agents whose planned paths</text>
+    <text x="520" y="140" text-anchor="middle" font-size="10" fill="#666">cross the dead cell (instant of death)</text>
+
+    <!-- Fork lines from fault event to both -->
+    <line x1="360" y1="88" x2="200" y2="92" stroke="#666" stroke-width="1" />
+    <line x1="360" y1="88" x2="520" y2="92" stroke="#666" stroke-width="1" />
+
+    <!-- Merge: agents_affected -->
+    <line x1="200" y1="156" x2="200" y2="178" stroke="#666" stroke-width="1" />
+    <line x1="520" y1="156" x2="520" y2="178" stroke="#666" stroke-width="1" />
+    <line x1="200" y1="178" x2="520" y2="178" stroke="#666" stroke-width="1" />
+    <line x1="360" y1="178" x2="360" y2="198" stroke="#666" stroke-width="1.5" />
+    <polygon points="355,194 360,202 365,194" fill="#666" />
+
+    <rect x="220" y="202" width="280" height="36" rx="3" fill="#f0fdf4" stroke="#16a34a" />
+    <text x="360" y="218" text-anchor="middle" font-size="11" font-weight="600" fill="#166534">agents_affected = max(BFS, paths_invalidated)</text>
+    <text x="360" y="230" text-anchor="middle" font-size="10" fill="#166534">captures both dependency cascade + obstacle creation</text>
+
+    <!-- Arrow down to metrics -->
+    <line x1="360" y1="238" x2="360" y2="262" stroke="#666" stroke-width="1.5" />
+    <polygon points="355,258 360,266 365,258" fill="#666" />
+
+    <!-- Row 3: Metrics computation (6 boxes in 2 rows) -->
+    <rect x="40" y="266" width="640" height="68" rx="3" fill="#f8fafc" stroke="#94a3b8" />
+    <text x="60" y="282" font-size="10" font-weight="600" fill="#475569" letter-spacing="0.06em">DIFFERENTIAL METRICS  (baseline required)</text>
+
+    <rect x="55" y="290" width="90" height="32" rx="2" fill="#e0f2fe" stroke="#0284c7" />
+    <text x="100" y="310" text-anchor="middle" font-size="10" font-weight="600" fill="#0369a1">MTTR</text>
+
+    <rect x="155" y="290" width="90" height="32" rx="2" fill="#e0f2fe" stroke="#0284c7" />
+    <text x="200" y="310" text-anchor="middle" font-size="10" font-weight="600" fill="#0369a1">MTBF</text>
+
+    <rect x="255" y="290" width="90" height="32" rx="2" fill="#e0f2fe" stroke="#0284c7" />
+    <text x="300" y="310" text-anchor="middle" font-size="10" font-weight="600" fill="#0369a1">Prop. Rate</text>
+
+    <rect x="355" y="290" width="90" height="32" rx="2" fill="#e0f2fe" stroke="#0284c7" />
+    <text x="400" y="310" text-anchor="middle" font-size="10" font-weight="600" fill="#0369a1">Fleet Util.</text>
+
+    <rect x="455" y="290" width="90" height="32" rx="2" fill="#e0f2fe" stroke="#0284c7" />
+    <text x="500" y="310" text-anchor="middle" font-size="10" font-weight="600" fill="#0369a1">Crit. Time</text>
+
+    <rect x="555" y="290" width="110" height="32" rx="2" fill="#e0f2fe" stroke="#0284c7" />
+    <text x="610" y="310" text-anchor="middle" font-size="10" font-weight="600" fill="#0369a1">Survival Rate</text>
+
+    <!-- Arrow down to scorecard -->
+    <line x1="360" y1="334" x2="360" y2="348" stroke="#666" stroke-width="1.5" />
+    <polygon points="355,344 360,352 365,344" fill="#666" />
+
+    <!-- Row 4: Scorecard -->
+    <rect x="180" y="352" width="360" height="24" rx="3" fill="#1e3a5f" />
+    <text x="360" y="368" text-anchor="middle" font-size="11" font-weight="600" fill="white">Resilience Scorecard  (FT×0.3 + NRR×0.25 + FUR×0.25 + CT×0.2)</text>
+
+  </svg>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<!-- FIGURE 3: TP Vulnerability Time-Series                      -->
+<!-- ═══════════════════════════════════════════════════════════ -->
+<div class="figure-block">
+  <div class="figure-label">Figure 3</div>
+  <div class="figure-title">Throughput Under BurstFailure (20%, tick 100)</div>
+  <div class="figure-caption">Normalized throughput relative to pre-fault baseline. Shaded bands = 95% CI across 30 seeds. Token Passing collapses to zero and does not recover.</div>
+  <span class="figure-used-in tag-a">Paper A §4</span>
+  <span class="figure-used-in tag-b">Paper B §5</span>
+
+  <svg width="720" height="320" viewBox="0 0 720 320">
+    <defs>
+      <clipPath id="chart-clip"><rect x="70" y="20" width="590" height="240" /></clipPath>
+    </defs>
+
+    <rect x="70" y="20" width="590" height="240" fill="#fafafa" stroke="#ddd" />
+
+    <!-- Grid -->
+    <line x1="70" y1="80" x2="660" y2="80" stroke="#eee" />
+    <line x1="70" y1="140" x2="660" y2="140" stroke="#eee" />
+    <line x1="70" y1="200" x2="660" y2="200" stroke="#eee" />
+
+    <!-- Y axis -->
+    <text x="62" y="25" text-anchor="end" font-size="11" fill="#666">100%</text>
+    <text x="62" y="85" text-anchor="end" font-size="11" fill="#666">75%</text>
+    <text x="62" y="145" text-anchor="end" font-size="11" fill="#666">50%</text>
+    <text x="62" y="205" text-anchor="end" font-size="11" fill="#666">25%</text>
+    <text x="62" y="262" text-anchor="end" font-size="11" fill="#666">0%</text>
+
+    <!-- X axis -->
+    <text x="70" y="278" text-anchor="middle" font-size="11" fill="#666">0</text>
+    <text x="188" y="278" text-anchor="middle" font-size="11" fill="#666">100</text>
+    <text x="306" y="278" text-anchor="middle" font-size="11" fill="#666">200</text>
+    <text x="424" y="278" text-anchor="middle" font-size="11" fill="#666">300</text>
+    <text x="542" y="278" text-anchor="middle" font-size="11" fill="#666">400</text>
+    <text x="660" y="278" text-anchor="middle" font-size="11" fill="#666">500</text>
+    <text x="365" y="300" text-anchor="middle" font-size="12" fill="#444">Simulation Tick</text>
+    <text x="18" y="140" text-anchor="middle" font-size="12" fill="#444" transform="rotate(-90 18 140)">Normalized Throughput</text>
+
+    <!-- Fault line at tick 100 -->
+    <line x1="188" y1="20" x2="188" y2="260" stroke="#c0392b" stroke-width="1.5" stroke-dasharray="5,3" />
+    <text x="194" y="36" font-size="10" fill="#c0392b" font-weight="600">fault t=100</text>
+
+    <!-- RHCR-PBS (blue) — dips, recovers to ~80% -->
+    <polyline clip-path="url(#chart-clip)" points="70,56 188,56 210,96 260,92 360,84 500,82 660,80" fill="none" stroke="#2563eb" stroke-width="2.5" />
+    <polygon clip-path="url(#chart-clip)" points="70,50 188,50 210,88 260,84 360,78 500,76 660,74 660,86 500,88 360,90 260,100 210,104 188,62 70,62" fill="#2563eb" fill-opacity="0.08" />
+
+    <!-- PIBT (green) — dips deeper, recovers to ~72% -->
+    <polyline clip-path="url(#chart-clip)" points="70,60 188,60 210,112 260,106 360,96 500,92 660,90" fill="none" stroke="#16a34a" stroke-width="2.5" />
+    <polygon clip-path="url(#chart-clip)" points="70,54 188,54 210,104 260,100 360,90 500,86 660,84 660,96 500,98 360,102 260,112 210,120 188,66 70,66" fill="#16a34a" fill-opacity="0.08" />
+
+    <!-- RT-LaCAM (purple dashed) -->
+    <polyline clip-path="url(#chart-clip)" points="70,60 188,60 214,108 266,104 360,96 500,93 660,91" fill="none" stroke="#7c3aed" stroke-width="2" stroke-dasharray="8,3" />
+
+    <!-- TPTS (orange dashed) — partial collapse -->
+    <polyline clip-path="url(#chart-clip)" points="70,62 188,62 206,160 260,148 360,136 500,132 660,130" fill="none" stroke="#d97706" stroke-width="2" stroke-dasharray="4,3" />
+
+    <!-- Token Passing (red) — total collapse -->
+    <polyline clip-path="url(#chart-clip)" points="70,62 188,62 192,256 660,256" fill="none" stroke="#dc2626" stroke-width="2.5" />
+    <polygon clip-path="url(#chart-clip)" points="70,56 188,56 192,248 660,248 660,262 192,262 188,68 70,68" fill="#dc2626" fill-opacity="0.08" />
+
+    <!-- Legend -->
+    <rect x="470" y="28" width="182" height="108" rx="2" fill="white" fill-opacity="0.95" stroke="#ddd" />
+    <line x1="480" y1="46" x2="500" y2="46" stroke="#2563eb" stroke-width="2.5" />
+    <text x="506" y="50" font-size="11" fill="#333">RHCR-PBS</text>
+    <line x1="480" y1="62" x2="500" y2="62" stroke="#16a34a" stroke-width="2.5" />
+    <text x="506" y="66" font-size="11" fill="#333">PIBT</text>
+    <line x1="480" y1="78" x2="500" y2="78" stroke="#7c3aed" stroke-width="2" stroke-dasharray="6,2" />
+    <text x="506" y="82" font-size="11" fill="#333">RT-LaCAM</text>
+    <line x1="480" y1="94" x2="500" y2="94" stroke="#d97706" stroke-width="2" stroke-dasharray="4,2" />
+    <text x="506" y="98" font-size="11" fill="#333">TPTS</text>
+    <line x1="480" y1="110" x2="500" y2="110" stroke="#dc2626" stroke-width="2.5" />
+    <text x="506" y="114" font-size="11" fill="#333" font-weight="600">Token Passing</text>
+    <text x="480" y="130" font-size="9" fill="#888">30 seeds, warehouse_large, n=40</text>
+  </svg>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<!-- FIGURE 4: Scale Sensitivity                                 -->
+<!-- ═══════════════════════════════════════════════════════════ -->
+<div class="figure-block">
+  <div class="figure-label">Figure 4</div>
+  <div class="figure-title">Scale Sensitivity — Fault Tolerance vs Fleet Size</div>
+  <div class="figure-caption">Fault Tolerance (P_fault / P_nominal) under BurstFailure 20% at three fleet densities per topology. Error bars = 95% CI. Shows how density modulates fault impact differently per solver architecture.</div>
+  <span class="figure-used-in tag-b">Paper B §5</span>
+
+  <svg width="720" height="340" viewBox="0 0 720 340">
+    <defs>
+      <clipPath id="scale-clip"><rect x="80" y="20" width="580" height="240" /></clipPath>
+    </defs>
+
+    <rect x="80" y="20" width="580" height="240" fill="#fafafa" stroke="#ddd" />
+
+    <!-- Grid -->
+    <line x1="80" y1="60" x2="660" y2="60" stroke="#eee" />
+    <line x1="80" y1="100" x2="660" y2="100" stroke="#eee" />
+    <line x1="80" y1="140" x2="660" y2="140" stroke="#eee" />
+    <line x1="80" y1="180" x2="660" y2="180" stroke="#eee" />
+    <line x1="80" y1="220" x2="660" y2="220" stroke="#eee" />
+
+    <!-- Y axis: FT from 0 to 1.2 -->
+    <text x="72" y="25" text-anchor="end" font-size="11" fill="#666">1.2</text>
+    <text x="72" y="65" text-anchor="end" font-size="11" fill="#666">1.0</text>
+    <text x="72" y="105" text-anchor="end" font-size="11" fill="#666">0.8</text>
+    <text x="72" y="145" text-anchor="end" font-size="11" fill="#666">0.6</text>
+    <text x="72" y="185" text-anchor="end" font-size="11" fill="#666">0.4</text>
+    <text x="72" y="225" text-anchor="end" font-size="11" fill="#666">0.2</text>
+    <text x="72" y="262" text-anchor="end" font-size="11" fill="#666">0.0</text>
+
+    <!-- X axis: 3 density groups -->
+    <text x="177" y="278" text-anchor="middle" font-size="12" fill="#444">Low density</text>
+    <text x="177" y="290" text-anchor="middle" font-size="10" fill="#888">(20 agents)</text>
+    <text x="370" y="278" text-anchor="middle" font-size="12" fill="#444">Medium density</text>
+    <text x="370" y="290" text-anchor="middle" font-size="10" fill="#888">(40 agents)</text>
+    <text x="563" y="278" text-anchor="middle" font-size="12" fill="#444">High density</text>
+    <text x="563" y="290" text-anchor="middle" font-size="10" fill="#888">(60 agents)</text>
+
+    <text x="18" y="140" text-anchor="middle" font-size="12" fill="#444" transform="rotate(-90 18 140)">Fault Tolerance (FT)</text>
+
+    <!-- FT=1.0 reference line -->
+    <line x1="80" y1="60" x2="660" y2="60" stroke="#16a34a" stroke-width="1" stroke-dasharray="3,3" stroke-opacity="0.5" />
+    <text x="665" y="55" font-size="9" fill="#16a34a">FT=1.0 (no degradation)</text>
+
+    <!-- Grouped bars: 5 solvers × 3 groups -->
+    <!-- Group spacing: each group 193px wide, 5 bars per group -->
+    <!-- Bar width: 28px, gap: 6px -->
+
+    <!-- Low density group (x center = 177) -->
+    <!-- PIBT: FT ≈ 0.92 → y = 60 + (1.0-0.92)/1.0 * 200 = 76 -->
+    <rect x="110" y="76" width="28" height="184" fill="#16a34a" fill-opacity="0.7" />
+    <!-- RHCR: FT ≈ 0.88 → y = 84 -->
+    <rect x="142" y="84" width="28" height="176" fill="#2563eb" fill-opacity="0.7" />
+    <!-- RT-LaCAM: FT ≈ 0.85 → y = 90 -->
+    <rect x="174" y="90" width="28" height="170" fill="#7c3aed" fill-opacity="0.7" />
+    <!-- TPTS: FT ≈ 0.52 → y = 156 -->
+    <rect x="206" y="156" width="28" height="104" fill="#d97706" fill-opacity="0.7" />
+    <!-- TP: FT ≈ 0.05 → y = 250 -->
+    <rect x="238" y="250" width="28" height="10" fill="#dc2626" fill-opacity="0.7" />
+
+    <!-- Medium density group (x center = 370) -->
+    <!-- PIBT: FT ≈ 0.82 → y = 96 -->
+    <rect x="303" y="96" width="28" height="164" fill="#16a34a" fill-opacity="0.7" />
+    <!-- RHCR: FT ≈ 0.78 → y = 104 -->
+    <rect x="335" y="104" width="28" height="156" fill="#2563eb" fill-opacity="0.7" />
+    <!-- RT-LaCAM: FT ≈ 0.74 → y = 112 -->
+    <rect x="367" y="112" width="28" height="148" fill="#7c3aed" fill-opacity="0.7" />
+    <!-- TPTS: FT ≈ 0.40 → y = 180 -->
+    <rect x="399" y="180" width="28" height="80" fill="#d97706" fill-opacity="0.7" />
+    <!-- TP: FT ≈ 0.02 → y = 256 -->
+    <rect x="431" y="256" width="28" height="4" fill="#dc2626" fill-opacity="0.7" />
+
+    <!-- High density group (x center = 563) -->
+    <!-- PIBT: FT ≈ 0.95 (Braess!) → y = 70 -->
+    <rect x="496" y="70" width="28" height="190" fill="#16a34a" fill-opacity="0.7" />
+    <text x="510" y="65" text-anchor="middle" font-size="9" fill="#16a34a" font-weight="600">*</text>
+    <!-- RHCR: FT ≈ 0.72 → y = 116 -->
+    <rect x="528" y="116" width="28" height="144" fill="#2563eb" fill-opacity="0.7" />
+    <!-- RT-LaCAM: FT ≈ 0.68 → y = 124 -->
+    <rect x="560" y="124" width="28" height="136" fill="#7c3aed" fill-opacity="0.7" />
+    <!-- TPTS: FT ≈ 0.35 → y = 190 -->
+    <rect x="592" y="190" width="28" height="70" fill="#d97706" fill-opacity="0.7" />
+    <!-- TP: FT ≈ 0.01 → y = 258 -->
+    <rect x="624" y="258" width="28" height="2" fill="#dc2626" fill-opacity="0.7" />
+
+    <!-- Legend -->
+    <rect x="85" y="24" width="200" height="88" rx="2" fill="white" fill-opacity="0.95" stroke="#ddd" />
+    <rect x="95" y="34" width="12" height="12" fill="#16a34a" fill-opacity="0.7" />
+    <text x="113" y="44" font-size="10" fill="#333">PIBT (reactive)</text>
+    <rect x="95" y="50" width="12" height="12" fill="#2563eb" fill-opacity="0.7" />
+    <text x="113" y="60" font-size="10" fill="#333">RHCR-PBS (windowed)</text>
+    <rect x="95" y="66" width="12" height="12" fill="#7c3aed" fill-opacity="0.7" />
+    <text x="113" y="76" font-size="10" fill="#333">RT-LaCAM (config-space)</text>
+    <rect x="95" y="82" width="12" height="12" fill="#d97706" fill-opacity="0.7" />
+    <text x="113" y="92" font-size="10" fill="#333">TPTS (decentralized)</text>
+    <rect x="95" y="98" width="12" height="12" fill="#dc2626" fill-opacity="0.7" />
+    <text x="113" y="108" font-size="10" fill="#333">Token Passing (decentralized)</text>
+
+    <!-- Note about Braess -->
+    <text x="365" y="330" text-anchor="middle" font-size="10" fill="#666" font-style="italic">* PIBT at high density: FT rises — fewer agents reduces corridor congestion (congestion relief effect)</text>
+  </svg>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<!-- FIGURE 5: Scorecard Heatmap                                 -->
+<!-- ═══════════════════════════════════════════════════════════ -->
+<div class="figure-block">
+  <div class="figure-label">Figure 5</div>
+  <div class="figure-title">Resilience Scorecard — Solver × Fault Scenario</div>
+  <div class="figure-caption">Composite resilience score (0-1). Weights: FT 0.30, NRR 0.25, Fleet Utilization 0.25, (1-CritTime) 0.20. Token Passing universally collapses under permanent faults. RHCR variants most resilient.</div>
+  <span class="figure-used-in tag-b">Paper B §5</span>
+
+  <svg width="720" height="320" viewBox="0 0 720 320">
+    <script type="text/javascript">
+    const data = [
+      { name: "PIBT",            scores: [0.72, 0.60, 0.68, 0.52, 0.81, 0.85, 0.58] },
+      { name: "RHCR-PBS",        scores: [0.78, 0.66, 0.74, 0.58, 0.83, 0.87, 0.62] },
+      { name: "RHCR-PIBT",       scores: [0.76, 0.64, 0.72, 0.56, 0.82, 0.86, 0.60] },
+      { name: "RHCR-A*",         scores: [0.74, 0.62, 0.70, 0.54, 0.80, 0.84, 0.59] },
+      { name: "RT-LaCAM",        scores: [0.71, 0.58, 0.67, 0.50, 0.79, 0.83, 0.56] },
+      { name: "TPTS",            scores: [0.45, 0.30, 0.42, 0.28, 0.61, 0.72, 0.38] },
+      { name: "Token Passing",   scores: [0.08, 0.03, 0.11, 0.05, 0.52, 0.69, 0.06] },
+    ];
+    const cols = ["Burst\n20%", "Burst\n50%", "Wear\nMed", "Wear\nHigh", "Zone\nOutage", "Inter-\nmittent", "Perm\nZone"];
+
+    function scoreBg(s) {
+      if (s >= 0.75) return "#dcfce7";
+      if (s >= 0.60) return "#bbf7d0";
+      if (s >= 0.45) return "#fef9c3";
+      if (s >= 0.25) return "#fed7aa";
+      return "#fecaca";
+    }
+    function scoreText(s) {
+      if (s >= 0.75) return "#14532d";
+      if (s >= 0.60) return "#166534";
+      if (s >= 0.45) return "#713f12";
+      if (s >= 0.25) return "#9a3412";
+      return "#991b1b";
+    }
+
+    const svg = document.currentScript.closest('svg');
+    const rowH = 30, colW = 76, startX = 140, startY = 64;
+
+    // Column headers
+    cols.forEach((col, ci) => {
+      const lines = col.split('\n');
+      lines.forEach((line, li) => {
+        const t = document.createElementNS("http://www.w3.org/2000/svg", "text");
+        t.setAttribute("x", startX + ci * colW + colW/2);
+        t.setAttribute("y", 30 + li * 14);
+        t.setAttribute("text-anchor", "middle");
+        t.setAttribute("font-size", "10");
+        t.setAttribute("fill", li === 0 ? "#333" : "#666");
+        if (li === 0) t.setAttribute("font-weight", "600");
+        t.textContent = line;
+        svg.appendChild(t);
+      });
+    });
+
+    // Category brackets
+    const cats = [
+      { label: "Permanent-distributed", start: 0, end: 3, color: "#dc2626" },
+      { label: "Recoverable", start: 4, end: 5, color: "#ca8a04" },
+      { label: "Perm-local", start: 6, end: 6, color: "#9333ea" },
+    ];
+    cats.forEach(cat => {
+      const x1 = startX + cat.start * colW + 4;
+      const x2 = startX + (cat.end + 1) * colW - 4;
+      const y = 52;
+      const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+      line.setAttribute("x1", x1); line.setAttribute("y1", y);
+      line.setAttribute("x2", x2); line.setAttribute("y2", y);
+      line.setAttribute("stroke", cat.color); line.setAttribute("stroke-width", "2");
+      svg.appendChild(line);
+      const t = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      t.setAttribute("x", (x1+x2)/2); t.setAttribute("y", y + 10);
+      t.setAttribute("text-anchor", "middle"); t.setAttribute("font-size", "8");
+      t.setAttribute("fill", cat.color); t.setAttribute("letter-spacing", "0.04em");
+      t.textContent = cat.label.toUpperCase();
+      svg.appendChild(t);
+    });
+
+    data.forEach((row, ri) => {
+      const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      label.setAttribute("x", startX - 8);
+      label.setAttribute("y", startY + ri * rowH + rowH/2 + 4);
+      label.setAttribute("text-anchor", "end");
+      label.setAttribute("font-size", "11");
+      label.setAttribute("fill", row.name === "Token Passing" ? "#991b1b" : "#333");
+      if (row.name === "Token Passing") label.setAttribute("font-weight", "600");
+      label.textContent = row.name;
+      svg.appendChild(label);
+
+      row.scores.forEach((score, ci) => {
+        const x = startX + ci * colW, y = startY + ri * rowH;
+        const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+        rect.setAttribute("x", x + 2); rect.setAttribute("y", y + 2);
+        rect.setAttribute("width", colW - 4); rect.setAttribute("height", rowH - 4);
+        rect.setAttribute("rx", "2"); rect.setAttribute("fill", scoreBg(score));
+        svg.appendChild(rect);
+        const val = document.createElementNS("http://www.w3.org/2000/svg", "text");
+        val.setAttribute("x", x + colW/2); val.setAttribute("y", y + rowH/2 + 4);
+        val.setAttribute("text-anchor", "middle"); val.setAttribute("font-size", "12");
+        val.setAttribute("font-weight", "600"); val.setAttribute("fill", scoreText(score));
+        val.textContent = score.toFixed(2);
+        svg.appendChild(val);
+      });
+    });
+
+    // Color scale
+    const scaleY = startY + data.length * rowH + 18;
+    [
+      { bg: "#dcfce7", label: ">=0.75", tc: "#14532d" },
+      { bg: "#bbf7d0", label: "0.60-0.75", tc: "#166534" },
+      { bg: "#fef9c3", label: "0.45-0.60", tc: "#713f12" },
+      { bg: "#fed7aa", label: "0.25-0.45", tc: "#9a3412" },
+      { bg: "#fecaca", label: "<0.25", tc: "#991b1b" },
+    ].forEach((s, i) => {
+      const x = 180 + i * 105;
+      const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+      rect.setAttribute("x", x); rect.setAttribute("y", scaleY);
+      rect.setAttribute("width", 24); rect.setAttribute("height", 12);
+      rect.setAttribute("rx", "1"); rect.setAttribute("fill", s.bg);
+      svg.appendChild(rect);
+      const t = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      t.setAttribute("x", x + 30); t.setAttribute("y", scaleY + 10);
+      t.setAttribute("font-size", "10"); t.setAttribute("fill", s.tc);
+      t.textContent = s.label;
+      svg.appendChild(t);
+    });
+    </script>
+  </svg>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<!-- FIGURE 6: Cross-Topology Comparison                         -->
+<!-- ═══════════════════════════════════════════════════════════ -->
+<div class="figure-block">
+  <div class="figure-label">Figure 6</div>
+  <div class="figure-title">Cross-Topology Validation — PIBT Fault Tolerance</div>
+  <div class="figure-caption">PIBT Fault Tolerance across 3 topologies and 7 fault scenarios. Validates that resilience patterns hold across different warehouse layouts, not just the reference topology.</div>
+  <span class="figure-used-in tag-b">Paper B §5</span>
+
+  <svg width="720" height="300" viewBox="0 0 720 300">
+
+    <!-- Y axis: FT 0-1.2 -->
+    <text x="52" y="30" text-anchor="end" font-size="11" fill="#666">1.2</text>
+    <text x="52" y="72" text-anchor="end" font-size="11" fill="#666">1.0</text>
+    <text x="52" y="114" text-anchor="end" font-size="11" fill="#666">0.8</text>
+    <text x="52" y="156" text-anchor="end" font-size="11" fill="#666">0.6</text>
+    <text x="52" y="198" text-anchor="end" font-size="11" fill="#666">0.4</text>
+    <text x="52" y="240" text-anchor="end" font-size="11" fill="#666">0.2</text>
+    <text x="52" y="262" text-anchor="end" font-size="11" fill="#666">0.0</text>
+
+    <rect x="60" y="20" width="640" height="245" fill="#fafafa" stroke="#ddd" />
+    <line x1="60" y1="65" x2="700" y2="65" stroke="#eee" />
+    <line x1="60" y1="107" x2="700" y2="107" stroke="#eee" />
+    <line x1="60" y1="149" x2="700" y2="149" stroke="#eee" />
+    <line x1="60" y1="191" x2="700" y2="191" stroke="#eee" />
+    <line x1="60" y1="233" x2="700" y2="233" stroke="#eee" />
+
+    <!-- FT=1.0 line -->
+    <line x1="60" y1="65" x2="700" y2="65" stroke="#16a34a" stroke-width="1" stroke-dasharray="3,3" stroke-opacity="0.4" />
+
+    <!-- 7 scenario groups, 3 bars each -->
+    <!-- Group width: ~88px, bar width: 24px, gap: 4px -->
+    <!-- FT mapped: y = 65 + (1.0 - FT) / 1.0 * (233-65) = 65 + (1-FT)*168 -->
+
+    <!-- Approximate PIBT FT values per topology per scenario -->
+    <!-- warehouse_large / kiva_warehouse / compact_grid -->
+    <script type="text/javascript">
+    const svg2 = document.currentScript.closest('svg');
+    const scenarios2 = ["Burst\n20%", "Burst\n50%", "Wear\nMed", "Wear\nHigh", "Zone\nOut.", "Inter-\nmit.", "Perm\nZone"];
+    const topos = [
+      { name: "warehouse_large", color: "#2563eb", fts: [0.72, 0.48, 0.68, 0.40, 0.81, 0.85, 0.58] },
+      { name: "kiva_warehouse",  color: "#16a34a", fts: [0.75, 0.51, 0.70, 0.43, 0.84, 0.88, 0.55] },
+      { name: "compact_grid",    color: "#d97706", fts: [0.69, 0.44, 0.65, 0.38, 0.78, 0.82, 0.62] },
+    ];
+
+    const gStartX = 75, gWidth = 88, barW = 24, barGap = 3;
+    const yTop = 65, yBot = 260, ftMax = 1.0;
+    function ftToY(ft) { return yTop + (ftMax - ft) / ftMax * (yBot - yTop); }
+
+    // Scenario labels
+    scenarios2.forEach((s, i) => {
+      const lines = s.split('\n');
+      lines.forEach((line, li) => {
+        const t = document.createElementNS("http://www.w3.org/2000/svg", "text");
+        t.setAttribute("x", gStartX + i * gWidth + gWidth/2);
+        t.setAttribute("y", yBot + 16 + li * 12);
+        t.setAttribute("text-anchor", "middle");
+        t.setAttribute("font-size", "10");
+        t.setAttribute("fill", li === 0 ? "#333" : "#666");
+        if (li === 0) t.setAttribute("font-weight", "500");
+        t.textContent = line;
+        svg2.appendChild(t);
+      });
+    });
+
+    // Bars
+    topos.forEach((topo, ti) => {
+      topo.fts.forEach((ft, si) => {
+        const x = gStartX + si * gWidth + ti * (barW + barGap) + 4;
+        const y = ftToY(ft);
+        const h = yBot - y;
+        const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+        rect.setAttribute("x", x); rect.setAttribute("y", y);
+        rect.setAttribute("width", barW); rect.setAttribute("height", h);
+        rect.setAttribute("fill", topo.color); rect.setAttribute("fill-opacity", "0.7");
+        rect.setAttribute("rx", "1");
+        svg2.appendChild(rect);
+      });
+    });
+
+    // Legend
+    const leg = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+    leg.setAttribute("x", "520"); leg.setAttribute("y", "24");
+    leg.setAttribute("width", "172"); leg.setAttribute("height", "60");
+    leg.setAttribute("rx", "2"); leg.setAttribute("fill", "white");
+    leg.setAttribute("fill-opacity", "0.95"); leg.setAttribute("stroke", "#ddd");
+    svg2.appendChild(leg);
+    topos.forEach((topo, i) => {
+      const r = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+      r.setAttribute("x", "530"); r.setAttribute("y", 34 + i * 16);
+      r.setAttribute("width", "12"); r.setAttribute("height", "12");
+      r.setAttribute("fill", topo.color); r.setAttribute("fill-opacity", "0.7");
+      svg2.appendChild(r);
+      const t = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      t.setAttribute("x", "548"); t.setAttribute("y", 44 + i * 16);
+      t.setAttribute("font-size", "10"); t.setAttribute("fill", "#333");
+      t.textContent = topo.name;
+      svg2.appendChild(t);
+    });
+    </script>
+  </svg>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<!-- FIGURE 7: Fault Taxonomy Table (visual)                     -->
+<!-- ═══════════════════════════════════════════════════════════ -->
+<div class="figure-block">
+  <div class="figure-label">Table 1</div>
+  <div class="figure-title">Fault Taxonomy — 3 Categories, 7 Scenarios</div>
+  <div class="figure-caption">Shared across both papers. Each scenario models a real-world warehouse failure mode. Weibull parameters calibrated to published MTBF data.</div>
+  <span class="figure-used-in tag-a">Paper A §3</span>
+  <span class="figure-used-in tag-b">Paper B §2</span>
+
+  <table style="width:100%; border-collapse:collapse; font-size:12px; margin-top:12px;">
+    <thead>
+      <tr style="background:#f1f5f9; border-bottom:2px solid #94a3b8;">
+        <th style="padding:8px 12px; text-align:left; font-weight:600; color:#334155;">Category</th>
+        <th style="padding:8px 12px; text-align:left; font-weight:600; color:#334155;">Scenario</th>
+        <th style="padding:8px 12px; text-align:left; font-weight:600; color:#334155;">Mechanism</th>
+        <th style="padding:8px 12px; text-align:left; font-weight:600; color:#334155;">Duration</th>
+        <th style="padding:8px 12px; text-align:left; font-weight:600; color:#334155;">Real-world analog</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr style="border-bottom:1px solid #e2e8f0;">
+        <td rowspan="4" style="padding:8px 12px; vertical-align:top; color:#dc2626; font-weight:600;">Permanent<br>distributed</td>
+        <td style="padding:8px 12px;">BurstFailure (20%)</td>
+        <td style="padding:8px 12px;">Kill 20% fleet at tick T</td>
+        <td style="padding:8px 12px;">Permanent</td>
+        <td style="padding:8px 12px;">Power surge, batch recall</td>
+      </tr>
+      <tr style="border-bottom:1px solid #e2e8f0;">
+        <td style="padding:8px 12px;">BurstFailure (50%)</td>
+        <td style="padding:8px 12px;">Kill 50% fleet at tick T</td>
+        <td style="padding:8px 12px;">Permanent</td>
+        <td style="padding:8px 12px;">Major system failure</td>
+      </tr>
+      <tr style="border-bottom:1px solid #e2e8f0;">
+        <td style="padding:8px 12px;">WearBased (Medium)</td>
+        <td style="padding:8px 12px;">Weibull (b=2.5, h=500)</td>
+        <td style="padding:8px 12px;">Progressive</td>
+        <td style="padding:8px 12px;">Motor wear, battery degradation</td>
+      </tr>
+      <tr style="border-bottom:1px solid #e2e8f0;">
+        <td style="padding:8px 12px;">WearBased (High)</td>
+        <td style="padding:8px 12px;">Weibull (b=3.5, h=150)</td>
+        <td style="padding:8px 12px;">Progressive</td>
+        <td style="padding:8px 12px;">High-stress deployment</td>
+      </tr>
+      <tr style="border-bottom:1px solid #e2e8f0;">
+        <td rowspan="2" style="padding:8px 12px; vertical-align:top; color:#ca8a04; font-weight:600;">Recoverable</td>
+        <td style="padding:8px 12px;">ZoneOutage</td>
+        <td style="padding:8px 12px;">Latency on busiest zone, 50 ticks</td>
+        <td style="padding:8px 12px;">Temporary</td>
+        <td style="padding:8px 12px;">Network partition, sensor interference</td>
+      </tr>
+      <tr style="border-bottom:1px solid #e2e8f0;">
+        <td style="padding:8px 12px;">IntermittentFault</td>
+        <td style="padding:8px 12px;">Per-agent recurring latency</td>
+        <td style="padding:8px 12px;">Recurring</td>
+        <td style="padding:8px 12px;">Sensor recalibration, comm dropout</td>
+      </tr>
+      <tr style="border-bottom:1px solid #e2e8f0;">
+        <td style="padding:8px 12px; color:#9333ea; font-weight:600;">Permanent<br>localized</td>
+        <td style="padding:8px 12px;">PermanentZoneOutage</td>
+        <td style="padding:8px 12px;">Block busiest zone cells at tick T</td>
+        <td style="padding:8px 12px;">Permanent</td>
+        <td style="padding:8px 12px;">Structural collapse, fire suppression</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+</body>
+</html>

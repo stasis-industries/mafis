@@ -230,7 +230,7 @@ src/
   render/          Environment, robot visuals, orbit camera, picking/hover (WASM only)
   ui/
     controls.rs    UiState resource
-    bridge.rs      Bevy↔JS bridge (WASM) — wasm_bindgen exports
+    bridge/        Bevy↔JS bridge (WASM) — serialize.rs, commands.rs, wasm_api.rs
     desktop/       Native egui panels (non-WASM only)
   export/          CSV/JSON export with triggers
   experiment/      Multi-seed experiment runner, stats, paper output

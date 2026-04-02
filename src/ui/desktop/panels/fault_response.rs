@@ -1,5 +1,5 @@
-use crate::analysis::fault_metrics::FaultMetrics;
 use super::super::theme;
+use crate::analysis::fault_metrics::FaultMetrics;
 
 pub fn fault_response_panel(ui: &mut egui::Ui, metrics: &FaultMetrics) {
     let has_events = !metrics.event_records.is_empty();
@@ -45,7 +45,9 @@ pub fn fault_response_panel(ui: &mut egui::Ui, metrics: &FaultMetrics) {
         ui.end_row();
 
         // Survival rate
-        let alive = metrics.initial_agent_count.saturating_sub(metrics.total_affected - metrics.total_recovered);
+        let alive = metrics
+            .initial_agent_count
+            .saturating_sub(metrics.total_affected - metrics.total_recovered);
         let survival = if metrics.initial_agent_count > 0 {
             alive as f32 / metrics.initial_agent_count as f32
         } else {
@@ -60,18 +62,16 @@ pub fn fault_response_panel(ui: &mut egui::Ui, metrics: &FaultMetrics) {
     if has_events {
         ui.add_space(6.0);
         ui.label("Recent Events");
-        egui::ScrollArea::vertical()
-            .max_height(120.0)
-            .show(ui, |ui| {
-                for ev in metrics.event_records.iter().rev().take(10) {
-                    ui.horizontal(|ui| {
-                        ui.weak(format!("t={}", ev.tick));
-                        ui.label(format!("{:?}", ev.fault_type));
-                        if ev.agents_affected > 0 {
-                            ui.weak(format!("({})", ev.agents_affected));
-                        }
-                    });
-                }
-            });
+        egui::ScrollArea::vertical().max_height(120.0).show(ui, |ui| {
+            for ev in metrics.event_records.iter().rev().take(10) {
+                ui.horizontal(|ui| {
+                    ui.weak(format!("t={}", ev.tick));
+                    ui.label(format!("{:?}", ev.fault_type));
+                    if ev.agents_affected > 0 {
+                        ui.weak(format!("({})", ev.agents_affected));
+                    }
+                });
+            }
+        });
     }
 }

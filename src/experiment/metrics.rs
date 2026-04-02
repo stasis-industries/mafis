@@ -73,19 +73,11 @@ pub fn compute_run_metrics(
     } else {
         0.0
     };
-    let total_tasks = faulted_analysis
-        .tasks_completed_series
-        .last()
-        .copied()
-        .unwrap_or(0);
+    let total_tasks = faulted_analysis.tasks_completed_series.last().copied().unwrap_or(0);
 
     // ── Idle / wait ratio ──────────────────────────────────────────
     // wait_ratio = cumulative (Wait actions / total actions). From AnalysisEngine.
-    let wait_ratio = faulted_analysis
-        .wait_ratio_series
-        .last()
-        .copied()
-        .unwrap_or(0.0) as f64;
+    let wait_ratio = faulted_analysis.wait_ratio_series.last().copied().unwrap_or(0.0) as f64;
 
     // idle_ratio = fraction of agent-ticks where the agent had no task assignment
     // (task leg == Idle). This is distinct from wait_ratio which measures physical
@@ -98,20 +90,14 @@ pub fn compute_run_metrics(
             .zip(faulted_analysis.dead_series.iter())
             .map(|(a, d)| a + d)
             .sum();
-        if total_agents > 0 {
-            total_idle as f64 / total_agents as f64
-        } else {
-            0.0
-        }
+        if total_agents > 0 { total_idle as f64 / total_agents as f64 } else { 0.0 }
     } else {
         0.0
     };
 
     // ── Fault Tolerance (post-fault-onset only) ───────────────────
     // Find first tick where fault events occurred (0-indexed into series).
-    let first_fault_idx = faulted_fault_events
-        .iter()
-        .position(|events| !events.is_empty());
+    let first_fault_idx = faulted_fault_events.iter().position(|events| !events.is_empty());
 
     let fault_tolerance = match first_fault_idx {
         Some(start) => {
@@ -132,11 +118,7 @@ pub fn compute_run_metrics(
             } else {
                 baseline_post.iter().sum::<f64>() / baseline_post.len() as f64
             };
-            if avg_baseline > 0.0 {
-                avg_faulted / avg_baseline
-            } else {
-                f64::NAN
-            }
+            if avg_baseline > 0.0 { avg_faulted / avg_baseline } else { f64::NAN }
         }
         None => {
             // No faults occurred → system retained full capability → FT = 1.0
@@ -156,24 +138,16 @@ pub fn compute_run_metrics(
     let all_fault_ticks: Vec<u64> = faulted_fault_events
         .iter()
         .enumerate()
-        .flat_map(|(i, events)| {
-            if events.is_empty() {
-                vec![]
-            } else {
-                vec![i as u64 + 1]
-            }
-        })
+        .flat_map(|(i, events)| if events.is_empty() { vec![] } else { vec![i as u64 + 1] })
         .collect();
 
     let mtbf = FaultMetrics::compute_mtbf(&all_fault_ticks).map(|v| v as f64);
 
     // Deficit recovery: ticks from first cumulative deficit to full catch-up.
     let deficit_recovery = match (diff.recovery_tick, diff.first_gap_tick) {
-        (Some(recovery), Some(first_gap)) if recovery > first_gap => {
-            (recovery - first_gap) as f64
-        }
+        (Some(recovery), Some(first_gap)) if recovery > first_gap => (recovery - first_gap) as f64,
         (None, Some(_)) => f64::NAN, // gap occurred but never recovered
-        _ => 0.0,                     // no gap = no fault impact = genuinely 0
+        _ => 0.0,                    // no gap = no fault impact = genuinely 0
     };
 
     // Throughput recovery: first tick after fault onset where per-tick
@@ -215,11 +189,7 @@ pub fn compute_run_metrics(
         let final_alive = faulted_analysis.alive_series.last().copied().unwrap_or(0);
         let total = faulted_analysis.alive_series.first().copied().unwrap_or(0)
             + faulted_analysis.dead_series.first().copied().unwrap_or(0);
-        if total > 0 {
-            final_alive as f64 / total as f64
-        } else {
-            1.0
-        }
+        if total > 0 { final_alive as f64 / total as f64 } else { 1.0 }
     } else {
         1.0
     };
@@ -255,10 +225,7 @@ pub fn compute_run_metrics(
     } else {
         solver_step_times_us.iter().sum::<f64>() / solver_step_times_us.len() as f64
     };
-    let solver_step_time_max_us = solver_step_times_us
-        .iter()
-        .copied()
-        .fold(0.0_f64, f64::max);
+    let solver_step_time_max_us = solver_step_times_us.iter().copied().fold(0.0_f64, f64::max);
 
     RunMetrics {
         avg_throughput,
@@ -323,8 +290,8 @@ fn compute_critical_time(
 ) -> f64 {
     let start = match first_gap_tick {
         Some(t) if t > 0 => (t - 1) as usize, // convert 1-indexed tick to 0-indexed
-        Some(_) => return 0.0,                  // tick 0 edge case
-        None => return f64::NAN,                // no fault impact → metric undefined
+        Some(_) => return 0.0,                // tick 0 edge case
+        None => return f64::NAN,              // no fault impact → metric undefined
     };
 
     let len = baseline_tp.len().min(faulted_tp.len());
@@ -340,11 +307,7 @@ fn compute_critical_time(
         })
         .count();
 
-    if ticks_after_fault > 0 {
-        ticks_below as f64 / ticks_after_fault as f64
-    } else {
-        0.0
-    }
+    if ticks_after_fault > 0 { ticks_below as f64 / ticks_after_fault as f64 } else { 0.0 }
 }
 
 #[cfg(test)]
@@ -409,10 +372,7 @@ mod tests {
         let throughput_recovery = 15.0_f64;
         // NRR = 1 - recovery / MTBF = 1 - 15/100 = 0.85
         let nrr = 1.0 - throughput_recovery / mtbf;
-        assert!(
-            (nrr - 0.85).abs() < 1e-10,
-            "NRR should be 0.85, got {nrr}"
-        );
+        assert!((nrr - 0.85).abs() < 1e-10, "NRR should be 0.85, got {nrr}");
 
         // Also verify MTBF computation
         let fault_ticks = vec![100_u64, 200];
@@ -434,10 +394,7 @@ mod tests {
         // CT = 5 below / (20-9=11 total post-fault) = 5/11
         let ct = compute_critical_time(&bl, &faulted, Some(10));
         let expected = 5.0 / 11.0;
-        assert!(
-            (ct - expected).abs() < 1e-10,
-            "CT should be {expected:.4}, got {ct:.4}"
-        );
+        assert!((ct - expected).abs() < 1e-10, "CT should be {expected:.4}, got {ct:.4}");
     }
 
     #[test]
@@ -453,10 +410,7 @@ mod tests {
         // Index 10: faulted[10] = 3.0 >= baseline[10] = 3.0
         // recovery = 10 - 5 = 5.0
         let recovery = compute_throughput_recovery(&bl, &faulted, Some(5));
-        assert!(
-            (recovery - 5.0).abs() < 1e-10,
-            "recovery should be 5.0, got {recovery}"
-        );
+        assert!((recovery - 5.0).abs() < 1e-10, "recovery should be 5.0, got {recovery}");
     }
 
     #[test]
@@ -498,16 +452,10 @@ mod tests {
         let faulted_tp = 2.5_f64;
         // No faults -> FT = faulted_avg / baseline_avg
         let ft = faulted_tp / bl_tp;
-        assert!(
-            (ft - 1.0).abs() < 1e-10,
-            "FT should be 1.0 with no faults, got {ft}"
-        );
+        assert!((ft - 1.0).abs() < 1e-10, "FT should be 1.0 with no faults, got {ft}");
 
         // Also verify throughput_recovery returns 0.0 with no faults
         let recovery = compute_throughput_recovery(&[2.0; 10], &[2.0; 10], None);
-        assert!(
-            (recovery - 0.0).abs() < 1e-10,
-            "recovery should be 0.0 with no faults"
-        );
+        assert!((recovery - 0.0).abs() < 1e-10, "recovery should be 0.0 with no faults");
     }
 }

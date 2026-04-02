@@ -29,11 +29,7 @@ pub fn write_runs_csv<W: Write>(writer: &mut W, runs: &[RunResult]) -> std::io::
 
 /// Format an f64 for CSV: NaN → empty string, finite → formatted number.
 fn csv_f64(v: f64, precision: usize) -> String {
-    if v.is_nan() {
-        String::new()
-    } else {
-        format!("{:.prec$}", v, prec = precision)
-    }
+    if v.is_nan() { String::new() } else { format!("{:.prec$}", v, prec = precision) }
 }
 
 fn write_run_row<W: Write>(
@@ -117,16 +113,35 @@ pub fn write_summary_csv<W: Write>(
             s.scheduler_name,
             s.num_agents,
             s.num_seeds,
-            s.throughput.mean, s.throughput.std, s.throughput.ci95_lo, s.throughput.ci95_hi,
-            s.total_tasks.mean, s.total_tasks.std,
-            s.fault_tolerance.n, s.fault_tolerance.mean, s.fault_tolerance.std, s.fault_tolerance.ci95_lo, s.fault_tolerance.ci95_hi,
-            s.nrr.n, s.nrr.mean, s.nrr.std, s.nrr.ci95_lo, s.nrr.ci95_hi,
-            s.critical_time.n, s.critical_time.mean, s.critical_time.std,
-            s.deficit_recovery.mean, s.deficit_recovery.std,
-            s.throughput_recovery.mean, s.throughput_recovery.std,
-            s.propagation_rate.mean, s.survival_rate.mean,
-            s.impacted_area.mean, s.deficit_integral.mean,
-            s.solver_step_us.mean, s.wall_time_ms.mean,
+            s.throughput.mean,
+            s.throughput.std,
+            s.throughput.ci95_lo,
+            s.throughput.ci95_hi,
+            s.total_tasks.mean,
+            s.total_tasks.std,
+            s.fault_tolerance.n,
+            s.fault_tolerance.mean,
+            s.fault_tolerance.std,
+            s.fault_tolerance.ci95_lo,
+            s.fault_tolerance.ci95_hi,
+            s.nrr.n,
+            s.nrr.mean,
+            s.nrr.std,
+            s.nrr.ci95_lo,
+            s.nrr.ci95_hi,
+            s.critical_time.n,
+            s.critical_time.mean,
+            s.critical_time.std,
+            s.deficit_recovery.mean,
+            s.deficit_recovery.std,
+            s.throughput_recovery.mean,
+            s.throughput_recovery.std,
+            s.propagation_rate.mean,
+            s.survival_rate.mean,
+            s.impacted_area.mean,
+            s.deficit_integral.mean,
+            s.solver_step_us.mean,
+            s.wall_time_ms.mean,
         )?;
     }
 
@@ -194,11 +209,7 @@ fn write_run_json<W: Write>(writer: &mut W, run: &RunResult) -> std::io::Result<
 
 /// Format an f64 for JSON: NaN → "null", finite → formatted number.
 fn json_f64(v: f64, precision: usize) -> String {
-    if v.is_nan() {
-        "null".to_string()
-    } else {
-        format!("{:.prec$}", v, prec = precision)
-    }
+    if v.is_nan() { "null".to_string() } else { format!("{:.prec$}", v, prec = precision) }
 }
 
 fn write_metrics_json<W: Write>(
@@ -225,8 +236,7 @@ fn write_metrics_json<W: Write>(
         json_f64(m.deficit_recovery, 2),
         json_f64(m.throughput_recovery, 2),
         m.mtbf.map_or("null".to_string(), |v| json_f64(v, 2)),
-        m.recovery_tick
-            .map_or("null".to_string(), |v| v.to_string()),
+        m.recovery_tick.map_or("null".to_string(), |v| v.to_string()),
         json_f64(m.propagation_rate, 4),
         json_f64(m.survival_rate, 4),
         json_f64(m.impacted_area, 4),
@@ -312,10 +322,8 @@ pub fn parse_summaries_from_json(json: &str) -> Result<Vec<ConfigSummary>, Strin
     let val: serde_json::Value =
         serde_json::from_str(json).map_err(|e| format!("JSON parse error: {e}"))?;
 
-    let summaries = val
-        .get("summaries")
-        .and_then(|v| v.as_array())
-        .ok_or("missing 'summaries' array")?;
+    let summaries =
+        val.get("summaries").and_then(|v| v.as_array()).ok_or("missing 'summaries' array")?;
 
     let mut result = Vec::with_capacity(summaries.len());
     for s in summaries {
@@ -454,9 +462,14 @@ impl MetricColumn {
         match self {
             Self::TotalTasks | Self::DeficitIntegral | Self::WallTimeMs => 0,
             Self::SolverStepUs | Self::DeficitRecovery | Self::ThroughputRecovery => 1,
-            Self::Throughput | Self::FaultTolerance | Self::Nrr
-            | Self::CriticalTime | Self::PropagationRate | Self::SurvivalRate
-            | Self::IdleRatio | Self::ImpactedArea => 2,
+            Self::Throughput
+            | Self::FaultTolerance
+            | Self::Nrr
+            | Self::CriticalTime
+            | Self::PropagationRate
+            | Self::SurvivalRate
+            | Self::IdleRatio
+            | Self::ImpactedArea => 2,
         }
     }
 
@@ -648,13 +661,31 @@ pub fn write_svg_chart<W: Write>(
 fn zone_color_hex(col: MetricColumn, val: f64) -> &'static str {
     match col {
         MetricColumn::FaultTolerance | MetricColumn::Nrr | MetricColumn::SurvivalRate => {
-            if val >= 0.7 { "#78b478" } else if val >= 0.4 { "#c8aa64" } else { "#b45050" }
+            if val >= 0.7 {
+                "#78b478"
+            } else if val >= 0.4 {
+                "#c8aa64"
+            } else {
+                "#b45050"
+            }
         }
         MetricColumn::CriticalTime | MetricColumn::PropagationRate | MetricColumn::ImpactedArea => {
-            if val <= 0.2 { "#78b478" } else if val <= 0.5 { "#c8aa64" } else { "#b45050" }
+            if val <= 0.2 {
+                "#78b478"
+            } else if val <= 0.5 {
+                "#c8aa64"
+            } else {
+                "#b45050"
+            }
         }
         MetricColumn::DeficitRecovery | MetricColumn::ThroughputRecovery => {
-            if val <= 20.0 { "#78b478" } else if val <= 60.0 { "#c8aa64" } else { "#b45050" }
+            if val <= 20.0 {
+                "#78b478"
+            } else if val <= 60.0 {
+                "#c8aa64"
+            } else {
+                "#b45050"
+            }
         }
         _ => "#6688aa", // neutral for throughput, tasks, etc.
     }
@@ -780,12 +811,7 @@ mod tests {
         let result = crate::experiment::runner::run_matrix(&matrix, None);
 
         let mut buf = Vec::new();
-        write_typst_table(
-            &mut buf,
-            &result.summaries,
-            &[MetricColumn::FaultTolerance],
-        )
-        .unwrap();
+        write_typst_table(&mut buf, &result.summaries, &[MetricColumn::FaultTolerance]).unwrap();
         let typst = String::from_utf8(buf).unwrap();
         assert!(typst.contains("#table("));
         assert!(typst.contains("[*FT*]"));
@@ -806,7 +832,8 @@ mod tests {
 
         let indices: Vec<usize> = (0..result.summaries.len()).collect();
         let mut buf = Vec::new();
-        write_svg_chart(&mut buf, &result.summaries, MetricColumn::FaultTolerance, &indices).unwrap();
+        write_svg_chart(&mut buf, &result.summaries, MetricColumn::FaultTolerance, &indices)
+            .unwrap();
         let svg = String::from_utf8(buf).unwrap();
         assert!(svg.contains("<svg"));
         assert!(svg.contains("</svg>"));

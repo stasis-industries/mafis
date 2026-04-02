@@ -47,15 +47,8 @@ fn run(
 // 1. Solver × Topology: every solver runs on every topology without panic
 // ═══════════════════════════════════════════════════════════════════════
 
-const SOLVERS: &[&str] = &[
-    "pibt",
-    "rhcr_pbs",
-    "rhcr_pibt",
-    "rhcr_priority_astar",
-    "token_passing",
-    "rt_lacam",
-    "tpts",
-];
+const SOLVERS: &[&str] =
+    &["pibt", "rhcr_pbs", "rhcr_pibt", "rhcr_priority_astar", "token_passing", "rt_lacam", "tpts"];
 
 const TOPOLOGIES: &[(&str, usize)] = &[
     ("warehouse_medium", 15),
@@ -112,14 +105,8 @@ fn all_solvers_on_all_topologies() {
 fn both_schedulers_produce_throughput() {
     for &sched in &["random", "closest"] {
         let r = run("pibt", "warehouse_large", sched, 20, None, 42);
-        assert!(
-            r.baseline_metrics.total_tasks > 0,
-            "{sched} scheduler produced 0 tasks"
-        );
-        assert!(
-            r.baseline_metrics.avg_throughput > 0.0,
-            "{sched} scheduler has zero throughput"
-        );
+        assert!(r.baseline_metrics.total_tasks > 0, "{sched} scheduler produced 0 tasks");
+        assert!(r.baseline_metrics.avg_throughput > 0.0, "{sched} scheduler has zero throughput");
         eprintln!(
             "  {sched:<10} tasks={:<4} tp={:.2}",
             r.baseline_metrics.total_tasks, r.baseline_metrics.avg_throughput
@@ -207,10 +194,7 @@ fn zone_outage_injects_latency() {
         r.faulted_metrics.survival_rate
     );
     // Tasks should still get done (agents recover after 30 ticks)
-    assert!(
-        r.faulted_metrics.total_tasks > 0,
-        "should still complete tasks after zone outage"
-    );
+    assert!(r.faulted_metrics.total_tasks > 0, "should still complete tasks after zone outage");
     eprintln!(
         "  zone_outage: baseline_tasks={} faulted_tasks={} survival={:.2}",
         r.baseline_metrics.total_tasks,
@@ -310,18 +294,15 @@ fn deterministic_replay() {
     let r2 = run("pibt", "warehouse_large", "random", 20, Some(scenario), 42);
 
     assert_eq!(
-        r1.baseline_metrics.total_tasks,
-        r2.baseline_metrics.total_tasks,
+        r1.baseline_metrics.total_tasks, r2.baseline_metrics.total_tasks,
         "baseline tasks differ"
     );
     assert_eq!(
-        r1.faulted_metrics.total_tasks,
-        r2.faulted_metrics.total_tasks,
+        r1.faulted_metrics.total_tasks, r2.faulted_metrics.total_tasks,
         "faulted tasks differ"
     );
     assert_eq!(
-        r1.faulted_metrics.deficit_integral,
-        r2.faulted_metrics.deficit_integral,
+        r1.faulted_metrics.deficit_integral, r2.faulted_metrics.deficit_integral,
         "deficit integral differs"
     );
 
@@ -335,8 +316,10 @@ fn deterministic_replay() {
         "faulted throughput differs"
     );
 
-    eprintln!("  determinism: OK (baseline_tasks={}, faulted_tasks={})",
-        r1.baseline_metrics.total_tasks, r1.faulted_metrics.total_tasks);
+    eprintln!(
+        "  determinism: OK (baseline_tasks={}, faulted_tasks={})",
+        r1.baseline_metrics.total_tasks, r1.faulted_metrics.total_tasks
+    );
 }
 
 /// Determinism holds across solvers — not just PIBT.
@@ -346,8 +329,7 @@ fn deterministic_across_solvers() {
         let r1 = run(solver, "warehouse_large", "random", 8, None, 42);
         let r2 = run(solver, "warehouse_large", "random", 8, None, 42);
         assert_eq!(
-            r1.baseline_metrics.total_tasks,
-            r2.baseline_metrics.total_tasks,
+            r1.baseline_metrics.total_tasks, r2.baseline_metrics.total_tasks,
             "{solver}: baseline tasks differ between identical runs"
         );
         eprintln!("  {solver}: deterministic OK (tasks={})", r1.baseline_metrics.total_tasks);
@@ -368,20 +350,12 @@ fn new_topologies_under_fault() {
         ..Default::default()
     };
 
-    for &(topology, agents) in &[
-        ("kiva_warehouse", 30),
-        ("sorting_center", 15),
-        ("compact_grid", 15),
-    ] {
+    for &(topology, agents) in
+        &[("kiva_warehouse", 30), ("sorting_center", 15), ("compact_grid", 15)]
+    {
         let r = run("pibt", topology, "random", agents, Some(scenario.clone()), 42);
-        assert!(
-            r.baseline_metrics.total_tasks > 0,
-            "{topology}: baseline produced no tasks"
-        );
-        assert!(
-            r.faulted_metrics.survival_rate < 1.0,
-            "{topology}: burst should kill agents"
-        );
+        assert!(r.baseline_metrics.total_tasks > 0, "{topology}: baseline produced no tasks");
+        assert!(r.faulted_metrics.survival_rate < 1.0, "{topology}: burst should kill agents");
         eprintln!(
             "  {topology:<20} baseline={:<4} faulted={:<4} FT={:.2} survival={:.2}",
             r.baseline_metrics.total_tasks,
@@ -415,9 +389,8 @@ fn all_solvers_no_collisions_500_ticks() {
         let mut rng = SeededRng::new(42);
         let agents = place_agents(40, &output.grid, &output.zones, &mut rng);
 
-        let solver =
-            mafis::solver::lifelong_solver_from_name(solver_name, grid_area, 40)
-                .expect("solver creation failed");
+        let solver = mafis::solver::lifelong_solver_from_name(solver_name, grid_area, 40)
+            .expect("solver creation failed");
         let scheduler = ActiveScheduler::from_name("random");
         let queue_policy = ActiveQueuePolicy::from_name("closest");
 
@@ -427,26 +400,18 @@ fn all_solvers_no_collisions_500_ticks() {
             agents,
             solver,
             rng,
-            FaultConfig {
-                enabled: false,
-                ..Default::default()
-            },
+            FaultConfig { enabled: false, ..Default::default() },
             FaultSchedule::default(),
         );
 
-        let mut prev_positions: Vec<IVec2> =
-            runner.agents.iter().map(|a| a.pos).collect();
+        let mut prev_positions: Vec<IVec2> = runner.agents.iter().map(|a| a.pos).collect();
 
         for tick in 0..500 {
             runner.tick(scheduler.scheduler(), queue_policy.policy());
 
             // Vertex collision check: no two alive agents share a position
-            let alive_positions: Vec<IVec2> = runner
-                .agents
-                .iter()
-                .filter(|a| a.alive)
-                .map(|a| a.pos)
-                .collect();
+            let alive_positions: Vec<IVec2> =
+                runner.agents.iter().filter(|a| a.alive).map(|a| a.pos).collect();
             let unique: HashSet<IVec2> = alive_positions.iter().copied().collect();
             assert_eq!(
                 unique.len(),
@@ -469,9 +434,7 @@ fn all_solvers_no_collisions_500_ticks() {
                         && runner.agents[j].pos == prev_positions[i]
                         && runner.agents[i].pos != runner.agents[j].pos
                     {
-                        panic!(
-                            "{solver_name} tick {tick}: edge swap between agents {i} and {j}"
-                        );
+                        panic!("{solver_name} tick {tick}: edge swap between agents {i} and {j}");
                     }
                 }
             }
@@ -494,9 +457,8 @@ fn token_passing_no_edge_swaps() {
     let mut rng = SeededRng::new(42);
     let agents = place_agents(30, &output.grid, &output.zones, &mut rng);
 
-    let solver =
-        mafis::solver::lifelong_solver_from_name("token_passing", grid_area, 30)
-            .expect("solver creation failed");
+    let solver = mafis::solver::lifelong_solver_from_name("token_passing", grid_area, 30)
+        .expect("solver creation failed");
     let scheduler = ActiveScheduler::from_name("random");
     let queue_policy = ActiveQueuePolicy::from_name("closest");
 
@@ -506,26 +468,18 @@ fn token_passing_no_edge_swaps() {
         agents,
         solver,
         rng,
-        FaultConfig {
-            enabled: false,
-            ..Default::default()
-        },
+        FaultConfig { enabled: false, ..Default::default() },
         FaultSchedule::default(),
     );
 
-    let mut prev_positions: Vec<IVec2> =
-        runner.agents.iter().map(|a| a.pos).collect();
+    let mut prev_positions: Vec<IVec2> = runner.agents.iter().map(|a| a.pos).collect();
 
     for tick in 0..500 {
         runner.tick(scheduler.scheduler(), queue_policy.policy());
 
         // Vertex collision check
-        let alive_positions: Vec<IVec2> = runner
-            .agents
-            .iter()
-            .filter(|a| a.alive)
-            .map(|a| a.pos)
-            .collect();
+        let alive_positions: Vec<IVec2> =
+            runner.agents.iter().filter(|a| a.alive).map(|a| a.pos).collect();
         let unique: HashSet<IVec2> = alive_positions.iter().copied().collect();
         assert_eq!(
             unique.len(),
@@ -572,9 +526,8 @@ fn rhcr_fallback_collision_free() {
     let mut rng = SeededRng::new(42);
     let agents = place_agents(40, &output.grid, &output.zones, &mut rng);
 
-    let solver =
-        mafis::solver::lifelong_solver_from_name("rhcr_pbs", grid_area, 40)
-            .expect("solver creation failed");
+    let solver = mafis::solver::lifelong_solver_from_name("rhcr_pbs", grid_area, 40)
+        .expect("solver creation failed");
     let scheduler = ActiveScheduler::from_name("random");
     let queue_policy = ActiveQueuePolicy::from_name("closest");
 
@@ -584,26 +537,18 @@ fn rhcr_fallback_collision_free() {
         agents,
         solver,
         rng,
-        FaultConfig {
-            enabled: false,
-            ..Default::default()
-        },
+        FaultConfig { enabled: false, ..Default::default() },
         FaultSchedule::default(),
     );
 
-    let mut prev_positions: Vec<IVec2> =
-        runner.agents.iter().map(|a| a.pos).collect();
+    let mut prev_positions: Vec<IVec2> = runner.agents.iter().map(|a| a.pos).collect();
 
     for tick in 0..500 {
         runner.tick(scheduler.scheduler(), queue_policy.policy());
 
         // Vertex collision check
-        let alive_positions: Vec<IVec2> = runner
-            .agents
-            .iter()
-            .filter(|a| a.alive)
-            .map(|a| a.pos)
-            .collect();
+        let alive_positions: Vec<IVec2> =
+            runner.agents.iter().filter(|a| a.alive).map(|a| a.pos).collect();
         let unique: HashSet<IVec2> = alive_positions.iter().copied().collect();
         assert_eq!(
             unique.len(),
@@ -626,9 +571,7 @@ fn rhcr_fallback_collision_free() {
                     && runner.agents[j].pos == prev_positions[i]
                     && runner.agents[i].pos != runner.agents[j].pos
                 {
-                    panic!(
-                        "rhcr_pbs(dense) tick {tick}: edge swap between agents {i} and {j}"
-                    );
+                    panic!("rhcr_pbs(dense) tick {tick}: edge swap between agents {i} and {j}");
                 }
             }
         }
@@ -661,16 +604,12 @@ fn determinism_all_solvers_all_schedulers() {
             let r2 = run(solver, "warehouse_large", sched, 20, None, 42);
 
             assert_eq!(
-                r1.baseline_metrics.total_tasks,
-                r2.baseline_metrics.total_tasks,
+                r1.baseline_metrics.total_tasks, r2.baseline_metrics.total_tasks,
                 "{solver}/{sched}: baseline tasks differ ({} vs {})",
-                r1.baseline_metrics.total_tasks,
-                r2.baseline_metrics.total_tasks
+                r1.baseline_metrics.total_tasks, r2.baseline_metrics.total_tasks
             );
             assert!(
-                (r1.baseline_metrics.avg_throughput
-                    - r2.baseline_metrics.avg_throughput)
-                    .abs()
+                (r1.baseline_metrics.avg_throughput - r2.baseline_metrics.avg_throughput).abs()
                     < 1e-15,
                 "{solver}/{sched}: baseline throughput differs ({} vs {})",
                 r1.baseline_metrics.avg_throughput,
@@ -702,18 +641,14 @@ fn baseline_faulted_parity_before_burst() {
     let queue_policy = ActiveQueuePolicy::from_name("closest");
 
     // Baseline runner (no faults)
-    let solver_bl =
-        mafis::solver::lifelong_solver_from_name("pibt", grid_area, 20).unwrap();
+    let solver_bl = mafis::solver::lifelong_solver_from_name("pibt", grid_area, 20).unwrap();
     let mut runner_bl = SimulationRunner::new(
         output.grid.clone(),
         output.zones.clone(),
         agents.clone(),
         solver_bl,
         rng_after.clone(),
-        FaultConfig {
-            enabled: false,
-            ..Default::default()
-        },
+        FaultConfig { enabled: false, ..Default::default() },
         FaultSchedule::default(),
     );
 
@@ -725,19 +660,11 @@ fn baseline_faulted_parity_before_burst() {
         burst_at_tick: 100,
         ..Default::default()
     };
-    let solver_f =
-        mafis::solver::lifelong_solver_from_name("pibt", grid_area, 20).unwrap();
+    let solver_f = mafis::solver::lifelong_solver_from_name("pibt", grid_area, 20).unwrap();
     let fc = scenario.to_fault_config();
     let fs = scenario.generate_schedule(200, 20);
-    let mut runner_f = SimulationRunner::new(
-        output.grid,
-        output.zones,
-        agents,
-        solver_f,
-        rng_after,
-        fc,
-        fs,
-    );
+    let mut runner_f =
+        SimulationRunner::new(output.grid, output.zones, agents, solver_f, rng_after, fc, fs);
 
     // Run both for 99 ticks (before burst at tick 100)
     for _tick in 1..=99 {
@@ -770,18 +697,14 @@ fn baseline_faulted_parity_before_wear() {
     let queue_policy = ActiveQueuePolicy::from_name("closest");
 
     // Baseline runner (no faults)
-    let solver_bl =
-        mafis::solver::lifelong_solver_from_name("pibt", grid_area, 15).unwrap();
+    let solver_bl = mafis::solver::lifelong_solver_from_name("pibt", grid_area, 15).unwrap();
     let mut runner_bl = SimulationRunner::new(
         output.grid.clone(),
         output.zones.clone(),
         agents.clone(),
         solver_bl,
         rng_after.clone(),
-        FaultConfig {
-            enabled: false,
-            ..Default::default()
-        },
+        FaultConfig { enabled: false, ..Default::default() },
         FaultSchedule::default(),
     );
 
@@ -792,19 +715,11 @@ fn baseline_faulted_parity_before_wear() {
         wear_heat_rate: WearHeatRate::High,
         ..Default::default()
     };
-    let solver_f =
-        mafis::solver::lifelong_solver_from_name("pibt", grid_area, 15).unwrap();
+    let solver_f = mafis::solver::lifelong_solver_from_name("pibt", grid_area, 15).unwrap();
     let fc = scenario.to_fault_config();
     let fs = scenario.generate_schedule(200, 15);
-    let mut runner_f = SimulationRunner::new(
-        output.grid,
-        output.zones,
-        agents,
-        solver_f,
-        rng_after,
-        fc,
-        fs,
-    );
+    let mut runner_f =
+        SimulationRunner::new(output.grid, output.zones, agents, solver_f, rng_after, fc, fs);
 
     // Run until first death or 200 ticks. Before any death, positions must match.
     let mut parity_ticks = 0u64;
@@ -823,12 +738,7 @@ fn baseline_faulted_parity_before_wear() {
         }
 
         // Before any death, positions must be identical
-        for (i, (bl, f)) in runner_bl
-            .agents
-            .iter()
-            .zip(runner_f.agents.iter())
-            .enumerate()
-        {
+        for (i, (bl, f)) in runner_bl.agents.iter().zip(runner_f.agents.iter()).enumerate() {
             assert_eq!(
                 bl.pos, f.pos,
                 "tick {}: agent {i} position diverged before any wear death (bl={:?} vs f={:?})",
@@ -865,18 +775,14 @@ fn baseline_faulted_parity_before_intermittent() {
     let queue_policy = ActiveQueuePolicy::from_name("closest");
 
     // Baseline runner (no faults)
-    let solver_bl =
-        mafis::solver::lifelong_solver_from_name("pibt", grid_area, 15).unwrap();
+    let solver_bl = mafis::solver::lifelong_solver_from_name("pibt", grid_area, 15).unwrap();
     let mut runner_bl = SimulationRunner::new(
         output.grid.clone(),
         output.zones.clone(),
         agents.clone(),
         solver_bl,
         rng_after.clone(),
-        FaultConfig {
-            enabled: false,
-            ..Default::default()
-        },
+        FaultConfig { enabled: false, ..Default::default() },
         FaultSchedule::default(),
     );
 
@@ -888,19 +794,11 @@ fn baseline_faulted_parity_before_intermittent() {
         intermittent_recovery_ticks: 10,
         ..Default::default()
     };
-    let solver_f =
-        mafis::solver::lifelong_solver_from_name("pibt", grid_area, 15).unwrap();
+    let solver_f = mafis::solver::lifelong_solver_from_name("pibt", grid_area, 15).unwrap();
     let fc = scenario.to_fault_config();
     let fs = scenario.generate_schedule(200, 15);
-    let mut runner_f = SimulationRunner::new(
-        output.grid,
-        output.zones,
-        agents,
-        solver_f,
-        rng_after,
-        fc,
-        fs,
-    );
+    let mut runner_f =
+        SimulationRunner::new(output.grid, output.zones, agents, solver_f, rng_after, fc, fs);
 
     // Run until first latency injection or 200 ticks.
     let mut parity_ticks = 0u64;
@@ -928,9 +826,7 @@ fn baseline_faulted_parity_before_intermittent() {
         parity_ticks += 1;
     }
     assert!(parity_ticks > 0, "parity should hold for at least 1 tick");
-    eprintln!(
-        "  baseline/faulted parity before intermittent fault: OK ({parity_ticks} ticks)"
-    );
+    eprintln!("  baseline/faulted parity before intermittent fault: OK ({parity_ticks} ticks)");
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -951,8 +847,7 @@ fn all_schedulers_nonzero_throughput() {
             custom_map: None,
         };
         let r = run_single_experiment(&config);
-        assert!(r.baseline_metrics.total_tasks > 0,
-            "{sched}: zero tasks in 500 ticks");
+        assert!(r.baseline_metrics.total_tasks > 0, "{sched}: zero tasks in 500 ticks");
         eprintln!("  {sched}: tasks={}", r.baseline_metrics.total_tasks);
     }
 }
@@ -965,8 +860,11 @@ fn all_schedulers_nonzero_throughput() {
 fn ft_pipeline_end_to_end() {
     // No faults -> FT should be 1.0
     let r_clean = run("pibt", "warehouse_large", "random", 30, None, 42);
-    assert!((r_clean.faulted_metrics.fault_tolerance - 1.0).abs() < 1e-10,
-        "FT should be 1.0 with no faults, got {}", r_clean.faulted_metrics.fault_tolerance);
+    assert!(
+        (r_clean.faulted_metrics.fault_tolerance - 1.0).abs() < 1e-10,
+        "FT should be 1.0 with no faults, got {}",
+        r_clean.faulted_metrics.fault_tolerance
+    );
 
     // Burst faults -> FT should differ from 1.0
     // Note: FT = faulted_tasks / baseline_tasks. Can exceed 1.0 due to Braess's
@@ -981,18 +879,25 @@ fn ft_pipeline_end_to_end() {
         ..Default::default()
     };
     let r_fault = run("pibt", "warehouse_large", "random", 30, Some(scenario), 42);
-    assert!(r_fault.faulted_metrics.fault_tolerance > 0.0,
+    assert!(
+        r_fault.faulted_metrics.fault_tolerance > 0.0,
         "FT should be > 0 (agents still complete tasks), got ft={}, faulted_tasks={}, baseline_tasks={}",
         r_fault.faulted_metrics.fault_tolerance,
         r_fault.faulted_metrics.total_tasks,
-        r_fault.baseline_metrics.total_tasks);
-    assert!(r_fault.faulted_metrics.survival_rate < 1.0,
-        "burst should kill agents: survival={}", r_fault.faulted_metrics.survival_rate);
+        r_fault.baseline_metrics.total_tasks
+    );
+    assert!(
+        r_fault.faulted_metrics.survival_rate < 1.0,
+        "burst should kill agents: survival={}",
+        r_fault.faulted_metrics.survival_rate
+    );
 
-    eprintln!("  FT pipeline: clean={:.3} burst={:.3} survival={:.3}",
+    eprintln!(
+        "  FT pipeline: clean={:.3} burst={:.3} survival={:.3}",
         r_clean.faulted_metrics.fault_tolerance,
         r_fault.faulted_metrics.fault_tolerance,
-        r_fault.faulted_metrics.survival_rate);
+        r_fault.faulted_metrics.survival_rate
+    );
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -1012,8 +917,11 @@ fn burst_kills_exact_count() {
 
     // 20% of 50 = 10 agents should die
     // survival_rate = (50 - 10) / 50 = 0.80
-    assert!((r.faulted_metrics.survival_rate - 0.80).abs() < 0.01,
-        "burst 20% of 50 should give survival_rate=0.80, got {}", r.faulted_metrics.survival_rate);
+    assert!(
+        (r.faulted_metrics.survival_rate - 0.80).abs() < 0.01,
+        "burst 20% of 50 should give survival_rate=0.80, got {}",
+        r.faulted_metrics.survival_rate
+    );
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -1053,10 +961,18 @@ fn wear_rate_ordering_invariant() {
     // Low >= Medium >= High survival (higher wear = more deaths).
     // The Weibull eta values (900, 500, 150) are far enough apart that with
     // 500 ticks and 10 agents, the ordering should hold deterministically.
-    assert!(survivals[0] >= survivals[1],
-        "Low ({:.3}) should have >= survival than Medium ({:.3})", survivals[0], survivals[1]);
-    assert!(survivals[1] >= survivals[2],
-        "Medium ({:.3}) should have >= survival than High ({:.3})", survivals[1], survivals[2]);
+    assert!(
+        survivals[0] >= survivals[1],
+        "Low ({:.3}) should have >= survival than Medium ({:.3})",
+        survivals[0],
+        survivals[1]
+    );
+    assert!(
+        survivals[1] >= survivals[2],
+        "Medium ({:.3}) should have >= survival than High ({:.3})",
+        survivals[1],
+        survivals[2]
+    );
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -1067,8 +983,7 @@ fn wear_rate_ordering_invariant() {
 fn delivery_direct_no_hotspot() {
     // compact_grid has no queue lines -> uses assign_delivery_direct
     let r = run("pibt", "compact_grid", "closest", 15, None, 42);
-    assert!(r.baseline_metrics.total_tasks > 0,
-        "compact_grid/closest should produce tasks");
+    assert!(r.baseline_metrics.total_tasks > 0, "compact_grid/closest should produce tasks");
     // The test verifies the path doesn't panic and produces throughput.
     // A proper hotspot test would need access to per-delivery-cell counts,
     // which the current API doesn't expose. The key check is that it works.
@@ -1113,13 +1028,17 @@ fn delete_fault_determinism() {
     let baseline_tasks;
     let baseline_throughput_series: Vec<f64>;
     {
-        let solver = mafis::solver::lifelong_solver_from_name(solver_name, grid_area, num_agents)
-            .unwrap();
+        let solver =
+            mafis::solver::lifelong_solver_from_name(solver_name, grid_area, num_agents).unwrap();
         let fault_config = FaultConfig { enabled: false, ..Default::default() };
         let mut runner = SimulationRunner::new(
-            grid.clone(), zones.clone(), agents.clone(),
-            solver, rng_after_placement.clone(),
-            fault_config, FaultSchedule::default(),
+            grid.clone(),
+            zones.clone(),
+            agents.clone(),
+            solver,
+            rng_after_placement.clone(),
+            fault_config,
+            FaultSchedule::default(),
         );
 
         let mut tp_series = Vec::new();
@@ -1151,17 +1070,18 @@ fn delete_fault_determinism() {
             fired: false,
         });
 
-        let fault_config = FaultConfig {
-            enabled: true,
-            ..Default::default()
-        };
+        let fault_config = FaultConfig { enabled: true, ..Default::default() };
 
-        let solver = mafis::solver::lifelong_solver_from_name(solver_name, grid_area, num_agents)
-            .unwrap();
+        let solver =
+            mafis::solver::lifelong_solver_from_name(solver_name, grid_area, num_agents).unwrap();
         let mut runner = SimulationRunner::new(
-            grid.clone(), zones.clone(), agents.clone(),
-            solver, rng_after_placement.clone(),
-            fault_config, fault_schedule,
+            grid.clone(),
+            zones.clone(),
+            agents.clone(),
+            solver,
+            rng_after_placement.clone(),
+            fault_config,
+            fault_schedule,
         );
 
         // Run to fault_tick - 1 (just before fault fires)
@@ -1176,9 +1096,7 @@ fn delete_fault_determinism() {
         _snapshot_fault_rng_pos = runner.fault_rng().rng.get_word_pos();
         snapshot_tasks_completed = runner.tasks_completed;
         _snapshot_completion_ticks = runner.completion_ticks().clone();
-        _snapshot_agent_states = runner.agents.iter()
-            .map(|a| (a.pos, a.goal, a.alive))
-            .collect();
+        _snapshot_agent_states = runner.agents.iter().map(|a| (a.pos, a.goal, a.alive)).collect();
         _snapshot_solver_priorities = runner.solver().save_priorities();
 
         eprintln!("  Faulted run at tick {snapshot_tick}: tasks = {snapshot_tasks_completed}");
@@ -1189,21 +1107,27 @@ fn delete_fault_determinism() {
     let baseline_rng_pos_at_snap: u128;
     let baseline_tasks_at_snap: u64;
     {
-        let solver = mafis::solver::lifelong_solver_from_name(solver_name, grid_area, num_agents)
-            .unwrap();
+        let solver =
+            mafis::solver::lifelong_solver_from_name(solver_name, grid_area, num_agents).unwrap();
         let fault_config = FaultConfig { enabled: false, ..Default::default() };
         let mut runner = SimulationRunner::new(
-            grid.clone(), zones.clone(), agents.clone(),
-            solver, rng_after_placement.clone(),
-            fault_config, FaultSchedule::default(),
+            grid.clone(),
+            zones.clone(),
+            agents.clone(),
+            solver,
+            rng_after_placement.clone(),
+            fault_config,
+            FaultSchedule::default(),
         );
         for _ in 0..(fault_tick - 1) {
             runner.tick(scheduler.scheduler(), queue_policy.policy());
         }
         baseline_rng_pos_at_snap = runner.rng().rng.get_word_pos();
         baseline_tasks_at_snap = runner.tasks_completed;
-        eprintln!("  Baseline at tick {}: tasks = {baseline_tasks_at_snap}, rng_pos = {baseline_rng_pos_at_snap}",
-            runner.tick);
+        eprintln!(
+            "  Baseline at tick {}: tasks = {baseline_tasks_at_snap}, rng_pos = {baseline_rng_pos_at_snap}",
+            runner.tick
+        );
     }
 
     // ── KEY ASSERTIONS ──────────────────────────────────────────────
@@ -1221,13 +1145,17 @@ fn delete_fault_determinism() {
     // ── Run 3: Resume from snapshot with faults disabled ────────────
     let resumed_tasks;
     {
-        let solver = mafis::solver::lifelong_solver_from_name(solver_name, grid_area, num_agents)
-            .unwrap();
+        let solver =
+            mafis::solver::lifelong_solver_from_name(solver_name, grid_area, num_agents).unwrap();
         let fault_config = FaultConfig { enabled: false, ..Default::default() };
         let mut runner = SimulationRunner::new(
-            grid.clone(), zones.clone(), agents.clone(),
-            solver, rng_after_placement.clone(),
-            fault_config, FaultSchedule::default(),
+            grid.clone(),
+            zones.clone(),
+            agents.clone(),
+            solver,
+            rng_after_placement.clone(),
+            fault_config,
+            FaultSchedule::default(),
         );
 
         // Fast-forward to snapshot tick (baseline path — identical to run 1)
@@ -1236,8 +1164,11 @@ fn delete_fault_determinism() {
         }
 
         // Now verify state matches
-        assert_eq!(runner.rng().rng.get_word_pos(), snapshot_rng_pos,
-            "Run 3 RNG pos at snapshot tick doesn't match");
+        assert_eq!(
+            runner.rng().rng.get_word_pos(),
+            snapshot_rng_pos,
+            "Run 3 RNG pos at snapshot tick doesn't match"
+        );
 
         // Continue to total_ticks
         for _ in (fault_tick - 1)..total_ticks {
@@ -1248,7 +1179,8 @@ fn delete_fault_determinism() {
     }
 
     assert_eq!(
-        resumed_tasks, baseline_tasks,
+        resumed_tasks,
+        baseline_tasks,
         "DELETE determinism failed!\n\
          Baseline tasks = {baseline_tasks}\n\
          Resumed tasks = {resumed_tasks}\n\
@@ -1260,13 +1192,17 @@ fn delete_fault_determinism() {
     // Also verify per-tick throughput matches
     let mut resumed_series: Vec<f64>;
     {
-        let solver = mafis::solver::lifelong_solver_from_name(solver_name, grid_area, num_agents)
-            .unwrap();
+        let solver =
+            mafis::solver::lifelong_solver_from_name(solver_name, grid_area, num_agents).unwrap();
         let fault_config = FaultConfig { enabled: false, ..Default::default() };
         let mut runner = SimulationRunner::new(
-            grid.clone(), zones.clone(), agents.clone(),
-            solver, rng_after_placement.clone(),
-            fault_config, FaultSchedule::default(),
+            grid.clone(),
+            zones.clone(),
+            agents.clone(),
+            solver,
+            rng_after_placement.clone(),
+            fault_config,
+            FaultSchedule::default(),
         );
         resumed_series = Vec::new();
         for _ in 0..total_ticks {
@@ -1317,13 +1253,21 @@ fn delete_fault_double_restore_determinism() {
     // ── Baseline: full clean run ────────────────────────────────────
     let baseline_tasks;
     {
-        let solver = mafis::solver::lifelong_solver_from_name(solver_name, grid_area, num_agents).unwrap();
+        let solver =
+            mafis::solver::lifelong_solver_from_name(solver_name, grid_area, num_agents).unwrap();
         let fc = FaultConfig { enabled: false, ..Default::default() };
         let mut r = SimulationRunner::new(
-            grid.clone(), zones.clone(), agents.clone(),
-            solver, rng_after.clone(), fc, FaultSchedule::default(),
+            grid.clone(),
+            zones.clone(),
+            agents.clone(),
+            solver,
+            rng_after.clone(),
+            fc,
+            FaultSchedule::default(),
         );
-        for _ in 0..total_ticks { r.tick(scheduler.scheduler(), queue_policy.policy()); }
+        for _ in 0..total_ticks {
+            r.tick(scheduler.scheduler(), queue_policy.policy());
+        }
         baseline_tasks = r.tasks_completed;
         eprintln!("  Baseline: {baseline_tasks} tasks in {total_ticks} ticks");
     }
@@ -1332,7 +1276,13 @@ fn delete_fault_double_restore_determinism() {
     let snap_rng_pos: u128;
     let snap_tasks: u64;
     let snap_completion_ticks: std::collections::VecDeque<u64>;
-    let snap_agent_data: Vec<(bevy::math::IVec2, bevy::math::IVec2, mafis::core::task::TaskLeg, Vec<u8>, bool)>;
+    let snap_agent_data: Vec<(
+        bevy::math::IVec2,
+        bevy::math::IVec2,
+        mafis::core::task::TaskLeg,
+        Vec<u8>,
+        bool,
+    )>;
     let snap_solver_pri: Vec<f32>;
     {
         let mut fs = FaultSchedule::default();
@@ -1344,10 +1294,16 @@ fn delete_fault_double_restore_determinism() {
             fired: false,
         });
         let fc = FaultConfig { enabled: true, ..Default::default() };
-        let solver = mafis::solver::lifelong_solver_from_name(solver_name, grid_area, num_agents).unwrap();
+        let solver =
+            mafis::solver::lifelong_solver_from_name(solver_name, grid_area, num_agents).unwrap();
         let mut r = SimulationRunner::new(
-            grid.clone(), zones.clone(), agents.clone(),
-            solver, rng_after.clone(), fc, fs,
+            grid.clone(),
+            zones.clone(),
+            agents.clone(),
+            solver,
+            rng_after.clone(),
+            fc,
+            fs,
         );
 
         for _ in 0..(fault_tick - 1) {
@@ -1357,10 +1313,14 @@ fn delete_fault_double_restore_determinism() {
         snap_rng_pos = r.rng().rng.get_word_pos();
         snap_tasks = r.tasks_completed;
         snap_completion_ticks = r.completion_ticks().clone();
-        snap_agent_data = r.agents.iter().map(|a| {
-            let actions: Vec<u8> = a.planned_path.iter().map(|act| act.to_u8()).collect();
-            (a.pos, a.goal, a.task_leg.clone(), actions, a.alive)
-        }).collect();
+        snap_agent_data = r
+            .agents
+            .iter()
+            .map(|a| {
+                let actions: Vec<u8> = a.planned_path.iter().map(|act| act.to_u8()).collect();
+                (a.pos, a.goal, a.task_leg.clone(), actions, a.alive)
+            })
+            .collect();
         snap_solver_pri = r.solver().save_priorities();
         eprintln!("  Snapshot at tick {}: tasks={snap_tasks}, rng_pos={snap_rng_pos}", r.tick);
     }
@@ -1371,27 +1331,45 @@ fn delete_fault_double_restore_determinism() {
     let resumed_tasks;
     {
         // --- Restore 1 (DELETE handler creates runner, restores state) ---
-        let solver = mafis::solver::lifelong_solver_from_name(solver_name, grid_area, num_agents).unwrap();
+        let solver =
+            mafis::solver::lifelong_solver_from_name(solver_name, grid_area, num_agents).unwrap();
         let fc = FaultConfig { enabled: false, ..Default::default() };
         let mut r = SimulationRunner::new(
-            grid.clone(), zones.clone(), agents.clone(),
-            solver, rng_after.clone(), fc, FaultSchedule::default(),
+            grid.clone(),
+            zones.clone(),
+            agents.clone(),
+            solver,
+            rng_after.clone(),
+            fc,
+            FaultSchedule::default(),
         );
 
         // Restore state from snapshot
-        restore_runner_from_snapshot(&mut r, &snap_agent_data, &snap_solver_pri,
-            snap_rng_pos, snap_tasks, &snap_completion_ticks, fault_tick - 1);
+        restore_runner_from_snapshot(
+            &mut r,
+            &snap_agent_data,
+            &snap_solver_pri,
+            snap_rng_pos,
+            snap_tasks,
+            &snap_completion_ticks,
+            fault_tick - 1,
+        );
 
         // Verify RNG matches
-        assert_eq!(r.rng().rng.get_word_pos(), snap_rng_pos,
-            "Restore 1: RNG pos mismatch");
+        assert_eq!(r.rng().rng.get_word_pos(), snap_rng_pos, "Restore 1: RNG pos mismatch");
 
         // --- Restore 2 (Resume handler restores AGAIN from same snapshot) ---
-        restore_runner_from_snapshot(&mut r, &snap_agent_data, &snap_solver_pri,
-            snap_rng_pos, snap_tasks, &snap_completion_ticks, fault_tick - 1);
+        restore_runner_from_snapshot(
+            &mut r,
+            &snap_agent_data,
+            &snap_solver_pri,
+            snap_rng_pos,
+            snap_tasks,
+            &snap_completion_ticks,
+            fault_tick - 1,
+        );
 
-        assert_eq!(r.rng().rng.get_word_pos(), snap_rng_pos,
-            "Restore 2: RNG pos mismatch");
+        assert_eq!(r.rng().rng.get_word_pos(), snap_rng_pos, "Restore 2: RNG pos mismatch");
 
         // Continue running to completion
         let remaining = total_ticks - (fault_tick - 1);
@@ -1403,7 +1381,8 @@ fn delete_fault_double_restore_determinism() {
     }
 
     assert_eq!(
-        resumed_tasks, baseline_tasks,
+        resumed_tasks,
+        baseline_tasks,
         "DOUBLE RESTORE determinism failed!\n\
          Baseline = {baseline_tasks}, Resumed = {resumed_tasks}, diff = {}",
         (resumed_tasks as i64) - (baseline_tasks as i64)
@@ -1437,11 +1416,17 @@ fn delete_fault_inplace_restore_determinism() {
     let baseline_tasks;
     let baseline_per_tick: Vec<u64>;
     {
-        let solver = mafis::solver::lifelong_solver_from_name(solver_name, grid_area, num_agents).unwrap();
+        let solver =
+            mafis::solver::lifelong_solver_from_name(solver_name, grid_area, num_agents).unwrap();
         let fc = FaultConfig { enabled: false, ..Default::default() };
         let mut r = SimulationRunner::new(
-            grid.clone(), zones.clone(), agents.clone(),
-            solver, rng_after.clone(), fc, FaultSchedule::default(),
+            grid.clone(),
+            zones.clone(),
+            agents.clone(),
+            solver,
+            rng_after.clone(),
+            fc,
+            FaultSchedule::default(),
         );
         let mut per_tick = Vec::new();
         for _ in 0..total_ticks {
@@ -1467,10 +1452,16 @@ fn delete_fault_inplace_restore_determinism() {
             fired: false,
         });
         let fc = FaultConfig { enabled: true, ..Default::default() };
-        let solver = mafis::solver::lifelong_solver_from_name(solver_name, grid_area, num_agents).unwrap();
+        let solver =
+            mafis::solver::lifelong_solver_from_name(solver_name, grid_area, num_agents).unwrap();
         let mut runner = SimulationRunner::new(
-            grid.clone(), zones.clone(), agents.clone(),
-            solver, rng_after.clone(), fc, fs,
+            grid.clone(),
+            zones.clone(),
+            agents.clone(),
+            solver,
+            rng_after.clone(),
+            fc,
+            fs,
         );
 
         // Run to fault_tick - 1 and take snapshot
@@ -1483,19 +1474,26 @@ fn delete_fault_inplace_restore_determinism() {
         let snap_fault_rng_pos = runner.fault_rng().rng.get_word_pos();
         let snap_tasks = runner.tasks_completed;
         let snap_completion_ticks = runner.completion_ticks().clone();
-        let snap_agent_data: Vec<_> = runner.agents.iter().map(|a| {
-            let actions: Vec<u8> = a.planned_path.iter().map(|act| act.to_u8()).collect();
-            (a.pos, a.goal, a.task_leg.clone(), actions, a.alive, a.heat, a.operational_age)
-        }).collect();
+        let snap_agent_data: Vec<_> = runner
+            .agents
+            .iter()
+            .map(|a| {
+                let actions: Vec<u8> = a.planned_path.iter().map(|act| act.to_u8()).collect();
+                (a.pos, a.goal, a.task_leg.clone(), actions, a.alive, a.heat, a.operational_age)
+            })
+            .collect();
         let snap_solver_pri = runner.solver().save_priorities();
 
         eprintln!("  Snapshot at tick {snap_tick}: tasks={snap_tasks}, rng={snap_rng_pos}");
 
         // Let the fault fire (run 1 more tick)
         runner.tick(scheduler.scheduler(), queue_policy.policy());
-        eprintln!("  After fault at tick {}: tasks={}, alive={}",
-            runner.tick, runner.tasks_completed,
-            runner.agents.iter().filter(|a| a.alive).count());
+        eprintln!(
+            "  After fault at tick {}: tasks={}, alive={}",
+            runner.tick,
+            runner.tasks_completed,
+            runner.agents.iter().filter(|a| a.alive).count()
+        );
 
         // ── Simulate DELETE: restore in-place ────────────────────────
         // Rebuild grid
@@ -1504,8 +1502,12 @@ fn delete_fault_inplace_restore_determinism() {
         // (no fault log entries to replay — this is the clean case)
 
         // Restore agents
-        for (i, (pos, goal, task_leg, actions, alive, heat, op_age)) in snap_agent_data.iter().enumerate() {
-            if i >= runner.agents.len() { break; }
+        for (i, (pos, goal, task_leg, actions, alive, heat, op_age)) in
+            snap_agent_data.iter().enumerate()
+        {
+            if i >= runner.agents.len() {
+                break;
+            }
             runner.agents[i].pos = *pos;
             runner.agents[i].goal = *goal;
             runner.agents[i].task_leg = task_leg.clone();
@@ -1513,9 +1515,9 @@ fn delete_fault_inplace_restore_determinism() {
             runner.agents[i].heat = *heat;
             runner.agents[i].operational_age = *op_age;
             runner.agents[i].planned_path.clear();
-            runner.agents[i].planned_path.extend(
-                actions.iter().map(|&b| mafis::core::action::Action::from_u8(b))
-            );
+            runner.agents[i]
+                .planned_path
+                .extend(actions.iter().map(|&b| mafis::core::action::Action::from_u8(b)));
             runner.agents[i].latency_remaining = 0;
             runner.agents[i].last_action = mafis::core::action::Action::Wait;
             runner.agents[i].next_fault_tick = None;
@@ -1549,14 +1551,22 @@ fn delete_fault_inplace_restore_determinism() {
         // Clear transient state
         runner.clear_transient_state();
 
-        eprintln!("  After in-place restore: tick={}, tasks={}, rng={}",
-            runner.tick, runner.tasks_completed, runner.rng().rng.get_word_pos());
+        eprintln!(
+            "  After in-place restore: tick={}, tasks={}, rng={}",
+            runner.tick,
+            runner.tasks_completed,
+            runner.rng().rng.get_word_pos()
+        );
 
         // ── Now simulate SECOND restore (Resume from Replay) ────────
         // In the live UI, ResumeFromTick re-runs restore_world_state + restore_runner_state
         *runner.grid_mut() = topo.topology().generate(seed).grid;
-        for (i, (pos, goal, task_leg, actions, alive, heat, op_age)) in snap_agent_data.iter().enumerate() {
-            if i >= runner.agents.len() { break; }
+        for (i, (pos, goal, task_leg, actions, alive, heat, op_age)) in
+            snap_agent_data.iter().enumerate()
+        {
+            if i >= runner.agents.len() {
+                break;
+            }
             runner.agents[i].pos = *pos;
             runner.agents[i].goal = *goal;
             runner.agents[i].task_leg = task_leg.clone();
@@ -1564,9 +1574,9 @@ fn delete_fault_inplace_restore_determinism() {
             runner.agents[i].heat = *heat;
             runner.agents[i].operational_age = *op_age;
             runner.agents[i].planned_path.clear();
-            runner.agents[i].planned_path.extend(
-                actions.iter().map(|&b| mafis::core::action::Action::from_u8(b))
-            );
+            runner.agents[i]
+                .planned_path
+                .extend(actions.iter().map(|&b| mafis::core::action::Action::from_u8(b)));
             runner.agents[i].latency_remaining = 0;
             runner.agents[i].last_action = mafis::core::action::Action::Wait;
             runner.agents[i].next_fault_tick = None;
@@ -1580,8 +1590,12 @@ fn delete_fault_inplace_restore_determinism() {
         runner.restore_completion_state(snap_tasks, snap_completion_ticks);
         runner.clear_transient_state();
 
-        eprintln!("  After double restore: tick={}, tasks={}, rng={}",
-            runner.tick, runner.tasks_completed, runner.rng().rng.get_word_pos());
+        eprintln!(
+            "  After double restore: tick={}, tasks={}, rng={}",
+            runner.tick,
+            runner.tasks_completed,
+            runner.rng().rng.get_word_pos()
+        );
 
         // ── Run to completion ────────────────────────────────────────
         let mut per_tick = Vec::new();
@@ -1623,7 +1637,13 @@ fn delete_fault_inplace_restore_determinism() {
 /// Helper: restore a SimulationRunner to a snapshot state (simulates apply_rewind).
 fn restore_runner_from_snapshot(
     runner: &mut SimulationRunner,
-    agent_data: &[(bevy::math::IVec2, bevy::math::IVec2, mafis::core::task::TaskLeg, Vec<u8>, bool)],
+    agent_data: &[(
+        bevy::math::IVec2,
+        bevy::math::IVec2,
+        mafis::core::task::TaskLeg,
+        Vec<u8>,
+        bool,
+    )],
     solver_priorities: &[f32],
     rng_word_pos: u128,
     tasks_completed: u64,
@@ -1634,15 +1654,17 @@ fn restore_runner_from_snapshot(
 
     // Restore agent state
     for (i, (pos, goal, task_leg, actions, alive)) in agent_data.iter().enumerate() {
-        if i >= runner.agents.len() { break; }
+        if i >= runner.agents.len() {
+            break;
+        }
         runner.agents[i].pos = *pos;
         runner.agents[i].goal = *goal;
         runner.agents[i].task_leg = task_leg.clone();
         runner.agents[i].alive = *alive;
         runner.agents[i].planned_path.clear();
-        runner.agents[i].planned_path.extend(
-            actions.iter().map(|&b| mafis::core::action::Action::from_u8(b))
-        );
+        runner.agents[i]
+            .planned_path
+            .extend(actions.iter().map(|&b| mafis::core::action::Action::from_u8(b)));
         runner.agents[i].latency_remaining = 0;
         runner.agents[i].last_action = mafis::core::action::Action::Wait;
     }
@@ -1694,8 +1716,7 @@ fn solver_throughput_ordering_sanity() {
     // Run 200 ticks (shorter than TICK_COUNT=500 to keep CI fast).
     let tick_count: u64 = 200;
 
-    let mut throughputs: std::collections::HashMap<&str, f64> =
-        std::collections::HashMap::new();
+    let mut throughputs: std::collections::HashMap<&str, f64> = std::collections::HashMap::new();
 
     let all_8_solvers = [
         "pibt",
@@ -1733,7 +1754,9 @@ fn solver_throughput_ordering_sanity() {
     // per-agent PIBT which can produce zero tasks at low density.
     for &solver in &all_8_solvers {
         let tp = throughputs[solver];
-        if solver == "rhcr_pbs" { continue; }
+        if solver == "rhcr_pbs" {
+            continue;
+        }
         assert!(
             tp > 0.0,
             "solver_throughput_ordering_sanity: {solver} produced zero throughput on \
@@ -1746,12 +1769,11 @@ fn solver_throughput_ordering_sanity() {
     // up to ~20× (e.g., Token Passing vs RT-LaCAM). A 1% floor is generous
     // enough to tolerate this spread while still catching a fully broken solver
     // that emits nothing but Wait actions.
-    let best_tp = throughputs
-        .values()
-        .cloned()
-        .fold(f64::NEG_INFINITY, f64::max);
+    let best_tp = throughputs.values().cloned().fold(f64::NEG_INFINITY, f64::max);
     for &solver in &all_8_solvers {
-        if solver == "rhcr_pbs" { continue; } // PBS hits node limit on large maps
+        if solver == "rhcr_pbs" {
+            continue;
+        } // PBS hits node limit on large maps
         let tp = throughputs[solver];
         assert!(
             tp >= best_tp * 0.01,
@@ -1776,14 +1798,7 @@ fn solver_throughput_ordering_sanity() {
 /// visited sets, token paths) that would poison the re-run.
 #[test]
 fn rewind_determinism_reset_matches_fresh() {
-    let solvers_with_state = [
-        "pibt",
-        "rhcr_pibt",
-        "rhcr_pbs",
-        "token_passing",
-        "rt_lacam",
-        "tpts",
-    ];
+    let solvers_with_state = ["pibt", "rhcr_pibt", "rhcr_pbs", "token_passing", "rt_lacam", "tpts"];
 
     let topo = ActiveTopology::from_name("warehouse_large");
     let output = topo.topology().generate(42);

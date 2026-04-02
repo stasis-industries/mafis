@@ -94,11 +94,21 @@ pub struct BaselineRecord {
 // ---------------------------------------------------------------------------
 
 impl TimeSeriesAccessor for BaselineRecord {
-    fn throughput_series(&self) -> &[f64] { &self.throughput_series }
-    fn tasks_completed_series(&self) -> &[u64] { &self.tasks_completed_series }
-    fn idle_count_series(&self) -> &[usize] { &self.idle_count_series }
-    fn wait_ratio_series(&self) -> &[f32] { &self.wait_ratio_series }
-    fn position_snapshots(&self) -> &[Vec<IVec2>] { &self.position_snapshots }
+    fn throughput_series(&self) -> &[f64] {
+        &self.throughput_series
+    }
+    fn tasks_completed_series(&self) -> &[u64] {
+        &self.tasks_completed_series
+    }
+    fn idle_count_series(&self) -> &[usize] {
+        &self.idle_count_series
+    }
+    fn wait_ratio_series(&self) -> &[f32] {
+        &self.wait_ratio_series
+    }
+    fn position_snapshots(&self) -> &[Vec<IVec2>] {
+        &self.position_snapshots
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -169,7 +179,14 @@ impl BaselineDiff {
     }
 
     /// Update the diff for the current tick. Called once per FixedUpdate tick.
-    pub fn update(&mut self, tick: u64, baseline_tasks: u64, live_tasks: u64, baseline_tp: f64, live_tp: f64) {
+    pub fn update(
+        &mut self,
+        tick: u64,
+        baseline_tasks: u64,
+        live_tasks: u64,
+        baseline_tp: f64,
+        live_tp: f64,
+    ) {
         self.gap = baseline_tasks as i64 - live_tasks as i64;
         self.rate_delta = baseline_tp - live_tp;
 
@@ -210,9 +227,15 @@ impl BaselineDiff {
     }
 
     /// Recompute from scratch for a range of ticks (used after rewind).
-    pub fn recompute(&mut self, baseline_record: &BaselineRecord, live_tasks_series: &[u64], live_tp_series: &[f64]) {
+    pub fn recompute(
+        &mut self,
+        baseline_record: &BaselineRecord,
+        live_tasks_series: &[u64],
+        live_tp_series: &[f64],
+    ) {
         self.clear();
-        let len = live_tasks_series.len()
+        let len = live_tasks_series
+            .len()
             .min(live_tp_series.len())
             .min(baseline_record.throughput_series.len());
         for i in 0..len {
@@ -236,7 +259,10 @@ impl BaselineDiff {
 pub fn check_position_parity(
     store: Res<BaselineStore>,
     config: Res<crate::core::state::SimulationConfig>,
-    agents: Query<(&crate::core::agent::LogicalAgent, &crate::core::agent::AgentIndex), Without<crate::fault::breakdown::Dead>>,
+    agents: Query<
+        (&crate::core::agent::LogicalAgent, &crate::core::agent::AgentIndex),
+        Without<crate::fault::breakdown::Dead>,
+    >,
     mut logged_divergence: Local<bool>,
 ) {
     if *logged_divergence {
@@ -246,10 +272,8 @@ pub fn check_position_parity(
     let Some(bl_positions) = record.positions_at(config.tick) else { return };
 
     // Build live positions in deterministic order
-    let mut live_order: Vec<(usize, IVec2)> = agents
-        .iter()
-        .map(|(a, idx)| (idx.0, a.current_pos))
-        .collect();
+    let mut live_order: Vec<(usize, IVec2)> =
+        agents.iter().map(|(a, idx)| (idx.0, a.current_pos)).collect();
     live_order.sort_unstable_by_key(|&(idx, _)| idx);
 
     if live_order.len() != bl_positions.len() {
@@ -261,9 +285,7 @@ pub fn check_position_parity(
             *logged_divergence = true;
             let msg = format!(
                 "[PARITY DIVERGENCE t={}] agent {} baseline=({},{}) live=({},{}) — simulation paths split here",
-                config.tick, i,
-                bl_positions[i].x, bl_positions[i].y,
-                live_pos.x, live_pos.y,
+                config.tick, i, bl_positions[i].x, bl_positions[i].y, live_pos.x, live_pos.y,
             );
             web_sys::console::warn_1(&msg.into());
             return;
@@ -317,10 +339,8 @@ impl BaselineComputation {
         let remaining = self.total_ticks - self.ticks_done;
         let to_do = remaining.min(batch_size);
         for _ in 0..to_do {
-            let mut result = self.runner.tick(
-                self.scheduler.scheduler(),
-                self.queue_policy.policy(),
-            );
+            let mut result =
+                self.runner.tick(self.scheduler.scheduler(), self.queue_policy.policy());
             self.analysis.record_tick(&self.runner, &mut result);
             self.ticks_done += 1;
         }
@@ -333,12 +353,10 @@ impl BaselineComputation {
         self.analysis.compute_aggregates();
         debug_assert!(
             self.total_ticks == 0 || !self.analysis.throughput_series.is_empty(),
-            "Baseline produced no data for {} ticks", self.total_ticks
+            "Baseline produced no data for {} ticks",
+            self.total_ticks
         );
-        let analysis = std::mem::replace(
-            &mut self.analysis,
-            super::engine::AnalysisEngine::new(0),
-        );
+        let analysis = std::mem::replace(&mut self.analysis, super::engine::AnalysisEngine::new(0));
         analysis.into_baseline_record(self.config_hash, self.total_ticks, self.num_agents)
     }
 
@@ -378,10 +396,7 @@ pub fn start_headless(config: &BaselineConfig) -> BaselineComputation {
     // 4. Place agents (treat empty positions as None — simulateIn3D strips robots)
     let agents = if let Some(ref positions) = config.agent_positions {
         if !positions.is_empty() {
-            positions
-                .iter()
-                .map(|&(start, _goal)| SimAgent::new(start))
-                .collect::<Vec<_>>()
+            positions.iter().map(|&(start, _goal)| SimAgent::new(start)).collect::<Vec<_>>()
         } else {
             place_agents(actual_agents, &grid, &zones, &mut rng)
         }
@@ -391,12 +406,14 @@ pub fn start_headless(config: &BaselineConfig) -> BaselineComputation {
     let n = agents.len();
 
     // 5. Create runner (no faults)
-    let fault_config = crate::fault::config::FaultConfig {
-        enabled: false,
-        ..Default::default()
-    };
+    let fault_config = crate::fault::config::FaultConfig { enabled: false, ..Default::default() };
     let runner = SimulationRunner::new(
-        grid, zones, agents, solver, rng, fault_config,
+        grid,
+        zones,
+        agents,
+        solver,
+        rng,
+        fault_config,
         crate::fault::scenario::FaultSchedule::default(),
     );
 
@@ -427,7 +444,8 @@ pub fn run_headless(config: &BaselineConfig) -> BaselineRecord {
     let record = comp.finalize();
     debug_assert!(
         config.tick_count == 0 || !record.throughput_series.is_empty(),
-        "Baseline produced no data for {} ticks", config.tick_count
+        "Baseline produced no data for {} ticks",
+        config.tick_count
     );
     record
 }
@@ -757,17 +775,21 @@ mod tests {
                 &config.solver_name,
                 (grid.width * grid.height) as usize,
                 config.num_agents,
-            ).unwrap();
+            )
+            .unwrap();
 
             let scheduler = ActiveScheduler::from_name(&config.scheduler_name);
             let mut rng = SeededRng::new(config.seed);
             let agents = place_agents(config.num_agents, &grid, &zones, &mut rng);
-            let fault_config = crate::fault::config::FaultConfig {
-                enabled: false,
-                ..Default::default()
-            };
+            let fault_config =
+                crate::fault::config::FaultConfig { enabled: false, ..Default::default() };
             let mut runner = SimulationRunner::new(
-                grid, zones, agents, solver, rng, fault_config,
+                grid,
+                zones,
+                agents,
+                solver,
+                rng,
+                fault_config,
                 crate::fault::scenario::FaultSchedule::default(),
             );
             let mut all_positions = Vec::with_capacity(config.tick_count as usize);
@@ -783,10 +805,7 @@ mod tests {
         let run2 = run_and_record(&config);
 
         for tick in 0..config.tick_count as usize {
-            assert_eq!(
-                run1[tick], run2[tick],
-                "position divergence at tick {tick}"
-            );
+            assert_eq!(run1[tick], run2[tick], "position divergence at tick {tick}");
         }
     }
 
@@ -836,17 +855,21 @@ mod tests {
             &config.solver_name,
             (grid.width * grid.height) as usize,
             config.num_agents,
-        ).unwrap();
+        )
+        .unwrap();
 
         let scheduler = ActiveScheduler::from_name(&config.scheduler_name);
         let mut rng = SeededRng::new(config.seed);
         let agents = place_agents(config.num_agents, &grid, &zones, &mut rng);
-        let fault_config = crate::fault::config::FaultConfig {
-            enabled: false,
-            ..Default::default()
-        };
+        let fault_config =
+            crate::fault::config::FaultConfig { enabled: false, ..Default::default() };
         let mut runner = SimulationRunner::new(
-            grid, zones, agents, solver, rng, fault_config,
+            grid,
+            zones,
+            agents,
+            solver,
+            rng,
+            fault_config,
             crate::fault::scenario::FaultSchedule::default(),
         );
 
@@ -916,22 +939,27 @@ mod tests {
             &config.solver_name,
             (grid.width * grid.height) as usize,
             config.num_agents,
-        ).unwrap();
+        )
+        .unwrap();
 
         let scheduler = ActiveScheduler::from_name(&config.scheduler_name);
         let mut rng = SeededRng::new(config.seed);
         let agents = place_agents(config.num_agents, &grid, &zones, &mut rng);
-        let fault_config = crate::fault::config::FaultConfig {
-            enabled: false,
-            ..Default::default()
-        };
+        let fault_config =
+            crate::fault::config::FaultConfig { enabled: false, ..Default::default() };
         let mut runner = SimulationRunner::new(
-            grid, zones, agents, solver, rng, fault_config,
+            grid,
+            zones,
+            agents,
+            solver,
+            rng,
+            fault_config,
             crate::fault::scenario::FaultSchedule::default(),
         );
 
         for _loop_tick in 0..config.tick_count {
-            let result = runner.tick(scheduler.scheduler(), &crate::core::queue::ClosestQueuePolicy);
+            let result =
+                runner.tick(scheduler.scheduler(), &crate::core::queue::ClosestQueuePolicy);
 
             // Accessors accept 1-based tick; result.tick is already 1-based.
             let tick = result.tick;

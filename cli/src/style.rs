@@ -45,33 +45,17 @@ pub fn section(title: &str) -> String {
 }
 
 pub fn print_error(msg: &str) {
-    eprintln!(
-        "{} {}",
-        "\u{2717}".truecolor(ERROR.0, ERROR.1, ERROR.2),
-        msg
-    );
+    eprintln!("{} {}", "\u{2717}".truecolor(ERROR.0, ERROR.1, ERROR.2), msg);
 }
 
 pub fn print_success(msg: &str) {
-    println!(
-        "{} {}",
-        "\u{2713}".truecolor(SUCCESS.0, SUCCESS.1, SUCCESS.2),
-        msg,
-    );
+    println!("{} {}", "\u{2713}".truecolor(SUCCESS.0, SUCCESS.1, SUCCESS.2), msg,);
 }
 
 pub fn print_warning(msg: &str) {
-    println!(
-        "{} {}",
-        "\u{26a0}".truecolor(WARNING.0, WARNING.1, WARNING.2),
-        msg
-    );
+    println!("{} {}", "\u{26a0}".truecolor(WARNING.0, WARNING.1, WARNING.2), msg);
 }
 
 pub fn kv(key: &str, val: &str) {
-    println!(
-        "  {:<24} {}",
-        key.truecolor(DIM.0, DIM.1, DIM.2),
-        val
-    );
+    println!("  {:<24} {}", key.truecolor(DIM.0, DIM.1, DIM.2), val);
 }

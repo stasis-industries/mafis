@@ -68,14 +68,16 @@ fn property_throughput_saturation_pibt() {
     // density compared to low density. This is the published property
     // (Okumura 2022, Chen et al. 2024): adding agents past the saturation
     // point reduces per-agent efficiency.
-    let per_agent_low = throughputs[0].1;  // n=5
+    let per_agent_low = throughputs[0].1; // n=5
     let per_agent_high = throughputs[5].1; // n=80
     assert!(
         per_agent_high < per_agent_low,
         "per-agent throughput at n=80 ({per_agent_high:.3}) should be lower than n=5 ({per_agent_low:.3}): saturation expected",
     );
 
-    eprintln!("[OK] PIBT throughput saturation confirmed: per-agent drops from {per_agent_low:.3} (n=5) to {per_agent_high:.3} (n=80)");
+    eprintln!(
+        "[OK] PIBT throughput saturation confirmed: per-agent drops from {per_agent_low:.3} (n=5) to {per_agent_high:.3} (n=80)"
+    );
 }
 
 // =========================================================================
@@ -163,8 +165,13 @@ fn property_solver_paradigm_consistency() {
     let agents = 20;
 
     let solvers = [
-        "pibt", "rhcr_pibt", "rhcr_priority_astar", "rhcr_pbs",
-        "token_passing", "rt_lacam", "tpts",
+        "pibt",
+        "rhcr_pibt",
+        "rhcr_priority_astar",
+        "rhcr_pbs",
+        "token_passing",
+        "rt_lacam",
+        "tpts",
     ];
 
     let mut results = Vec::new();
@@ -180,10 +187,7 @@ fn property_solver_paradigm_consistency() {
     // 100x better than the worst (catches broken implementations).
     let min_t = results.iter().map(|(_, t)| *t).fold(f64::MAX, f64::min);
     let max_t = results.iter().map(|(_, t)| *t).fold(f64::MIN, f64::max);
-    assert!(
-        min_t > 0.0,
-        "At least one solver produced 0 tasks"
-    );
+    assert!(min_t > 0.0, "At least one solver produced 0 tasks");
     assert!(
         max_t < min_t * 100.0,
         "Solver spread too large ({min_t:.1} to {max_t:.1}): likely broken solver"

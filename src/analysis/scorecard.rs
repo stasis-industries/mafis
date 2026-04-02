@@ -86,7 +86,10 @@ impl ScorecardState {
 
 /// Shannon entropy from an iterator of density values, normalized to [0, 1].
 /// Zero-allocation: iterates twice via Clone.
-pub fn compute_heatmap_entropy(density: impl Iterator<Item = f32> + Clone, grid_cells: usize) -> f64 {
+pub fn compute_heatmap_entropy(
+    density: impl Iterator<Item = f32> + Clone,
+    grid_cells: usize,
+) -> f64 {
     if grid_cells == 0 {
         return 0.0;
     }
@@ -105,11 +108,7 @@ pub fn compute_heatmap_entropy(density: impl Iterator<Item = f32> + Clone, grid_
     }
 
     let max_entropy = (grid_cells as f64).ln();
-    if max_entropy > 0.0 {
-        (entropy / max_entropy).clamp(0.0, 1.0)
-    } else {
-        0.0
-    }
+    if max_entropy > 0.0 { (entropy / max_entropy).clamp(0.0, 1.0) } else { 0.0 }
 }
 
 // ---------------------------------------------------------------------------
@@ -143,11 +142,7 @@ pub fn update_resilience_scorecard(
     }
 
     // --- Get baseline avg throughput for FT and Critical Time ---
-    let baseline_avg_tp = baseline_store
-        .record
-        .as_ref()
-        .map(|r| r.avg_throughput)
-        .unwrap_or(0.0);
+    let baseline_avg_tp = baseline_store.record.as_ref().map(|r| r.avg_throughput).unwrap_or(0.0);
 
     // --- Fault Tolerance: P_fault / P_nominal (classical reliability ratio) ---
     // Track live throughput from first fault onwards.
@@ -155,11 +150,8 @@ pub fn update_resilience_scorecard(
         // Use the instantaneous throughput from baseline_diff (live side).
         // baseline_diff.rate_delta = baseline_tp - live_tp, so:
         // live_tp = baseline_tp - rate_delta
-        let bl_tp_at_tick = baseline_store
-            .record
-            .as_ref()
-            .map(|r| r.throughput_at(tick))
-            .unwrap_or(0.0);
+        let bl_tp_at_tick =
+            baseline_store.record.as_ref().map(|r| r.throughput_at(tick)).unwrap_or(0.0);
         let live_tp = bl_tp_at_tick - baseline_diff.rate_delta;
 
         state.fault_throughput_sum += live_tp;
@@ -188,11 +180,7 @@ pub fn update_resilience_scorecard(
         None
     } else {
         fault_metrics.mtbf.map(|mtbf| {
-            if mtbf <= 0.0 {
-                0.0
-            } else {
-                (1.0 - fault_metrics.mttr / mtbf).clamp(0.0, 1.0)
-            }
+            if mtbf <= 0.0 { 0.0 } else { (1.0 - fault_metrics.mttr / mtbf).clamp(0.0, 1.0) }
         })
     };
 

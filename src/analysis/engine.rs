@@ -114,8 +114,7 @@ impl AnalysisEngine {
 
         // Position snapshot (opt-in — disabled for headless baseline)
         if self.record_positions {
-            self.position_snapshots
-                .push(runner.agents.iter().map(|a| a.pos).collect());
+            self.position_snapshots.push(runner.agents.iter().map(|a| a.pos).collect());
         }
 
         // Traffic accumulation — flat Vec for O(1) access, no hashing
@@ -153,11 +152,7 @@ impl AnalysisEngine {
 
     /// Compute aggregate metrics from accumulated series.
     pub fn compute_aggregates(&mut self) {
-        self.total_tasks = self
-            .tasks_completed_series
-            .last()
-            .copied()
-            .unwrap_or(0);
+        self.total_tasks = self.tasks_completed_series.last().copied().unwrap_or(0);
         self.avg_throughput = if self.throughput_series.is_empty() {
             0.0
         } else {
@@ -216,11 +211,21 @@ impl AnalysisEngine {
 // ---------------------------------------------------------------------------
 
 impl TimeSeriesAccessor for AnalysisEngine {
-    fn throughput_series(&self) -> &[f64] { &self.throughput_series }
-    fn tasks_completed_series(&self) -> &[u64] { &self.tasks_completed_series }
-    fn idle_count_series(&self) -> &[usize] { &self.idle_count_series }
-    fn wait_ratio_series(&self) -> &[f32] { &self.wait_ratio_series }
-    fn position_snapshots(&self) -> &[Vec<IVec2>] { &self.position_snapshots }
+    fn throughput_series(&self) -> &[f64] {
+        &self.throughput_series
+    }
+    fn tasks_completed_series(&self) -> &[u64] {
+        &self.tasks_completed_series
+    }
+    fn idle_count_series(&self) -> &[usize] {
+        &self.idle_count_series
+    }
+    fn wait_ratio_series(&self) -> &[f32] {
+        &self.wait_ratio_series
+    }
+    fn position_snapshots(&self) -> &[Vec<IVec2>] {
+        &self.position_snapshots
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -359,10 +364,7 @@ mod tests {
         e.throughput_series = vec![1.0, 2.0];
         e.tasks_completed_series = vec![1, 3];
         e.idle_count_series = vec![5, 4];
-        e.position_snapshots = vec![
-            vec![IVec2::new(1, 1)],
-            vec![IVec2::new(2, 2)],
-        ];
+        e.position_snapshots = vec![vec![IVec2::new(1, 1)], vec![IVec2::new(2, 2)]];
         // Simulate traffic at (1,1) on a 3x3 grid
         e.traffic_grid_w = 3;
         e.traffic_grid_h = 3;

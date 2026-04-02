@@ -12,10 +12,7 @@ pub struct SeededRng {
 
 impl SeededRng {
     pub fn new(seed: u64) -> Self {
-        Self {
-            rng: ChaCha8Rng::seed_from_u64(seed),
-            seed,
-        }
+        Self { rng: ChaCha8Rng::seed_from_u64(seed), seed }
     }
 
     pub fn seed(&self) -> u64 {

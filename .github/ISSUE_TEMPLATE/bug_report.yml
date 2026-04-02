@@ -1,0 +1,99 @@
+name: Bug Report
+description: Report a bug in MAFIS simulation or visualization
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. Please fill in as much detail as you can.
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      description: Which part of MAFIS is affected?
+      options:
+        - Simulation core (solvers, pathfinding)
+        - Fault injection
+        - Visualization / rendering
+        - Web UI (charts, timeline, controls)
+        - Desktop UI (egui panels)
+        - Data export (CSV, JSON)
+        - Build / WASM compilation
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: topology
+    attributes:
+      label: Topology
+      description: Which map topology were you using?
+      placeholder: "e.g., warehouse-medium, sorting-center"
+
+  - type: input
+    id: solver
+    attributes:
+      label: Solver
+      description: Which solver was active?
+      placeholder: "e.g., PIBT, RHCR+PIBT, RHCR+PBS, RT-LaCAM"
+
+  - type: input
+    id: agent-count
+    attributes:
+      label: Agent Count
+      description: How many agents were in the simulation?
+      placeholder: "e.g., 50"
+
+  - type: textarea
+    id: fault-scenario
+    attributes:
+      label: Fault Scenario
+      description: What fault configuration was active (if relevant)?
+      placeholder: "e.g., Weibull wear model, 3 breakdowns injected at timestep 200"
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce
+      description: Minimal steps to trigger the bug
+      value: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual Behavior
+    validations:
+      required: true
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - Browser (WASM) — Chrome
+        - Browser (WASM) — Firefox
+        - Browser (WASM) — Safari
+        - Browser (WASM) — Other
+        - Desktop (native)
+    validations:
+      required: true
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional Context
+      description: Screenshots, console errors, or anything else helpful
