@@ -9,11 +9,6 @@ web/topologies/
 
 settings.local.json
 
-CLAUDE.md
-.claude/
-docs/superpowers/
-docs/papers
-
 results/
 **__pycache__
 
@@ -33,3 +28,6 @@ results/
 # OS artifacts
 Thumbs.db
 Desktop.ini
+
+# Papers (local only, not part of open-source project)
+papers/

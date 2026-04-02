@@ -350,7 +350,15 @@ fn solver_factory_empty_name_returns_none() {
 #[test]
 fn solver_factory_zero_agents() {
     // All solvers should accept 0 agents without panic
-    for name in ["pibt", "rhcr_pibt", "rhcr_pbs", "rhcr_priority_astar", "token_passing", "rt_lacam", "tpts"] {
+    for name in [
+        "pibt",
+        "rhcr_pibt",
+        "rhcr_pbs",
+        "rhcr_priority_astar",
+        "token_passing",
+        "rt_lacam",
+        "tpts",
+    ] {
         let solver = lifelong_solver_from_name(name, 100, 0);
         assert!(solver.is_some(), "{name} should accept 0 agents");
     }
