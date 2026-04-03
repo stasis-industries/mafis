@@ -11,6 +11,8 @@ pub mod policy;
 pub use policy::*;
 
 use bevy::prelude::*;
+use rand::Rng;
+use rand_chacha::ChaCha8Rng;
 
 use super::action::Direction;
 use super::grid::GridMap;
@@ -67,11 +69,12 @@ impl QueueLine {
         *self.cells.last().unwrap_or(&self.delivery_cell)
     }
 
-    /// The cell a new agent should target: the first empty slot if known,
-    /// otherwise the back cell. When the queue is empty this returns `cells[0]`
-    /// (right next to delivery) instead of forcing agents to the far end.
+    /// The cell a new agent should target, accounting for pending reservations.
+    /// Skips `state.reserved` empty slots so that agents assigned in the same
+    /// tick get different goal cells. When the queue is empty this returns
+    /// `cells[0]` (right next to delivery) instead of forcing agents to the far end.
     pub fn join_cell(&self, state: &QueueState) -> IVec2 {
-        if let Some(slot_idx) = state.first_empty_slot() {
+        if let Some(slot_idx) = state.nth_empty_slot(state.reserved) {
             self.cells[slot_idx]
         } else {
             self.back_cell()
@@ -98,11 +101,17 @@ pub struct QueueState {
     pub slots: Vec<Option<usize>>,
     /// Agent currently at the delivery cell (doing delivery).
     pub delivery_occupied_by: Option<usize>,
+    /// Transient reservation count — tracks how many slots have been logically
+    /// claimed within the current phase but not yet physically occupied. Reset
+    /// to 0 at the start/end of each phase that uses it. Makes `free_slots()`
+    /// and `is_full()` aware of pending assignments so policies see correct
+    /// availability when multiple agents are assigned in the same tick.
+    pub(super) reserved: usize,
 }
 
 impl QueueState {
     pub fn new(line_index: usize, capacity: usize) -> Self {
-        Self { line_index, slots: vec![None; capacity], delivery_occupied_by: None }
+        Self { line_index, slots: vec![None; capacity], delivery_occupied_by: None, reserved: 0 }
     }
 
     /// Number of agents currently in the queue (not counting delivery).
@@ -120,9 +129,20 @@ impl QueueState {
         self.free_slots() == 0
     }
 
+    /// Find the (skip+1)th empty slot index. When `skip=0`, returns the
+    /// front-most empty slot (same as the old `first_empty_slot`).
+    pub(super) fn nth_empty_slot(&self, skip: usize) -> Option<usize> {
+        self.slots
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| s.is_none())
+            .nth(skip)
+            .map(|(i, _)| i)
+    }
+
     /// Find the front-most empty slot index.
     pub(super) fn first_empty_slot(&self) -> Option<usize> {
-        self.slots.iter().position(|s| s.is_none())
+        self.nth_empty_slot(0)
     }
 }
 
@@ -226,6 +246,7 @@ impl QueueManager {
     pub fn clear(&mut self) {
         for state in &mut self.queues {
             state.delivery_occupied_by = None;
+            state.reserved = 0;
             for slot in &mut state.slots {
                 *slot = None;
             }
@@ -309,6 +330,7 @@ impl QueueManager {
         queue_lines: &[QueueLine],
         policy: &dyn DeliveryQueuePolicy,
         just_loaded: &[usize],
+        rng: &mut ChaCha8Rng,
     ) -> Vec<usize> {
         if queue_lines.is_empty() {
             return Vec::new();
@@ -334,7 +356,7 @@ impl QueueManager {
 
         // Phase F: New joins — Loading agents → ask policy → Queuing
         // (skip agents that just entered Loading this tick)
-        self.process_new_joins(agents, queue_lines, policy, &mut changed_agents, just_loaded);
+        self.process_new_joins(agents, queue_lines, policy, &mut changed_agents, just_loaded, rng);
 
         changed_agents
     }
@@ -467,6 +489,13 @@ impl QueueManager {
                     agent.planned_path.clear();
                     changed.push(agent_idx);
                 }
+            } else if matches!(agent.task_leg, TaskLeg::TravelToQueue { .. }) {
+                // Queue full when agent arrived — revert to Loading so
+                // process_new_joins can reassign to a different queue next tick.
+                agent.task_leg = TaskLeg::Loading(from);
+                agent.goal = from;
+                agent.planned_path.clear();
+                changed.push(agent_idx);
             }
         }
     }
@@ -511,6 +540,10 @@ impl QueueManager {
 
     /// Process new joins: Loading agents → ask policy → transition to TravelToQueue.
     /// Agents in `just_loaded` are skipped (must dwell in Loading for 1 tick first).
+    ///
+    /// Uses `reserved` counter on QueueState so that agents assigned in the same
+    /// tick see progressively reduced availability and get different goal cells.
+    /// Eligible agents are shuffled for fairness (same pattern as recycle_goals_core).
     fn process_new_joins(
         &mut self,
         agents: &mut [SimAgent],
@@ -518,29 +551,50 @@ impl QueueManager {
         policy: &dyn DeliveryQueuePolicy,
         changed: &mut Vec<usize>,
         just_loaded: &[usize],
+        rng: &mut ChaCha8Rng,
     ) {
-        #[allow(clippy::needless_range_loop)]
-        for agent_idx in 0..agents.len() {
-            let agent = &agents[agent_idx];
-            if !agent.alive {
-                continue;
-            }
-            // Only process Loading agents that are at their goal (at pickup cell)
-            if !matches!(agent.task_leg, TaskLeg::Loading(_)) {
-                continue;
-            }
-            if agent.pos != agent.goal {
-                continue;
-            }
-            // Skip agents that just entered Loading this tick
-            if just_loaded.contains(&agent_idx) {
-                continue;
-            }
+        // Collect eligible Loading agents
+        let mut eligible: Vec<usize> = (0..agents.len())
+            .filter(|&i| {
+                let a = &agents[i];
+                a.alive
+                    && matches!(a.task_leg, TaskLeg::Loading(_))
+                    && a.pos == a.goal
+                    && !just_loaded.contains(&i)
+            })
+            .collect();
 
-            let decision = policy.choose_queue(agent.pos, queue_lines, &self.queues);
+        // Shuffle for fairness — lower-index agents don't always get first pick
+        if !eligible.is_empty() {
+            for i in (1..eligible.len()).rev() {
+                let j = rng.random_range(0..=i);
+                eligible.swap(i, j);
+            }
+        }
+
+        // Reset reservations before assignment pass
+        for state in &mut self.queues {
+            state.reserved = 0;
+        }
+
+        for agent_idx in eligible {
+            let decision =
+                policy.choose_queue(agents[agent_idx].pos, queue_lines, &self.queues);
 
             match decision {
                 QueueDecision::JoinQueue { line_index } => {
+                    // Guard: skip if this queue's physical capacity is exhausted
+                    // by pending reservations from earlier agents in this tick.
+                    let physical_free = self.queues[line_index]
+                        .slots
+                        .iter()
+                        .filter(|s| s.is_none())
+                        .count();
+                    if self.queues[line_index].reserved >= physical_free {
+                        // Queue logically full from pending reservations — hold
+                        continue;
+                    }
+
                     let line = &queue_lines[line_index];
                     let state = &self.queues[line_index];
                     let from = match &agents[agent_idx].task_leg {
@@ -554,16 +608,28 @@ impl QueueManager {
                     agent.goal = line.join_cell(state);
                     agent.planned_path.clear();
                     changed.push(agent_idx);
+
+                    // Reserve slot so next agent can't also claim this queue's capacity
+                    self.queues[line_index].reserved += 1;
                 }
                 QueueDecision::Hold => {
                     // Stay in Loading — retry next tick
                 }
             }
         }
+
+        // Reset reservations — don't leak into next tick's phases
+        for state in &mut self.queues {
+            state.reserved = 0;
+        }
     }
 
     /// Handle fault rerouting: agents in TravelToQueue/Queuing whose queue has a dead
     /// agent blocking them get reassigned to another queue.
+    ///
+    /// Uses `reserved` to prevent reassigning agents back to the blocked queue
+    /// (which looks empty after slot clearing) and to ensure displaced agents
+    /// assigned in the same pass get different goal cells.
     pub fn reroute_blocked_agents(
         &mut self,
         agents: &mut [SimAgent],
@@ -571,12 +637,8 @@ impl QueueManager {
         policy: &dyn DeliveryQueuePolicy,
         changed: &mut Vec<usize>,
     ) {
-        // Find agents in TravelToQueue/Queuing that need rerouting (their queue
-        // has a dead agent blocking the delivery cell).
-        // After remove_dead_agents + compact, gaps are filled automatically.
-        // Explicit rerouting is only needed if the delivery cell itself is
-        // permanently blocked (dead agent became obstacle there).
-        // Pass 1: collect agents from blocked queues (mutable borrow of self.queues)
+        // Pass 1: collect agents from blocked queues and mark blocked queues as
+        // artificially full so the policy won't reassign agents back to them.
         let mut reroute_agents: Vec<usize> = Vec::new();
         for (qi, state) in self.queues.iter_mut().enumerate() {
             let line = &queue_lines[qi];
@@ -590,9 +652,11 @@ impl QueueManager {
                     reroute_agents.push(agent_idx);
                 }
             }
+            // Mark blocked queue as full so policy skips it in Pass 2
+            state.reserved = state.slots.len();
         }
 
-        // Pass 2: reroute collected agents (immutable borrow of self.queues for policy)
+        // Pass 2: reroute collected agents with reservation tracking
         for agent_idx in reroute_agents {
             if !agents[agent_idx].alive {
                 continue;
@@ -614,6 +678,9 @@ impl QueueManager {
                     agent.goal = new_line.join_cell(new_state);
                     agent.planned_path.clear();
                     changed.push(agent_idx);
+
+                    // Reserve slot so next displaced agent sees reduced availability
+                    self.queues[line_index].reserved += 1;
                 }
                 QueueDecision::Hold => {
                     let from = match &agents[agent_idx].task_leg {
@@ -632,6 +699,11 @@ impl QueueManager {
                     changed.push(agent_idx);
                 }
             }
+        }
+
+        // Reset all reservations — don't leak into the main tick() phases
+        for state in &mut self.queues {
+            state.reserved = 0;
         }
     }
 }
@@ -883,5 +955,198 @@ mod tests {
         assert_eq!(mgr.queues.len(), 2);
         assert_eq!(mgr.queues[0].slots.len(), lines[0].capacity());
         assert_eq!(mgr.queues[1].slots.len(), lines[1].capacity());
+    }
+
+    // ── Bug fix regression tests ────────────────────────────────────────
+
+    #[test]
+    fn reserved_tracks_pending_assignments() {
+        let mut state = QueueState::new(0, 4);
+        assert_eq!(state.reserved, 0);
+
+        // free_slots is physical (ignores reserved) — policy sees real capacity
+        state.reserved = 2;
+        assert_eq!(state.free_slots(), 4); // physical, not affected
+
+        // reserved is used as a local guard in process_new_joins
+        let physical_free = state.slots.iter().filter(|s| s.is_none()).count();
+        assert!(state.reserved < physical_free); // capacity still available
+
+        state.reserved = 4;
+        assert!(state.reserved >= physical_free); // logically full
+    }
+
+    #[test]
+    fn nth_empty_slot_skips() {
+        let mut state = QueueState::new(0, 4);
+        // All empty: [None, None, None, None]
+        assert_eq!(state.nth_empty_slot(0), Some(0));
+        assert_eq!(state.nth_empty_slot(1), Some(1));
+        assert_eq!(state.nth_empty_slot(2), Some(2));
+        assert_eq!(state.nth_empty_slot(3), Some(3));
+        assert_eq!(state.nth_empty_slot(4), None);
+
+        // Partial: [Some, None, Some, None]
+        state.slots[0] = Some(0);
+        state.slots[2] = Some(1);
+        assert_eq!(state.nth_empty_slot(0), Some(1)); // first empty = slot 1
+        assert_eq!(state.nth_empty_slot(1), Some(3)); // second empty = slot 3
+        assert_eq!(state.nth_empty_slot(2), None); // only 2 empty slots
+    }
+
+    #[test]
+    fn join_cell_with_reservations() {
+        let grid = test_grid();
+        let line = QueueLine::compute(IVec2::new(8, 2), Direction::West, &grid).unwrap();
+        let cap = line.capacity();
+        assert!(cap >= 3, "Need at least 3 queue slots for this test");
+
+        let mut state = QueueState::new(0, cap);
+
+        // No reservations: join at first empty (cells[0])
+        state.reserved = 0;
+        assert_eq!(line.join_cell(&state), line.cells[0]);
+
+        // 1 reservation: join at second empty (cells[1])
+        state.reserved = 1;
+        assert_eq!(line.join_cell(&state), line.cells[1]);
+
+        // 2 reservations: join at third empty (cells[2])
+        state.reserved = 2;
+        assert_eq!(line.join_cell(&state), line.cells[2]);
+
+        // All slots reserved: fallback to back_cell
+        state.reserved = cap;
+        assert_eq!(line.join_cell(&state), line.back_cell());
+    }
+
+    #[test]
+    fn process_new_joins_no_duplicate_goals() {
+        use super::super::runner::SimAgent;
+        use rand::SeedableRng;
+
+        let grid = test_grid();
+        // Single queue at (8,2) going West — 4 slots
+        let lines = vec![QueueLine::compute(IVec2::new(8, 2), Direction::West, &grid).unwrap()];
+        let mut mgr = QueueManager::new(&lines);
+
+        // Create 3 Loading agents all at their pickup cell (3,2)
+        let pickup = IVec2::new(3, 2);
+        let mut agents: Vec<SimAgent> = (0..3)
+            .map(|_| {
+                let mut a = SimAgent::new(pickup);
+                a.task_leg = TaskLeg::Loading(pickup);
+                a.goal = pickup; // at goal = eligible for process_new_joins
+                a
+            })
+            .collect();
+
+        let policy = ClosestQueuePolicy;
+        let mut changed = Vec::new();
+        let just_loaded: Vec<usize> = Vec::new();
+        let mut rng = ChaCha8Rng::seed_from_u64(42);
+
+        mgr.process_new_joins(&mut agents, &lines, &policy, &mut changed, &just_loaded, &mut rng);
+
+        // All 3 agents should be assigned TravelToQueue
+        assert_eq!(changed.len(), 3);
+
+        // All 3 should have DIFFERENT goal cells
+        let goals: Vec<IVec2> = agents.iter().map(|a| a.goal).collect();
+        let unique: HashSet<IVec2> = goals.iter().copied().collect();
+        assert_eq!(
+            unique.len(),
+            3,
+            "Expected 3 unique goals, got {:?}",
+            goals
+        );
+    }
+
+    #[test]
+    fn arrivals_full_queue_reverts_to_loading() {
+        use super::super::runner::SimAgent;
+
+        let grid = test_grid();
+        let lines = vec![QueueLine::compute(IVec2::new(8, 2), Direction::West, &grid).unwrap()];
+        let cap = lines[0].capacity();
+        let mut mgr = QueueManager::new(&lines);
+
+        // Fill queue completely with dummy agents
+        for i in 0..cap {
+            mgr.queues[0].slots[i] = Some(100 + i); // dummy indices
+        }
+
+        // Create a TravelToQueue agent that has arrived at the queue
+        let pickup = IVec2::new(3, 2);
+        let queue_cell = lines[0].cells[0];
+        let mut agents = vec![SimAgent::new(queue_cell)];
+        agents[0].task_leg = TaskLeg::TravelToQueue {
+            from: pickup,
+            to: lines[0].delivery_cell,
+            line_index: 0,
+        };
+        agents[0].pos = queue_cell; // physically at queue cell
+
+        let mut changed = Vec::new();
+        mgr.process_arrivals(&mut agents, &lines, &mut changed);
+
+        // Agent should have reverted to Loading
+        assert!(
+            matches!(agents[0].task_leg, TaskLeg::Loading(_)),
+            "Expected Loading, got {:?}",
+            agents[0].task_leg
+        );
+        assert_eq!(agents[0].goal, pickup);
+        assert!(changed.contains(&0));
+    }
+
+    #[test]
+    fn reroute_excludes_blocked_queue() {
+        use super::super::runner::SimAgent;
+
+        let grid = test_grid();
+        // Two queues at different rows
+        let lines = vec![
+            QueueLine::compute(IVec2::new(8, 1), Direction::West, &grid).unwrap(),
+            QueueLine::compute(IVec2::new(8, 3), Direction::West, &grid).unwrap(),
+        ];
+        let mut mgr = QueueManager::new(&lines);
+
+        let pickup = IVec2::new(3, 2);
+        // Agent 0 in queue 0 slot 0, agent 1 at queue 1's delivery cell (healthy queue)
+        let mut agents = vec![
+            SimAgent::new(lines[0].cells[0]),
+            SimAgent::new(lines[1].delivery_cell),
+        ];
+        agents[0].task_leg = TaskLeg::Queuing {
+            from: pickup,
+            to: lines[0].delivery_cell,
+            line_index: 0,
+        };
+        mgr.queues[0].slots[0] = Some(0);
+        // Agent 1 is delivering at queue 1 — marks queue 1 as NOT blocked
+        agents[1].task_leg = TaskLeg::TravelLoaded {
+            from: pickup,
+            to: lines[1].delivery_cell,
+        };
+        mgr.queues[1].delivery_occupied_by = Some(1);
+
+        // Queue 0's delivery cell is blocked (no alive agent there, delivery_occupied_by is None)
+        // Queue 1's delivery cell is NOT blocked (agent 1 is there)
+
+        let policy = ClosestQueuePolicy;
+        let mut changed = Vec::new();
+        mgr.reroute_blocked_agents(&mut agents, &lines, &policy, &mut changed);
+
+        // Agent should be rerouted to queue 1, NOT back to queue 0
+        match &agents[0].task_leg {
+            TaskLeg::TravelToQueue { line_index, .. } => {
+                assert_eq!(
+                    *line_index, 1,
+                    "Agent should be rerouted to queue 1, not back to blocked queue 0"
+                );
+            }
+            other => panic!("Expected TravelToQueue, got {:?}", other),
+        }
     }
 }
