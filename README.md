@@ -18,7 +18,7 @@
 
 ---
 
-Most MAPF tools measure how fast solvers find paths. MAFIS measures what happens when things go *wrong* — pairing every faulted run with a fault-free baseline so every metric is a deviation, not an absolute number. It is not a solver benchmark.
+Most MAPF tools measure how fast solvers find paths. **MAFIS** (Multi-Agent Fault Injection Simulator) measures what happens when things go *wrong* — pairing every faulted run with a fault-free baseline so every metric is a deviation, not an absolute number. It is not a solver benchmark.
 
 ---
 
@@ -66,10 +66,11 @@ To report a vulnerability, see [SECURITY.md](SECURITY.md).
 
 MAFIS implements algorithms from published research:
 
-- **Okumura et al.** — *Priority Inheritance with Backtracking for Iterative Multi-agent Path Finding*, AAAI 2019
-- **Li et al.** — *Lifelong Multi-Agent Path Finding in Large-Scale Warehouses*, AAAI 2021
-- **Ma et al.** — *Lifelong Multi-Agent Path Finding for Online Pickup and Delivery Tasks*, AAMAS 2017
+- **Okumura et al.** — *Priority Inheritance with Backtracking for Iterative Multi-agent Path Finding*, [arXiv:1901.11282](https://arxiv.org/abs/1901.11282), AAAI 2019
+- **Li et al.** — *Lifelong Multi-Agent Path Finding in Large-Scale Warehouses*, [arXiv:2005.07371](https://arxiv.org/abs/2005.07371), AAAI 2021
+- **Ma et al.** — *Lifelong Multi-Agent Path Finding for Online Pickup and Delivery Tasks*, [arXiv:1705.10868](https://arxiv.org/abs/1705.10868), AAMAS 2017
 - **Liang et al.** — *Real-Time LaCAM for Real-Time MAPF*, [arXiv:2504.06091](https://arxiv.org/abs/2504.06091), SoCS 2025
+- https://arxiv.org/abs/1705.10868
 
 ---
 
