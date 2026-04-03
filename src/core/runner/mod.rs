@@ -997,6 +997,7 @@ impl SimulationRunner {
             &self.zones.queue_lines,
             queue_policy,
             just_loaded,
+            &mut self.rng.rng,
         );
     }
 
