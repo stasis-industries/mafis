@@ -253,12 +253,6 @@ fn metrics_in_valid_ranges() {
     // reduces congestion, remaining agents outperform the full fleet)
     assert!(m.fault_tolerance >= 0.0, "FT negative: {}", m.fault_tolerance);
 
-    // NRR should be 0..1 (NaN when MTBF unavailable — single burst has only 1 event)
-    if !m.nrr.is_nan() {
-        assert!(m.nrr >= 0.0, "NRR negative: {}", m.nrr);
-        assert!(m.nrr <= 1.0, "NRR > 1: {}", m.nrr);
-    }
-
     // Critical time should be 0..1
     assert!(m.critical_time >= 0.0, "critical_time negative: {}", m.critical_time);
     assert!(m.critical_time <= 1.0, "critical_time > 1: {}", m.critical_time);
@@ -266,13 +260,25 @@ fn metrics_in_valid_ranges() {
     // Survival rate 0..1
     assert!(m.survival_rate >= 0.0 && m.survival_rate <= 1.0);
 
-    // Idle ratio 0..1
-    assert!(m.idle_ratio >= 0.0 && m.idle_ratio <= 1.0);
+    // Unassigned ratio 0..1
+    assert!(m.unassigned_ratio >= 0.0 && m.unassigned_ratio <= 1.0);
     assert!(m.wait_ratio >= 0.0 && m.wait_ratio <= 1.0);
 
+    // Fleet utilization 0..1
+    assert!(m.fleet_utilization >= 0.0 && m.fleet_utilization <= 1.0);
+
+    // Cascade metrics non-negative
+    assert!(m.cascade_depth_avg >= 0.0);
+    assert!(m.cascade_spread_avg >= 0.0);
+
     eprintln!(
-        "  FT={:.3} NRR={:.3} CritTime={:.3} Survival={:.3} Idle={:.3}",
-        m.fault_tolerance, m.nrr, m.critical_time, m.survival_rate, m.idle_ratio
+        "  FT={:.3} CritTime={:.3} Survival={:.3} CascD={:.2} CascS={:.2} FUtil={:.3}",
+        m.fault_tolerance,
+        m.critical_time,
+        m.survival_rate,
+        m.cascade_depth_avg,
+        m.cascade_spread_avg,
+        m.fleet_utilization
     );
 }
 

@@ -81,7 +81,7 @@ fn fault_metrics_zero_before_faults() {
     assert_eq!(m.recovery_rate, 0.0);
     assert_eq!(m.avg_cascade_spread, 0.0);
     assert_eq!(m.throughput, 0.0);
-    assert_eq!(m.idle_ratio, 0.0);
+    assert_eq!(m.wait_ratio, 0.0);
 }
 
 #[test]
@@ -92,11 +92,11 @@ fn initial_agent_count_set_on_first_tick() {
 }
 
 #[test]
-fn idle_ratio_bounded_zero_to_one() {
+fn wait_ratio_bounded_zero_to_one() {
     let mut h = SimHarness::new(4);
     h.run_ticks(10);
-    let ratio = h.metrics().idle_ratio;
-    assert!((0.0..=1.0).contains(&ratio), "idle_ratio={ratio}");
+    let ratio = h.metrics().wait_ratio;
+    assert!((0.0..=1.0).contains(&ratio), "wait_ratio={ratio}");
 }
 
 #[test]

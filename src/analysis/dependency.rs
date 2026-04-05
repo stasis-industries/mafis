@@ -4,6 +4,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use crate::constants;
 use crate::core::agent::{AgentIndex, LogicalAgent};
 use crate::core::live_sim::LiveSim;
+use crate::core::runner::SimAgent;
 use crate::core::state::SimulationConfig;
 use crate::fault::breakdown::Dead;
 
@@ -236,6 +237,58 @@ pub fn compute_betweenness_criticality(
     }
 }
 
+// ---------------------------------------------------------------------------
+// Headless (index-based) ADG — for experiment runner
+// ---------------------------------------------------------------------------
+
+/// Index-based dependency graph for headless use (no Bevy Entity).
+/// Used by the experiment runner for cascade analysis.
+pub struct IndexedDependencyGraph {
+    pub(crate) dependents: HashMap<usize, Vec<usize>>,
+}
+
+impl IndexedDependencyGraph {
+    /// Get the list of agents that depend on agent `idx`.
+    pub fn direct_dependents(&self, idx: usize) -> &[usize] {
+        self.dependents.get(&idx).map(|v| v.as_slice()).unwrap_or(&[])
+    }
+}
+
+/// Build an index-based ADG from SimAgent positions and planned paths.
+/// Mirrors the logic of the ECS `build_adg` system but uses agent indices
+/// instead of Bevy entities.
+pub fn build_adg_from_agents(agents: &[SimAgent], lookahead: usize) -> IndexedDependencyGraph {
+    let mut dependents: HashMap<usize, Vec<usize>> = HashMap::new();
+    let mut occupation: HashMap<IVec2, usize> = HashMap::with_capacity(agents.len());
+
+    // Build occupation map: pos → agent index (alive only)
+    for (i, agent) in agents.iter().enumerate() {
+        if agent.alive {
+            occupation.insert(agent.pos, i);
+        }
+    }
+
+    // For each alive agent B, walk planned_path and find dependencies
+    let mut seen = HashSet::new();
+    for (idx_b, agent_b) in agents.iter().enumerate() {
+        if !agent_b.alive {
+            continue;
+        }
+        seen.clear();
+        let mut pos = agent_b.pos;
+        for action in agent_b.planned_path.iter().take(lookahead) {
+            pos = action.apply(pos);
+            if let Some(&idx_a) = occupation.get(&pos) {
+                if idx_a != idx_b && seen.insert(idx_a) {
+                    dependents.entry(idx_a).or_default().push(idx_b);
+                }
+            }
+        }
+    }
+
+    IndexedDependencyGraph { dependents }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -430,5 +483,49 @@ mod tests {
         b.clear();
         assert!(b.scores.is_empty());
         assert_eq!(b.last_tick, 0);
+    }
+
+    // ── IndexedDependencyGraph (headless) ─────────────────────────────
+
+    #[test]
+    fn test_indexed_adg_empty() {
+        let agents: Vec<SimAgent> = vec![];
+        let adg = build_adg_from_agents(&agents, 3);
+        assert!(adg.dependents.is_empty());
+    }
+
+    #[test]
+    fn test_indexed_adg_linear_chain() {
+        use crate::core::action::Action;
+        use std::collections::VecDeque;
+        // Agent A at (0,0), no plan. Agent B at (1,0), plans to move West to (0,0).
+        let mut agent_a = SimAgent::new(IVec2::new(0, 0));
+        agent_a.alive = true;
+        let mut agent_b = SimAgent::new(IVec2::new(1, 0));
+        agent_b.alive = true;
+        agent_b.planned_path =
+            VecDeque::from(vec![Action::Move(crate::core::action::Direction::West)]);
+
+        let adg = build_adg_from_agents(&[agent_a, agent_b], 3);
+        // B depends on A (B's path crosses A's position)
+        assert_eq!(adg.direct_dependents(0), &[1]); // A's dependents = [B]
+        assert!(adg.direct_dependents(1).is_empty()); // B has no dependents
+    }
+
+    #[test]
+    fn test_indexed_adg_dead_excluded() {
+        use crate::core::action::Action;
+        use std::collections::VecDeque;
+        // Dead agent's position should not appear in occupation map
+        let mut agent_a = SimAgent::new(IVec2::new(0, 0));
+        agent_a.alive = false; // dead
+        let mut agent_b = SimAgent::new(IVec2::new(1, 0));
+        agent_b.alive = true;
+        agent_b.planned_path =
+            VecDeque::from(vec![Action::Move(crate::core::action::Direction::West)]);
+
+        let adg = build_adg_from_agents(&[agent_a, agent_b], 3);
+        // A is dead, so no occupation → no edge
+        assert!(adg.dependents.is_empty());
     }
 }

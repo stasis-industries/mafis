@@ -10,10 +10,11 @@ pub fn write_runs_csv<W: Write>(writer: &mut W, runs: &[RunResult]) -> std::io::
     writeln!(
         writer,
         "solver,topology,scenario,scheduler,num_agents,seed,is_baseline,\
-         avg_throughput,total_tasks,idle_ratio,wait_ratio,\
-         fault_tolerance,nrr,critical_time,\
+         avg_throughput,total_tasks,unassigned_ratio,wait_ratio,\
+         fault_tolerance,critical_time,\
          deficit_recovery,throughput_recovery,mtbf,recovery_tick,\
-         propagation_rate,survival_rate,impacted_area,deficit_integral,\
+         survival_rate,impacted_area,deficit_integral,\
+         cascade_depth_avg,cascade_spread_avg,fleet_utilization,\
          solver_step_avg_us,solver_step_max_us,wall_time_ms"
     )?;
 
@@ -40,7 +41,13 @@ fn write_run_row<W: Write>(
 ) -> std::io::Result<()> {
     writeln!(
         writer,
-        "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
+        "{},{},{},{},{},{},{},\
+         {},{},{},{},\
+         {},{},\
+         {},{},{},{},\
+         {},{},{},\
+         {},{},{},\
+         {},{},{}",
         config.solver_name,
         config.topology_name,
         config.scenario_label(),
@@ -50,19 +57,20 @@ fn write_run_row<W: Write>(
         if is_baseline { "true" } else { "false" },
         csv_f64(m.avg_throughput, 4),
         m.total_tasks,
-        csv_f64(m.idle_ratio, 4),
+        csv_f64(m.unassigned_ratio, 4),
         csv_f64(m.wait_ratio, 4),
         csv_f64(m.fault_tolerance, 4),
-        csv_f64(m.nrr, 4),
         csv_f64(m.critical_time, 4),
         csv_f64(m.deficit_recovery, 2),
         csv_f64(m.throughput_recovery, 2),
         m.mtbf.map_or("".to_string(), |v| csv_f64(v, 2)),
         m.recovery_tick.map_or("".to_string(), |v| v.to_string()),
-        csv_f64(m.propagation_rate, 4),
         csv_f64(m.survival_rate, 4),
         csv_f64(m.impacted_area, 4),
         m.deficit_integral,
+        csv_f64(m.cascade_depth_avg, 2),
+        csv_f64(m.cascade_spread_avg, 2),
+        csv_f64(m.fleet_utilization, 4),
         csv_f64(m.solver_step_time_avg_us, 1),
         csv_f64(m.solver_step_time_max_us, 1),
         m.wall_time_ms,
@@ -76,7 +84,6 @@ pub fn write_summary_csv<W: Write>(
 ) -> std::io::Result<()> {
     // Per-metric `n` columns expose when NaN filtering reduced sample size.
     // ft_n < num_seeds means some runs had baseline throughput = 0.
-    // nrr_n < num_seeds means some runs had < 2 fault events (MTBF undefined).
     // ct_n < num_seeds means some runs had no fault impact (critical_time undefined).
     writeln!(
         writer,
@@ -84,12 +91,13 @@ pub fn write_summary_csv<W: Write>(
          throughput_mean,throughput_std,throughput_ci95_lo,throughput_ci95_hi,\
          tasks_mean,tasks_std,\
          ft_n,ft_mean,ft_std,ft_ci95_lo,ft_ci95_hi,\
-         nrr_n,nrr_mean,nrr_std,nrr_ci95_lo,nrr_ci95_hi,\
          ct_n,critical_time_mean,critical_time_std,\
          deficit_recovery_mean,deficit_recovery_std,\
          throughput_recovery_mean,throughput_recovery_std,\
-         propagation_rate_mean,survival_rate_mean,\
+         survival_rate_mean,\
          impacted_area_mean,deficit_integral_mean,\
+         cascade_depth_mean,cascade_depth_std,cascade_spread_mean,cascade_spread_std,\
+         fleet_utilization_mean,fleet_utilization_std,\
          solver_step_us_mean,wall_time_ms_mean"
     )?;
 
@@ -100,12 +108,13 @@ pub fn write_summary_csv<W: Write>(
              {:.4},{:.4},{:.4},{:.4},\
              {:.1},{:.1},\
              {},{:.4},{:.4},{:.4},{:.4},\
-             {},{:.4},{:.4},{:.4},{:.4},\
              {},{:.4},{:.4},\
              {:.2},{:.2},\
              {:.2},{:.2},\
-             {:.4},{:.4},\
+             {:.4},\
              {:.4},{:.1},\
+             {:.2},{:.2},{:.2},{:.2},\
+             {:.4},{:.4},\
              {:.1},{:.0}",
             s.solver_name,
             s.topology_name,
@@ -124,11 +133,6 @@ pub fn write_summary_csv<W: Write>(
             s.fault_tolerance.std,
             s.fault_tolerance.ci95_lo,
             s.fault_tolerance.ci95_hi,
-            s.nrr.n,
-            s.nrr.mean,
-            s.nrr.std,
-            s.nrr.ci95_lo,
-            s.nrr.ci95_hi,
             s.critical_time.n,
             s.critical_time.mean,
             s.critical_time.std,
@@ -136,10 +140,15 @@ pub fn write_summary_csv<W: Write>(
             s.deficit_recovery.std,
             s.throughput_recovery.mean,
             s.throughput_recovery.std,
-            s.propagation_rate.mean,
             s.survival_rate.mean,
             s.impacted_area.mean,
             s.deficit_integral.mean,
+            s.cascade_depth.mean,
+            s.cascade_depth.std,
+            s.cascade_spread.mean,
+            s.cascade_spread.std,
+            s.fleet_utilization.mean,
+            s.fleet_utilization.std,
             s.solver_step_us.mean,
             s.wall_time_ms.mean,
         )?;
@@ -218,29 +227,31 @@ fn write_metrics_json<W: Write>(
 ) -> std::io::Result<()> {
     write!(
         writer,
-        "{{\"avg_throughput\":{},\"total_tasks\":{},\"idle_ratio\":{},\
-         \"wait_ratio\":{},\"fault_tolerance\":{},\"nrr\":{},\
+        "{{\"avg_throughput\":{},\"total_tasks\":{},\"unassigned_ratio\":{},\
+         \"wait_ratio\":{},\"fault_tolerance\":{},\
          \"critical_time\":{},\"deficit_recovery\":{},\"throughput_recovery\":{},\"mtbf\":{},\
-         \"recovery_tick\":{},\"propagation_rate\":{},\
+         \"recovery_tick\":{},\
          \"survival_rate\":{},\"impacted_area\":{},\
          \"deficit_integral\":{},\
+         \"cascade_depth_avg\":{},\"cascade_spread_avg\":{},\"fleet_utilization\":{},\
          \"solver_step_avg_us\":{},\"solver_step_max_us\":{},\
          \"wall_time_ms\":{}}}",
         json_f64(m.avg_throughput, 4),
         m.total_tasks,
-        json_f64(m.idle_ratio, 4),
+        json_f64(m.unassigned_ratio, 4),
         json_f64(m.wait_ratio, 4),
         json_f64(m.fault_tolerance, 4),
-        json_f64(m.nrr, 4),
         json_f64(m.critical_time, 4),
         json_f64(m.deficit_recovery, 2),
         json_f64(m.throughput_recovery, 2),
         m.mtbf.map_or("null".to_string(), |v| json_f64(v, 2)),
         m.recovery_tick.map_or("null".to_string(), |v| v.to_string()),
-        json_f64(m.propagation_rate, 4),
         json_f64(m.survival_rate, 4),
         json_f64(m.impacted_area, 4),
         m.deficit_integral,
+        json_f64(m.cascade_depth_avg, 2),
+        json_f64(m.cascade_spread_avg, 2),
+        json_f64(m.fleet_utilization, 4),
         json_f64(m.solver_step_time_avg_us, 1),
         json_f64(m.solver_step_time_max_us, 1),
         m.wall_time_ms,
@@ -264,11 +275,9 @@ fn write_summary_json<W: Write>(writer: &mut W, s: &ConfigSummary) -> std::io::R
     write!(writer, ",")?;
     write_stat_json(writer, "total_tasks", &s.total_tasks)?;
     write!(writer, ",")?;
-    write_stat_json(writer, "idle_ratio", &s.idle_ratio)?;
+    write_stat_json(writer, "unassigned_ratio", &s.unassigned_ratio)?;
     write!(writer, ",")?;
     write_stat_json(writer, "fault_tolerance", &s.fault_tolerance)?;
-    write!(writer, ",")?;
-    write_stat_json(writer, "nrr", &s.nrr)?;
     write!(writer, ",")?;
     write_stat_json(writer, "critical_time", &s.critical_time)?;
     write!(writer, ",")?;
@@ -276,13 +285,17 @@ fn write_summary_json<W: Write>(writer: &mut W, s: &ConfigSummary) -> std::io::R
     write!(writer, ",")?;
     write_stat_json(writer, "throughput_recovery", &s.throughput_recovery)?;
     write!(writer, ",")?;
-    write_stat_json(writer, "propagation_rate", &s.propagation_rate)?;
-    write!(writer, ",")?;
     write_stat_json(writer, "survival_rate", &s.survival_rate)?;
     write!(writer, ",")?;
     write_stat_json(writer, "impacted_area", &s.impacted_area)?;
     write!(writer, ",")?;
     write_stat_json(writer, "deficit_integral", &s.deficit_integral)?;
+    write!(writer, ",")?;
+    write_stat_json(writer, "cascade_depth", &s.cascade_depth)?;
+    write!(writer, ",")?;
+    write_stat_json(writer, "cascade_spread", &s.cascade_spread)?;
+    write!(writer, ",")?;
+    write_stat_json(writer, "fleet_utilization", &s.fleet_utilization)?;
     write!(writer, ",")?;
     write_stat_json(writer, "solver_step_us", &s.solver_step_us)?;
     write!(writer, ",")?;
@@ -343,16 +356,17 @@ pub fn parse_summaries_from_json(json: &str) -> Result<Vec<ConfigSummary>, Strin
             num_seeds,
             throughput: parse_stat(s, "throughput"),
             total_tasks: parse_stat(s, "total_tasks"),
-            idle_ratio: parse_stat(s, "idle_ratio"),
+            unassigned_ratio: parse_stat(s, "unassigned_ratio"),
             fault_tolerance: parse_stat(s, "fault_tolerance"),
-            nrr: parse_stat(s, "nrr"),
             critical_time: parse_stat(s, "critical_time"),
             deficit_recovery: parse_stat(s, "deficit_recovery"),
             throughput_recovery: parse_stat(s, "throughput_recovery"),
-            propagation_rate: parse_stat(s, "propagation_rate"),
             survival_rate: parse_stat(s, "survival_rate"),
             impacted_area: parse_stat(s, "impacted_area"),
             deficit_integral: parse_stat(s, "deficit_integral"),
+            cascade_depth: parse_stat(s, "cascade_depth"),
+            cascade_spread: parse_stat(s, "cascade_spread"),
+            fleet_utilization: parse_stat(s, "fleet_utilization"),
             solver_step_us: parse_stat(s, "solver_step_us"),
             wall_time_ms: parse_stat(s, "wall_time_ms"),
         });
@@ -385,16 +399,17 @@ fn parse_stat(parent: &serde_json::Value, key: &str) -> super::stats::StatSummar
 pub enum MetricColumn {
     Throughput,
     TotalTasks,
-    IdleRatio,
+    UnassignedRatio,
     FaultTolerance,
-    Nrr,
     CriticalTime,
     DeficitRecovery,
     ThroughputRecovery,
-    PropagationRate,
     SurvivalRate,
     ImpactedArea,
     DeficitIntegral,
+    CascadeDepth,
+    CascadeSpread,
+    FleetUtilization,
     SolverStepUs,
     WallTimeMs,
 }
@@ -404,16 +419,17 @@ impl MetricColumn {
         match self {
             Self::Throughput => "Throughput",
             Self::TotalTasks => "Tasks",
-            Self::IdleRatio => "Idle %",
+            Self::UnassignedRatio => "Unassigned %",
             Self::FaultTolerance => "FT",
-            Self::Nrr => "NRR",
             Self::CriticalTime => "Crit. Time",
             Self::DeficitRecovery => "Deficit Rec.",
             Self::ThroughputRecovery => "TP Rec.",
-            Self::PropagationRate => "Prop. Rate",
             Self::SurvivalRate => "Survival",
             Self::ImpactedArea => "Impact Area",
             Self::DeficitIntegral => "Deficit",
+            Self::CascadeDepth => "Casc. Depth",
+            Self::CascadeSpread => "Casc. Spread",
+            Self::FleetUtilization => "Fleet Util.",
             Self::SolverStepUs => "Solver µs",
             Self::WallTimeMs => "Wall ms",
         }
@@ -423,16 +439,17 @@ impl MetricColumn {
         match self {
             Self::Throughput => "TP",
             Self::TotalTasks => "Tasks",
-            Self::IdleRatio => "Idle",
+            Self::UnassignedRatio => "Unassigned",
             Self::FaultTolerance => "FT",
-            Self::Nrr => "NRR",
             Self::CriticalTime => "CT",
             Self::DeficitRecovery => "DefRec",
             Self::ThroughputRecovery => "TPRec",
-            Self::PropagationRate => "Prop",
             Self::SurvivalRate => "Surv",
             Self::ImpactedArea => "Impact",
             Self::DeficitIntegral => "Deficit",
+            Self::CascadeDepth => "CascD",
+            Self::CascadeSpread => "CascS",
+            Self::FleetUtilization => "FUtil",
             Self::SolverStepUs => "µs",
             Self::WallTimeMs => "ms",
         }
@@ -442,16 +459,17 @@ impl MetricColumn {
         match self {
             Self::Throughput => &s.throughput,
             Self::TotalTasks => &s.total_tasks,
-            Self::IdleRatio => &s.idle_ratio,
+            Self::UnassignedRatio => &s.unassigned_ratio,
             Self::FaultTolerance => &s.fault_tolerance,
-            Self::Nrr => &s.nrr,
             Self::CriticalTime => &s.critical_time,
             Self::DeficitRecovery => &s.deficit_recovery,
             Self::ThroughputRecovery => &s.throughput_recovery,
-            Self::PropagationRate => &s.propagation_rate,
             Self::SurvivalRate => &s.survival_rate,
             Self::ImpactedArea => &s.impacted_area,
             Self::DeficitIntegral => &s.deficit_integral,
+            Self::CascadeDepth => &s.cascade_depth,
+            Self::CascadeSpread => &s.cascade_spread,
+            Self::FleetUtilization => &s.fleet_utilization,
             Self::SolverStepUs => &s.solver_step_us,
             Self::WallTimeMs => &s.wall_time_ms,
         }
@@ -464,28 +482,30 @@ impl MetricColumn {
             Self::SolverStepUs | Self::DeficitRecovery | Self::ThroughputRecovery => 1,
             Self::Throughput
             | Self::FaultTolerance
-            | Self::Nrr
             | Self::CriticalTime
-            | Self::PropagationRate
             | Self::SurvivalRate
-            | Self::IdleRatio
-            | Self::ImpactedArea => 2,
+            | Self::UnassignedRatio
+            | Self::ImpactedArea
+            | Self::CascadeDepth
+            | Self::CascadeSpread
+            | Self::FleetUtilization => 2,
         }
     }
 
     pub const ALL: &'static [MetricColumn] = &[
         Self::Throughput,
         Self::TotalTasks,
-        Self::IdleRatio,
+        Self::UnassignedRatio,
         Self::FaultTolerance,
-        Self::Nrr,
         Self::CriticalTime,
         Self::DeficitRecovery,
         Self::ThroughputRecovery,
-        Self::PropagationRate,
         Self::SurvivalRate,
         Self::ImpactedArea,
         Self::DeficitIntegral,
+        Self::CascadeDepth,
+        Self::CascadeSpread,
+        Self::FleetUtilization,
         Self::SolverStepUs,
         Self::WallTimeMs,
     ];
@@ -660,7 +680,7 @@ pub fn write_svg_chart<W: Write>(
 /// Return a hex color based on metric zone thresholds.
 fn zone_color_hex(col: MetricColumn, val: f64) -> &'static str {
     match col {
-        MetricColumn::FaultTolerance | MetricColumn::Nrr | MetricColumn::SurvivalRate => {
+        MetricColumn::FaultTolerance | MetricColumn::SurvivalRate => {
             if val >= 0.7 {
                 "#78b478"
             } else if val >= 0.4 {
@@ -669,7 +689,7 @@ fn zone_color_hex(col: MetricColumn, val: f64) -> &'static str {
                 "#b45050"
             }
         }
-        MetricColumn::CriticalTime | MetricColumn::PropagationRate | MetricColumn::ImpactedArea => {
+        MetricColumn::CriticalTime | MetricColumn::ImpactedArea => {
             if val <= 0.2 {
                 "#78b478"
             } else if val <= 0.5 {

@@ -362,7 +362,7 @@ pub(super) fn process_js_commands(
                         "recovery_rate" => mc.recovery_rate = value,
                         "cascade_spread" => mc.cascade_spread = value,
                         "throughput" => mc.throughput = value,
-                        "idle_ratio" => mc.idle_ratio = value,
+                        "wait_ratio" => mc.wait_ratio = value,
                         _ => {}
                     }
                 }

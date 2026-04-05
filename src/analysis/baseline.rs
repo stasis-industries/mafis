@@ -74,7 +74,7 @@ pub struct BaselineRecord {
     pub tasks_completed_series: Vec<u64>,
     pub idle_count_series: Vec<usize>,
     /// Cumulative wait ratio (wait_actions / total_actions) at each tick.
-    /// Equivalent to FaultMetrics.idle_ratio from the live ECS path.
+    /// Equivalent to FaultMetrics.wait_ratio from the live ECS path.
     pub wait_ratio_series: Vec<f32>,
 
     // Aggregate

@@ -45,7 +45,7 @@ pub struct AgentActionStats {
 
 impl AgentActionStats {
     /// Fraction of actions that were waits (0.0–1.0).
-    pub fn idle_ratio(&self) -> f32 {
+    pub fn wait_ratio(&self) -> f32 {
         if self.total_actions == 0 {
             0.0
         } else {

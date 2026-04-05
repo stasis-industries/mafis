@@ -6,7 +6,7 @@ use crate::core::state::SimulationConfig;
 use crate::fault::breakdown::FaultEvent;
 use crate::fault::config::{FaultSource, FaultType};
 
-use super::dependency::ActionDependencyGraph;
+use super::dependency::{ActionDependencyGraph, IndexedDependencyGraph};
 
 /// Per-agent cascade record — counting only, no artificial delay numbers.
 #[derive(Component, Debug, Clone)]
@@ -128,6 +128,44 @@ pub fn propagate_cascade(
     }
 }
 
+// ---------------------------------------------------------------------------
+// Standalone cascade BFS — for experiment runner
+// ---------------------------------------------------------------------------
+
+/// Standalone cascade BFS for headless use.
+/// Returns (agents_affected, max_depth) for a given dead agent index.
+/// Mirrors the BFS logic of `propagate_cascade` but without ECS dependencies.
+pub fn cascade_bfs_standalone(
+    graph: &IndexedDependencyGraph,
+    dead_agent: usize,
+    max_depth: u32,
+) -> (u32, u32) {
+    let mut visited = HashSet::new();
+    let mut queue: VecDeque<(usize, u32)> = VecDeque::new();
+    visited.insert(dead_agent);
+    queue.push_back((dead_agent, 0));
+
+    let mut affected = 0u32;
+    let mut deepest = 0u32;
+
+    while let Some((idx, depth)) = queue.pop_front() {
+        if depth > 0 {
+            affected += 1;
+            deepest = deepest.max(depth);
+        }
+        if depth >= max_depth {
+            continue;
+        }
+        for &dep in graph.direct_dependents(idx) {
+            if visited.insert(dep) {
+                queue.push_back((dep, depth + 1));
+            }
+        }
+    }
+
+    (affected, deepest)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -218,5 +256,43 @@ mod tests {
         state.clear();
         state.clear(); // second clear on already-empty state is safe
         assert_eq!(state.max_depth, 0);
+    }
+
+    // ── Standalone cascade BFS ───────────────────────────────────────
+
+    #[test]
+    fn test_cascade_bfs_no_dependents() {
+        use super::super::dependency::IndexedDependencyGraph;
+        let graph = IndexedDependencyGraph { dependents: HashMap::new() };
+        let (affected, depth) = cascade_bfs_standalone(&graph, 0, 10);
+        assert_eq!(affected, 0);
+        assert_eq!(depth, 0);
+    }
+
+    #[test]
+    fn test_cascade_bfs_linear_chain() {
+        use super::super::dependency::IndexedDependencyGraph;
+        // Chain: 0 → 1 → 2
+        let mut deps = HashMap::new();
+        deps.insert(0, vec![1]);
+        deps.insert(1, vec![2]);
+        let graph = IndexedDependencyGraph { dependents: deps };
+        let (affected, depth) = cascade_bfs_standalone(&graph, 0, 10);
+        assert_eq!(affected, 2);
+        assert_eq!(depth, 2);
+    }
+
+    #[test]
+    fn test_cascade_bfs_depth_cap() {
+        use super::super::dependency::IndexedDependencyGraph;
+        // Chain: 0 → 1 → 2 → 3, but max_depth = 1
+        let mut deps = HashMap::new();
+        deps.insert(0, vec![1]);
+        deps.insert(1, vec![2]);
+        deps.insert(2, vec![3]);
+        let graph = IndexedDependencyGraph { dependents: deps };
+        let (affected, depth) = cascade_bfs_standalone(&graph, 0, 1);
+        assert_eq!(affected, 1); // only agent 1 reached
+        assert_eq!(depth, 1);
     }
 }

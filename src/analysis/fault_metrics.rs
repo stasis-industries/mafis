@@ -5,7 +5,7 @@
 //! - Recovery rate
 //! - Cascade spread
 //! - Throughput (goals/tick)
-//! - Idle ratio (aggregate)
+//! - Wait ratio (aggregate)
 //! - Fault survival rate (time-series)
 
 use bevy::prelude::*;
@@ -73,7 +73,7 @@ pub struct FaultMetrics {
     finished_entities: HashSet<Entity>,
     pub throughput: f32,
 
-    pub idle_ratio: f32,
+    pub wait_ratio: f32,
 
     pub survival_series: VecDeque<(u64, f32)>,
     pub initial_agent_count: u32,
@@ -99,7 +99,7 @@ impl Default for FaultMetrics {
             throughput_window: VecDeque::with_capacity(constants::THROUGHPUT_WINDOW_SIZE + 1),
             finished_entities: HashSet::new(),
             throughput: 0.0,
-            idle_ratio: 0.0,
+            wait_ratio: 0.0,
             survival_series: VecDeque::with_capacity(constants::MAX_SURVIVAL_ENTRIES + 1),
             initial_agent_count: 0,
             event_records: Vec::new(),
@@ -193,9 +193,9 @@ impl FaultMetrics {
         sum as f32 / window.len() as f32
     }
 
-    /// Compute idle ratio as wait_actions / total_actions.
+    /// Compute wait ratio as wait_actions / total_actions.
     /// Returns 0.0 if `total_actions` is 0.
-    pub fn compute_idle_ratio(wait_actions: u32, total_actions: u32) -> f32 {
+    pub fn compute_wait_ratio(wait_actions: u32, total_actions: u32) -> f32 {
         if total_actions == 0 {
             return 0.0;
         }
@@ -334,7 +334,7 @@ pub fn update_fault_metrics(
         fault_metrics.initial_agent_count = all_agents.iter().count() as u32;
     }
 
-    // --- Track agent actions + throughput + idle ratio in single pass ---
+    // --- Track agent actions + throughput + wait ratio in single pass ---
     let mut new_arrivals = 0u32;
     let mut total_actions_sum = 0u32;
     let mut wait_actions_sum = 0u32;
@@ -418,12 +418,12 @@ pub fn update_fault_metrics(
         record.throughput_delta = record.throughput_before - record.throughput_min;
     }
 
-    // --- Idle ratio: alive agents only ---
+    // --- Wait ratio: alive agents only ---
     // Dead agents are excluded — their fleet loss is captured by survival_rate and
     // fleet_utilization. Counting dead agents as permanently idle would make this
     // metric unresponsive to late-stage events (old deaths dominate the cumulative sum).
     if total_actions_sum > 0 {
-        fault_metrics.idle_ratio = wait_actions_sum as f32 / total_actions_sum as f32;
+        fault_metrics.wait_ratio = wait_actions_sum as f32 / total_actions_sum as f32;
     }
 
     // --- Survival rate (uses alive_count from main pass) ---
@@ -502,7 +502,7 @@ mod tests {
         assert_eq!(fm.recovery_rate, 0.0);
         assert_eq!(fm.avg_cascade_spread, 0.0);
         assert_eq!(fm.throughput, 0.0);
-        assert_eq!(fm.idle_ratio, 0.0);
+        assert_eq!(fm.wait_ratio, 0.0);
         assert_eq!(fm.initial_agent_count, 0);
         assert!(fm.event_records.is_empty());
         assert!(fm.survival_series.is_empty());
@@ -517,7 +517,7 @@ mod tests {
         fm.recovery_rate = 0.7;
         fm.avg_cascade_spread = 3.5;
         fm.throughput = 1.2;
-        fm.idle_ratio = 0.3;
+        fm.wait_ratio = 0.3;
         fm.initial_agent_count = 50;
 
         fm.clear();
@@ -528,7 +528,7 @@ mod tests {
         assert_eq!(fm.recovery_rate, 0.0);
         assert_eq!(fm.avg_cascade_spread, 0.0);
         assert_eq!(fm.throughput, 0.0);
-        assert_eq!(fm.idle_ratio, 0.0);
+        assert_eq!(fm.wait_ratio, 0.0);
         assert_eq!(fm.initial_agent_count, 0);
     }
 
@@ -666,34 +666,34 @@ mod tests {
         assert_eq!(FaultMetrics::compute_throughput(&window), 0.0);
     }
 
-    // ── compute_idle_ratio ────────────────────────────────────────────────
+    // ── compute_wait_ratio ────────────────────────────────────────────────
 
     #[test]
-    fn compute_idle_ratio_no_actions_returns_zero() {
-        assert_eq!(FaultMetrics::compute_idle_ratio(0, 0), 0.0);
+    fn compute_wait_ratio_no_actions_returns_zero() {
+        assert_eq!(FaultMetrics::compute_wait_ratio(0, 0), 0.0);
     }
 
     #[test]
-    fn compute_idle_ratio_all_idle() {
-        let ratio = FaultMetrics::compute_idle_ratio(10, 10);
+    fn compute_wait_ratio_all_idle() {
+        let ratio = FaultMetrics::compute_wait_ratio(10, 10);
         assert!((ratio - 1.0).abs() < 1e-5, "expected 1.0, got {ratio}");
     }
 
     #[test]
-    fn compute_idle_ratio_no_idle() {
-        let ratio = FaultMetrics::compute_idle_ratio(0, 10);
+    fn compute_wait_ratio_no_idle() {
+        let ratio = FaultMetrics::compute_wait_ratio(0, 10);
         assert_eq!(ratio, 0.0);
     }
 
     #[test]
-    fn compute_idle_ratio_half_idle() {
-        let ratio = FaultMetrics::compute_idle_ratio(5, 10);
+    fn compute_wait_ratio_half_idle() {
+        let ratio = FaultMetrics::compute_wait_ratio(5, 10);
         assert!((ratio - 0.5).abs() < 1e-5, "expected 0.5, got {ratio}");
     }
 
     #[test]
-    fn compute_idle_ratio_between_zero_and_one() {
-        let ratio = FaultMetrics::compute_idle_ratio(3, 11);
+    fn compute_wait_ratio_between_zero_and_one() {
+        let ratio = FaultMetrics::compute_wait_ratio(3, 11);
         assert!(ratio > 0.0);
         assert!(ratio < 1.0);
         // 3/11 ≈ 0.2727...

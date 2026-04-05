@@ -37,13 +37,13 @@ impl SimulationPhase {
 #[derive(Resource, Debug, Clone)]
 pub struct ResilienceBaseline {
     pub baseline_throughput: f64,
-    pub baseline_idle_ratio: f32,
+    pub baseline_wait_ratio: f32,
     pub warmup_complete: bool,
 }
 
 impl Default for ResilienceBaseline {
     fn default() -> Self {
-        Self { baseline_throughput: 0.0, baseline_idle_ratio: 0.0, warmup_complete: false }
+        Self { baseline_throughput: 0.0, baseline_wait_ratio: 0.0, warmup_complete: false }
     }
 }
 
@@ -79,12 +79,12 @@ mod tests {
     fn resilience_baseline_reset_clears_all_fields() {
         let mut baseline = ResilienceBaseline {
             baseline_throughput: 1.5,
-            baseline_idle_ratio: 0.3,
+            baseline_wait_ratio: 0.3,
             warmup_complete: true,
         };
         baseline.reset();
         assert!(!baseline.warmup_complete);
         assert_eq!(baseline.baseline_throughput, 0.0);
-        assert_eq!(baseline.baseline_idle_ratio, 0.0);
+        assert_eq!(baseline.baseline_wait_ratio, 0.0);
     }
 }

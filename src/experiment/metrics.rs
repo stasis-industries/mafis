@@ -15,10 +15,10 @@ pub struct RunMetrics {
     pub total_tasks: u64,
 
     // ── Agent utilization ──────────────────────────────────────────
-    /// Fraction of agent-ticks spent idle: `sum(idle_count[t]) / sum(total_agents[t])`.
-    /// An agent is "idle" when its task leg is `Idle` (no active pickup/delivery).
+    /// Fraction of agent-ticks spent unassigned: `sum(idle_count[t]) / sum(total_agents[t])`.
+    /// An agent is "unassigned" when its task leg is `Free` (no active pickup/delivery).
     /// This differs from `wait_ratio` which counts physical `Wait` actions.
-    pub idle_ratio: f64,
+    pub unassigned_ratio: f64,
     /// Cumulative wait ratio: `total_wait_actions / total_actions` across all agent-ticks.
     /// Includes dead agents (permanent `Wait`). Higher = more congestion or faults.
     pub wait_ratio: f64,
@@ -26,8 +26,6 @@ pub struct RunMetrics {
     // ── Fault resilience (differential) ────────────────────────────
     /// Fault Tolerance: faulted_avg_tp / baseline_avg_tp (0..1+)
     pub fault_tolerance: f64,
-    /// Net Resilience Ratio: 1 - MTTR/MTBF. Higher = more resilient.
-    pub nrr: f64,
     /// Fraction of ticks below threshold after first fault.
     pub critical_time: f64,
 
@@ -43,8 +41,17 @@ pub struct RunMetrics {
     pub mtbf: Option<f64>,
     pub recovery_tick: Option<u64>,
 
+    // ── Cascade (ADG-based) ─────────────────────────────────────────
+    /// Average cascade spread per fault event (agents affected via ADG BFS).
+    pub cascade_spread_avg: f64,
+    /// Average cascade depth per fault event (max BFS depth).
+    pub cascade_depth_avg: f64,
+
+    // ── Fleet utilization ─────────────────────────────────────────
+    /// Fleet utilization: average (alive_and_tasked / initial_fleet) post-fault.
+    pub fleet_utilization: f64,
+
     // ── Cascade / spread ───────────────────────────────────────────
-    pub propagation_rate: f64,
     pub survival_rate: f64,
     pub impacted_area: f64,
     pub deficit_integral: i64,
@@ -79,10 +86,10 @@ pub fn compute_run_metrics(
     // wait_ratio = cumulative (Wait actions / total actions). From AnalysisEngine.
     let wait_ratio = faulted_analysis.wait_ratio_series.last().copied().unwrap_or(0.0) as f64;
 
-    // idle_ratio = fraction of agent-ticks where the agent had no task assignment
-    // (task leg == Idle). This is distinct from wait_ratio which measures physical
+    // unassigned_ratio = fraction of agent-ticks where the agent had no task assignment
+    // (task leg == Free). This is distinct from wait_ratio which measures physical
     // Wait actions regardless of task state.
-    let idle_ratio = if tick_count > 0 {
+    let unassigned_ratio = if tick_count > 0 {
         let total_idle: usize = faulted_analysis.idle_count_series.iter().sum();
         let total_agents: usize = faulted_analysis
             .alive_series
@@ -158,23 +165,6 @@ pub fn compute_run_metrics(
         first_fault_idx,
     );
 
-    // ── NRR ────────────────────────────────────────────────────────
-    // Uses throughput_recovery (rate-based) for a more meaningful ratio.
-    let nrr = match mtbf {
-        Some(mtbf_val) if mtbf_val > 0.0 => {
-            if throughput_recovery.is_nan() {
-                f64::NAN // never recovered → NRR undefined
-            } else {
-                1.0 - (throughput_recovery / mtbf_val)
-            }
-        }
-        _ => {
-            // MTBF undefined (< 2 fault events): NRR is a fault-recovery metric,
-            // so it's undefined when there aren't enough fault events to measure.
-            f64::NAN
-        }
-    };
-
     // ── Critical Time ──────────────────────────────────────────────
     // Use first_fault_idx (direct from fault events) instead of first_gap_tick
     // (which is based on cumulative task deficit — can lag behind actual fault onset).
@@ -194,30 +184,28 @@ pub fn compute_run_metrics(
         1.0
     };
 
-    // ── Propagation rate from fault events ─────────────────────────
-    // Use alive count from the PREVIOUS tick (before this tick's faults fired).
-    // alive_series[tick_idx] is recorded AFTER the tick completes, so it already
-    // reflects agents killed in that tick. Using it as the denominator would
-    // undercount the population at risk (e.g., 5 faults out of 20 agents would
-    // read as 5/15 = 0.33 instead of the correct 5/20 = 0.25).
-    // For tick 0 there is no previous tick, so we use the initial fleet size.
-    let propagation_events: Vec<(u32, u32)> = faulted_fault_events
-        .iter()
-        .enumerate()
-        .filter(|(_, events)| !events.is_empty())
-        .map(|(tick_idx, events)| {
-            let alive_before_fault = if tick_idx > 0 {
-                faulted_analysis.alive_series[tick_idx - 1] as u32
+    // ── Fleet Utilization: (alive - free) / initial, averaged post-fault ──
+    let initial_fleet = faulted_analysis.alive_series.first().copied().unwrap_or(0)
+        + faulted_analysis.dead_series.first().copied().unwrap_or(0);
+    let fleet_utilization = match first_fault_idx {
+        Some(start) if initial_fleet > 0 => {
+            let post_ticks = tick_count - start;
+            if post_ticks > 0 {
+                let sum: f64 = (start..tick_count)
+                    .map(|i| {
+                        let alive = faulted_analysis.alive_series.get(i).copied().unwrap_or(0);
+                        let idle = faulted_analysis.idle_count_series.get(i).copied().unwrap_or(0);
+                        let tasked = alive.saturating_sub(idle);
+                        tasked as f64 / initial_fleet as f64
+                    })
+                    .sum();
+                sum / post_ticks as f64
             } else {
-                // First tick: use initial fleet size (all alive)
-                let total = faulted_analysis.alive_series.first().copied().unwrap_or(0)
-                    + faulted_analysis.dead_series.first().copied().unwrap_or(0);
-                total as u32
-            };
-            (events.len() as u32, alive_before_fault)
-        })
-        .collect();
-    let propagation_rate = FaultMetrics::compute_propagation_rate(&propagation_events) as f64;
+                1.0
+            }
+        }
+        _ => 1.0,
+    };
 
     // ── Solver step timing ─────────────────────────────────────────
     let solver_step_time_avg_us = if solver_step_times_us.is_empty() {
@@ -230,16 +218,17 @@ pub fn compute_run_metrics(
     RunMetrics {
         avg_throughput,
         total_tasks,
-        idle_ratio,
+        unassigned_ratio,
         wait_ratio,
         fault_tolerance,
-        nrr,
         critical_time,
         deficit_recovery,
         throughput_recovery,
         mtbf,
         recovery_tick: diff.recovery_tick,
-        propagation_rate,
+        cascade_spread_avg: 0.0,
+        cascade_depth_avg: 0.0,
+        fleet_utilization,
         survival_rate,
         impacted_area: diff.impacted_area,
         deficit_integral: diff.deficit_integral,
@@ -362,22 +351,6 @@ mod tests {
         let avg_baseline: f64 = bl[5..].iter().sum::<f64>() / 15.0;
         let ft = avg_faulted / avg_baseline;
         assert!((ft - 0.5).abs() < 1e-10, "FT should be 0.5, got {ft}");
-    }
-
-    #[test]
-    fn nrr_known_values() {
-        // MTBF = 100 (faults at tick 100 and 200)
-        let mtbf = 100.0_f64;
-        // Throughput recovery = 15 ticks
-        let throughput_recovery = 15.0_f64;
-        // NRR = 1 - recovery / MTBF = 1 - 15/100 = 0.85
-        let nrr = 1.0 - throughput_recovery / mtbf;
-        assert!((nrr - 0.85).abs() < 1e-10, "NRR should be 0.85, got {nrr}");
-
-        // Also verify MTBF computation
-        let fault_ticks = vec![100_u64, 200];
-        let computed_mtbf = FaultMetrics::compute_mtbf(&fault_ticks).unwrap();
-        assert_eq!(computed_mtbf, 100.0);
     }
 
     #[test]

@@ -42,16 +42,17 @@ pub struct ConfigSummary {
     // Per-metric summaries (faulted run)
     pub throughput: StatSummary,
     pub total_tasks: StatSummary,
-    pub idle_ratio: StatSummary,
+    pub unassigned_ratio: StatSummary,
     pub fault_tolerance: StatSummary,
-    pub nrr: StatSummary,
     pub critical_time: StatSummary,
     pub deficit_recovery: StatSummary,
     pub throughput_recovery: StatSummary,
-    pub propagation_rate: StatSummary,
     pub survival_rate: StatSummary,
     pub impacted_area: StatSummary,
     pub deficit_integral: StatSummary,
+    pub cascade_depth: StatSummary,
+    pub cascade_spread: StatSummary,
+    pub fleet_utilization: StatSummary,
     pub solver_step_us: StatSummary,
     pub wall_time_ms: StatSummary,
 }
@@ -181,25 +182,58 @@ pub fn run_single_experiment(config: &ExperimentConfig) -> RunResult {
 
         let mut analysis = AnalysisEngine::new(config.tick_count as usize);
         let mut step_times = Vec::with_capacity(config.tick_count as usize);
+        let mut cascade_depths: Vec<f64> = Vec::new();
+        let mut cascade_spreads: Vec<f64> = Vec::new();
 
         let faulted_start = Instant::now();
         for _ in 0..config.tick_count {
             let tick_start = Instant::now();
             let mut result = runner.tick(scheduler.scheduler(), queue_policy.policy());
             step_times.push(tick_start.elapsed().as_micros() as f64);
+
+            // Cascade analysis via standalone ADG
+            if !result.fault_events.is_empty() {
+                let adg = crate::analysis::dependency::build_adg_from_agents(
+                    &runner.agents,
+                    crate::constants::ADG_LOOKAHEAD,
+                );
+                for fault in &result.fault_events {
+                    let (spread, depth) = crate::analysis::cascade::cascade_bfs_standalone(
+                        &adg,
+                        fault.agent_index,
+                        crate::constants::MAX_CASCADE_DEPTH,
+                    );
+                    cascade_spreads.push(spread as f64);
+                    cascade_depths.push(depth as f64);
+                }
+            }
+
             analysis.record_tick(&runner, &mut result);
         }
         analysis.compute_aggregates();
 
         let faulted_wall_ms = faulted_start.elapsed().as_millis() as u64;
 
-        faulted_metrics = compute_run_metrics(
+        let mut fm = compute_run_metrics(
             &baseline_record,
             &analysis,
             &analysis.fault_events,
             &step_times,
             faulted_wall_ms,
         );
+
+        fm.cascade_depth_avg = if cascade_depths.is_empty() {
+            0.0
+        } else {
+            cascade_depths.iter().sum::<f64>() / cascade_depths.len() as f64
+        };
+        fm.cascade_spread_avg = if cascade_spreads.is_empty() {
+            0.0
+        } else {
+            cascade_spreads.iter().sum::<f64>() / cascade_spreads.len() as f64
+        };
+
+        faulted_metrics = fm;
     }
 
     RunResult { config: config.clone(), baseline_metrics, faulted_metrics }
@@ -300,23 +334,26 @@ pub fn compute_summaries(runs: &[RunResult]) -> Vec<ConfigSummary> {
                 group.iter().map(|r| r.faulted_metrics.avg_throughput).collect();
             let tasks: Vec<f64> =
                 group.iter().map(|r| r.faulted_metrics.total_tasks as f64).collect();
-            let idle_ratios: Vec<f64> =
-                group.iter().map(|r| r.faulted_metrics.idle_ratio).collect();
+            let unassigned_ratios: Vec<f64> =
+                group.iter().map(|r| r.faulted_metrics.unassigned_ratio).collect();
             let fts: Vec<f64> = group.iter().map(|r| r.faulted_metrics.fault_tolerance).collect();
-            let nrrs: Vec<f64> = group.iter().map(|r| r.faulted_metrics.nrr).collect();
             let cts: Vec<f64> = group.iter().map(|r| r.faulted_metrics.critical_time).collect();
             let deficit_recs: Vec<f64> =
                 group.iter().map(|r| r.faulted_metrics.deficit_recovery).collect();
             let tp_recs: Vec<f64> =
                 group.iter().map(|r| r.faulted_metrics.throughput_recovery).collect();
-            let prop_rates: Vec<f64> =
-                group.iter().map(|r| r.faulted_metrics.propagation_rate).collect();
             let survival_rates: Vec<f64> =
                 group.iter().map(|r| r.faulted_metrics.survival_rate).collect();
             let impacted_areas: Vec<f64> =
                 group.iter().map(|r| r.faulted_metrics.impacted_area).collect();
             let deficits: Vec<f64> =
                 group.iter().map(|r| r.faulted_metrics.deficit_integral as f64).collect();
+            let cascade_depths: Vec<f64> =
+                group.iter().map(|r| r.faulted_metrics.cascade_depth_avg).collect();
+            let cascade_spreads: Vec<f64> =
+                group.iter().map(|r| r.faulted_metrics.cascade_spread_avg).collect();
+            let fleet_utils: Vec<f64> =
+                group.iter().map(|r| r.faulted_metrics.fleet_utilization).collect();
             let solver_us: Vec<f64> =
                 group.iter().map(|r| r.faulted_metrics.solver_step_time_avg_us).collect();
             let wall_times: Vec<f64> =
@@ -331,16 +368,17 @@ pub fn compute_summaries(runs: &[RunResult]) -> Vec<ConfigSummary> {
                 num_seeds: n,
                 throughput: compute_stat_summary(&throughputs).unwrap_or_default(),
                 total_tasks: compute_stat_summary(&tasks).unwrap_or_default(),
-                idle_ratio: compute_stat_summary(&idle_ratios).unwrap_or_default(),
+                unassigned_ratio: compute_stat_summary(&unassigned_ratios).unwrap_or_default(),
                 fault_tolerance: compute_stat_summary(&fts).unwrap_or_default(),
-                nrr: compute_stat_summary(&nrrs).unwrap_or_default(),
                 critical_time: compute_stat_summary(&cts).unwrap_or_default(),
                 deficit_recovery: compute_stat_summary(&deficit_recs).unwrap_or_default(),
                 throughput_recovery: compute_stat_summary(&tp_recs).unwrap_or_default(),
-                propagation_rate: compute_stat_summary(&prop_rates).unwrap_or_default(),
                 survival_rate: compute_stat_summary(&survival_rates).unwrap_or_default(),
                 impacted_area: compute_stat_summary(&impacted_areas).unwrap_or_default(),
                 deficit_integral: compute_stat_summary(&deficits).unwrap_or_default(),
+                cascade_depth: compute_stat_summary(&cascade_depths).unwrap_or_default(),
+                cascade_spread: compute_stat_summary(&cascade_spreads).unwrap_or_default(),
+                fleet_utilization: compute_stat_summary(&fleet_utils).unwrap_or_default(),
                 solver_step_us: compute_stat_summary(&solver_us).unwrap_or_default(),
                 wall_time_ms: compute_stat_summary(&wall_times).unwrap_or_default(),
             }

@@ -110,7 +110,7 @@ pub struct MetricsConfig {
     pub recovery_rate: bool,
     pub cascade_spread: bool,
     pub throughput: bool,
-    pub idle_ratio: bool,
+    pub wait_ratio: bool,
 }
 
 impl Default for MetricsConfig {
@@ -126,7 +126,7 @@ impl Default for MetricsConfig {
             recovery_rate: true,
             cascade_spread: true,
             throughput: true,
-            idle_ratio: true,
+            wait_ratio: true,
         }
     }
 }
@@ -148,7 +148,7 @@ impl MetricsConfig {
             || self.recovery_rate
             || self.cascade_spread
             || self.throughput
-            || self.idle_ratio
+            || self.wait_ratio
     }
 
     /// Any metric at all?
@@ -335,7 +335,7 @@ mod tests {
         m.recovery_rate = false;
         m.cascade_spread = false;
         m.throughput = false;
-        m.idle_ratio = false;
+        m.wait_ratio = false;
         assert!(!m.any_fault());
         assert!(m.any()); // core still on
     }
@@ -353,7 +353,7 @@ mod tests {
             recovery_rate: false,
             cascade_spread: false,
             throughput: false,
-            idle_ratio: false,
+            wait_ratio: false,
         };
         assert!(!m.any());
         assert!(!m.any_core());

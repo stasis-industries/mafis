@@ -82,7 +82,7 @@ fn preset_smoke_test() -> PresetConfig {
 
 pub fn metric_zone_color(col: MetricColumn, val: f64) -> Color32 {
     match col {
-        MetricColumn::FaultTolerance | MetricColumn::Nrr | MetricColumn::SurvivalRate => {
+        MetricColumn::FaultTolerance | MetricColumn::SurvivalRate => {
             if val >= 0.7 {
                 Color32::from_rgb(120, 180, 120)
             } else if val >= 0.4 {
@@ -91,7 +91,7 @@ pub fn metric_zone_color(col: MetricColumn, val: f64) -> Color32 {
                 Color32::from_rgb(180, 80, 80)
             }
         }
-        MetricColumn::CriticalTime | MetricColumn::PropagationRate | MetricColumn::ImpactedArea => {
+        MetricColumn::CriticalTime | MetricColumn::ImpactedArea => {
             if val <= 0.2 {
                 Color32::from_rgb(120, 180, 120)
             } else if val <= 0.5 {
@@ -109,7 +109,7 @@ pub fn metric_zone_color(col: MetricColumn, val: f64) -> Color32 {
                 Color32::from_rgb(180, 80, 80)
             }
         }
-        MetricColumn::IdleRatio => {
+        MetricColumn::UnassignedRatio => {
             if val <= 0.3 {
                 Color32::from_rgb(120, 180, 120)
             } else if val <= 0.6 {
@@ -149,12 +149,10 @@ pub fn sortable_header(
 pub const TABLE_METRICS: &[MetricColumn] = &[
     MetricColumn::FaultTolerance,
     MetricColumn::Throughput,
-    MetricColumn::Nrr,
     MetricColumn::CriticalTime,
     MetricColumn::SurvivalRate,
     MetricColumn::ThroughputRecovery,
-    MetricColumn::PropagationRate,
-    MetricColumn::IdleRatio,
+    MetricColumn::UnassignedRatio,
     MetricColumn::ImpactedArea,
     MetricColumn::TotalTasks,
     MetricColumn::DeficitIntegral,

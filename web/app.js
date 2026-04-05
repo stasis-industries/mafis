@@ -1288,11 +1288,11 @@ function updateUI(s) {
         }
 
         // Idle Ratio card
-        animateMetric('metric-idle-ratio', m.idle_ratio.toFixed(2));
+        animateMetric('metric-idle-ratio', m.wait_ratio.toFixed(2));
         if (showBaseline) {
-            updateCtxMetric('idle_ratio', m.idle_ratio, bd.baseline_wait_ratio_at_tick, 1.0, true);
+            updateCtxMetric('idle_ratio', m.wait_ratio, bd.baseline_wait_ratio_at_tick, 1.0, true);
         } else {
-            updateCtxBar('idle_ratio', m.idle_ratio, 1.0);
+            updateCtxBar('idle_ratio', m.wait_ratio, 1.0);
             clearCtxDelta('idle_ratio');
             clearCtxGhost('idle_ratio');
             clearCtxBaseline('idle_ratio');
@@ -2022,7 +2022,7 @@ function updateAgentSummary(summary, faultEnabled) {
         html += '<div class="summary-row"><span>Avg Wear:</span><span class="mono">' + (summary.avg_heat * 100).toFixed(1) + '%</span></div>';
         html += '<div class="summary-row"><span>Max Wear:</span><span class="mono">' + (summary.max_heat * 100).toFixed(1) + '%</span></div>';
     }
-    html += '<div class="summary-row"><span>Avg Idle:</span><span class="mono">' + (summary.avg_idle_ratio * 100).toFixed(1) + '%</span></div>';
+    html += '<div class="summary-row"><span>Avg Idle:</span><span class="mono">' + (summary.avg_wait_ratio * 100).toFixed(1) + '%</span></div>';
 
     // Mini heat histogram bar
     if (faultEnabled && summary.heat_histogram) {
@@ -2062,7 +2062,7 @@ function updatePopover(agent) {
     if (taskLegEl) taskLegEl.textContent = agent.task_leg || 'Free';
     document.getElementById('popover-heat').textContent = agent.heat.toFixed(1);
     document.getElementById('popover-heat-fill').style.width = (agent.heat_normalized * 100) + '%';
-    document.getElementById('popover-idle').textContent = (agent.idle_ratio * 100).toFixed(0) + '%';
+    document.getElementById('popover-idle').textContent = (agent.wait_ratio * 100).toFixed(0) + '%';
     document.getElementById('popover-path').textContent = agent.distance_to_goal != null ? agent.distance_to_goal : agent.path_length;
 
     // Kill button — hidden if already dead
@@ -2279,10 +2279,10 @@ function renderResultsCharts(heatEnabled) {
             });
             tpSeries = [
                 { label: 'Gap (MVA Live - Baseline)', stroke: 'rgb(143,58,222)', fill: 'rgba(143,58,222,0.1)', width: 2 },
-                { label: 'Zero', stroke: 'rgba(140,140,148,0.4)', width: 1, dash: [4, 4] }
+                { label: 'Baseline', stroke: 'rgba(140,140,148,0.4)', width: 1, dash: [4, 4] }
             ];
             tpData = [d.ticks, gapData, gapData.map(() => 0)];
-            tpLegend = '<span style="color:rgb(143,58,222)">\u2501\u2501</span> Gap (MVA Live \u2212 MVA Baseline) &nbsp; <span style="color:rgba(140,140,148,0.4)">\u2508\u2508</span> Zero';
+            tpLegend = '<span style="color:rgb(143,58,222)">\u2501\u2501</span> Gap (MVA Live \u2212 MVA Baseline) &nbsp; <span style="color:rgba(140,140,148,0.4)">\u2508\u2508</span> Baseline';
         } else {
             // RAW mode: 4 series — per-tick (faint) + MA (bold) + baseline per-tick (faint dashed) + baseline MA (dashed)
             tpSeries = [
@@ -2331,14 +2331,16 @@ function renderResultsCharts(heatEnabled) {
             // NORM mode: ratio line + 1.0 reference
             const normData = d.tasksCumulative.map((v, i) => {
                 const bl = d.baselineTasksCumulative[i];
-                return (bl != null && bl > 0) ? v / bl : null;
+                if (bl == null) return null;
+                if (bl === 0) return (v === 0) ? 1.0 : null;
+                return v / bl;
             });
             taskSeries = [
                 { label: 'Ratio (Live / BL)', stroke: 'rgb(45,160,0)', fill: 'rgba(45,160,0,0.1)', width: 2 },
-                { label: '1.0', stroke: 'rgba(140,140,148,0.4)', width: 1, dash: [4, 4] }
+                { label: 'Baseline', stroke: 'rgba(140,140,148,0.4)', width: 1, dash: [4, 4] }
             ];
             taskData = [d.ticks, normData, normData.map(() => 1.0)];
-            taskLegend = '<span style="color:rgb(45,160,0)">\u2501\u2501</span> Ratio (Live / Baseline) &nbsp; <span style="color:rgba(140,140,148,0.4)">\u2508\u2508</span> 1.0';
+            taskLegend = '<span style="color:rgb(45,160,0)">\u2501\u2501</span> Ratio (Live / Baseline) &nbsp; <span style="color:rgba(140,140,148,0.4)">\u2508\u2508</span> Baseline';
         } else {
             // ABS mode
             taskSeries = [{ label: hasBaseline ? 'Live' : 'Tasks', stroke: 'rgb(45,160,0)', fill: 'rgba(45,160,0,0.1)', width: 2 }];
@@ -2515,7 +2517,7 @@ function populateResultsFromState(s) {
             const rows = [
                 { name: 'Throughput (avg)', baseline: blThroughput, current: m.throughput },
                 { name: 'Tasks Completed', baseline: blTasks, current: liveTasks, integer: true },
-                { name: 'Idle Ratio (avg)', baseline: blIdleRatio, current: m.idle_ratio, inverted: true },
+                { name: 'Idle Ratio (avg)', baseline: blIdleRatio, current: m.wait_ratio, inverted: true },
                 { name: 'Impacted Area', baseline: null, current: impactedArea, noCompare: true, suffix: '%' },
                 { name: 'Deficit', baseline: null, current: bd.deficit_integral || 0, integer: true, noCompare: true },
                 { name: 'Surplus', baseline: null, current: bd.surplus_integral || 0, integer: true, noCompare: true },
@@ -2554,7 +2556,7 @@ function populateResultsFromState(s) {
             const rows = [
                 { name: 'Throughput (avg)', value: m.throughput },
                 { name: 'Tasks Completed', value: liveTasks, integer: true },
-                { name: 'Idle Ratio (avg)', value: m.idle_ratio },
+                { name: 'Idle Ratio (avg)', value: m.wait_ratio },
                 { name: 'Survival Rate', value: survivalRate },
             ];
             summaryBody.innerHTML = rows.map(r => {
@@ -3031,7 +3033,7 @@ function updateChartLegends() {
     const tpLegend = document.querySelector('#chart-throughput .chart-legend');
     if (tpLegend) {
         if (throughputChartMode === 'gap') {
-            tpLegend.innerHTML = '<span style="color:rgb(143,58,222)">\u2501\u2501</span> Gap (MVA Live \u2212 MVA Baseline) &nbsp; <span style="color:rgba(140,140,148,0.4)">\u2508\u2508</span> Zero';
+            tpLegend.innerHTML = '<span style="color:rgb(143,58,222)">\u2501\u2501</span> Gap (MVA Live \u2212 MVA Baseline) &nbsp; <span style="color:rgba(140,140,148,0.4)">\u2508\u2508</span> Baseline';
         } else if (hasFaults) {
             tpLegend.innerHTML = '<span style="color:rgba(143,58,222,0.3)">\u2501\u2501</span> Per-Tick &nbsp; <span style="color:rgb(143,58,222)">\u2501\u2501</span> MVA (Live) &nbsp; <span style="color:rgba(140,140,148,0.6)">\u2508\u2508</span> MVA (Baseline)';
         } else {
@@ -3041,7 +3043,7 @@ function updateChartLegends() {
     const taskLegend = document.querySelector('#chart-tasks .chart-legend');
     if (taskLegend) {
         if (tasksChartMode === 'norm') {
-            taskLegend.innerHTML = '<span style="color:rgb(45,160,0)">\u2501\u2501</span> Ratio (Live / Baseline) &nbsp; <span style="color:rgba(140,140,148,0.4)">\u2508\u2508</span> 1.0';
+            taskLegend.innerHTML = '<span style="color:rgb(45,160,0)">\u2501\u2501</span> Ratio (Live / Baseline) &nbsp; <span style="color:rgba(140,140,148,0.4)">\u2508\u2508</span> Baseline';
         } else if (hasFaults) {
             taskLegend.innerHTML = '<span style="color:rgb(45,160,0)">\u2501\u2501</span> Live &nbsp; <span style="color:rgba(140,140,148,0.6)">\u2508\u2508</span> Baseline';
         } else {
@@ -3075,7 +3077,9 @@ function redrawChartsForMode() {
         if (tasksChartMode === 'norm' && _lastShowBaseline) {
             const normData = chartData.tasksCumulative.map((v, i) => {
                 const bl = chartData.baselineTasksCumulative[i];
-                return (bl != null && bl > 0) ? v / bl : null;
+                if (bl == null) return null;
+                if (bl === 0) return (v === 0) ? 1.0 : null;
+                return v / bl;
             });
             chartInsts.tasks.setData([chartData.ticks, normData, normData.map(() => 1.0)]);
         } else {
@@ -3168,7 +3172,7 @@ function updateChartData(s) {
     chartData.baselineThroughput.push(blThroughput);
     chartData.tasksCumulative.push(liveTasks);
     chartData.baselineTasksCumulative.push(blTasks);
-    chartData.idleRatio.push(s.metrics ? s.metrics.idle_ratio : null);
+    chartData.idleRatio.push(s.metrics ? s.metrics.wait_ratio : null);
     chartData.baselineIdleRatio.push(bd && bd.has_baseline ? bd.baseline_wait_ratio_at_tick : null);
     chartData.cascadeSpread.push(s.metrics ? s.metrics.avg_cascade_spread : null);
 
@@ -3203,7 +3207,9 @@ function updateChartData(s) {
             // NORM mode: single line = live / baseline, reference at 1.0
             const normData = chartData.tasksCumulative.map((v, i) => {
                 const bl = chartData.baselineTasksCumulative[i];
-                return (bl != null && bl > 0) ? v / bl : null;
+                if (bl == null) return null;
+                if (bl === 0) return (v === 0) ? 1.0 : null;
+                return v / bl;
             });
             chartInsts.tasks.setData([chartData.ticks, normData, normData.map(() => 1.0)]);
         } else {
@@ -4699,7 +4705,7 @@ const EXPERIMENT_METRICS = [
     { key: 'survival_rate', label: 'Survival Rate', decimals: 2 },
     { key: 'mttr', label: 'MTTR', decimals: 1 },
     { key: 'propagation_rate', label: 'Propagation Rate', decimals: 2 },
-    { key: 'idle_ratio', label: 'Idle Ratio', decimals: 2 },
+    { key: 'wait_ratio', label: 'Wait Ratio', decimals: 2 },
     { key: 'impacted_area', label: 'Impacted Area', decimals: 2 },
     { key: 'total_tasks', label: 'Tasks Completed', decimals: 0 },
     { key: 'deficit_integral', label: 'Deficit Integral', decimals: 0 },
@@ -4712,7 +4718,7 @@ const EXPERIMENT_METRICS = [
 function getApplicableMetrics(scenario) {
     if (!scenario || scenario === 'none') {
         return new Set([
-            'fault_tolerance', 'throughput', 'idle_ratio',
+            'fault_tolerance', 'throughput', 'wait_ratio',
             'total_tasks', 'deficit_integral',
             'solver_step_us', 'wall_time_ms'
         ]);
@@ -4765,7 +4771,7 @@ function computeStatSummaryJS(values) {
 const METRIC_MAP = [
     ['avg_throughput', 'throughput'],
     ['total_tasks', 'total_tasks'],
-    ['idle_ratio', 'idle_ratio'],
+    ['wait_ratio', 'wait_ratio'],
     ['fault_tolerance', 'fault_tolerance'],
     ['nrr', 'nrr'],
     ['critical_time', 'critical_time'],
@@ -4957,7 +4963,7 @@ function metricZoneClass(key, val) {
             return val >= 0 ? 'zone-good' : val >= -10 ? 'zone-fair' : 'zone-poor';
         case 'mttr':
             return val <= 20 ? 'zone-good' : val <= 60 ? 'zone-fair' : 'zone-poor';
-        case 'idle_ratio':
+        case 'wait_ratio':
             return val <= 0.3 ? 'zone-good' : val <= 0.6 ? 'zone-fair' : 'zone-poor';
         default:
             return 'zone-neutral';

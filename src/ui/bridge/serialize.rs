@@ -214,7 +214,7 @@ pub(super) struct AgentSummary {
     dead: usize,
     avg_heat: f32,
     max_heat: f32,
-    avg_idle_ratio: f32,
+    avg_wait_ratio: f32,
     heat_histogram: [u32; 10],
 }
 
@@ -240,7 +240,7 @@ pub(super) struct AgentSnapshot {
     path_length: usize,
     distance_to_goal: i32,
     task_leg: String,
-    idle_ratio: f32,
+    wait_ratio: f32,
 }
 
 #[derive(Serialize)]
@@ -274,7 +274,7 @@ pub(super) struct MetricsConfigSnapshot {
     recovery_rate: bool,
     cascade_spread: bool,
     throughput: bool,
-    idle_ratio: bool,
+    wait_ratio: bool,
 }
 
 #[derive(Serialize)]
@@ -291,7 +291,7 @@ pub(super) struct ExportConfigSnapshot {
 pub(super) struct PhaseSnapshot {
     phase: String,
     baseline_throughput: f64,
-    baseline_idle_ratio: f32,
+    baseline_wait_ratio: f32,
 }
 
 #[derive(Serialize)]
@@ -315,7 +315,7 @@ pub(super) struct MetricsSnapshot {
     avg_cascade_spread: f32,
     propagation_rate: f32,
     throughput: f32,
-    idle_ratio: f32,
+    wait_ratio: f32,
     /// Number of agents with TaskLeg::Free (no task assigned).
     /// Used by charts for apples-to-apples baseline comparison.
     task_idle_count: usize,
@@ -447,7 +447,7 @@ pub(super) fn sync_state_to_js(
             avg_cascade_spread: analysis.fault_metrics.avg_cascade_spread,
             propagation_rate: analysis.fault_metrics.propagation_rate,
             throughput: phase_res.lifelong.throughput(config.tick) as f32,
-            idle_ratio: analysis.fault_metrics.idle_ratio,
+            wait_ratio: analysis.fault_metrics.wait_ratio,
             task_idle_count: 0, // filled below after agent loop
             survival_rate: latest_survival,
         })
@@ -503,7 +503,7 @@ pub(super) fn sync_state_to_js(
         }
         let bucket = ((heat_normalized * 10.0) as usize).min(9);
         heat_histogram[bucket] += 1;
-        idle_sum += action_stats.map_or(0.0, |s| s.idle_ratio());
+        idle_sum += action_stats.map_or(0.0, |s| s.wait_ratio());
 
         if !use_aggregate {
             let dist = (agent.current_pos.x - agent.goal_pos.x).abs()
@@ -519,7 +519,7 @@ pub(super) fn sync_state_to_js(
                 path_length: agent.path_length,
                 distance_to_goal: dist,
                 task_leg: agent.task_leg.label().to_string(),
-                idle_ratio: action_stats.map_or(0.0, |s| s.idle_ratio()),
+                wait_ratio: action_stats.map_or(0.0, |s| s.wait_ratio()),
             });
         }
     }
@@ -535,7 +535,7 @@ pub(super) fn sync_state_to_js(
             dead,
             avg_heat: if total > 0 { heat_sum / total as f32 } else { 0.0 },
             max_heat,
-            avg_idle_ratio: if total > 0 { idle_sum / total as f32 } else { 0.0 },
+            avg_wait_ratio: if total > 0 { idle_sum / total as f32 } else { 0.0 },
             heat_histogram,
         })
     } else {
@@ -604,7 +604,7 @@ pub(super) fn sync_state_to_js(
             recovery_rate: phase_res.metrics_config.recovery_rate,
             cascade_spread: phase_res.metrics_config.cascade_spread,
             throughput: phase_res.metrics_config.throughput,
-            idle_ratio: phase_res.metrics_config.idle_ratio,
+            wait_ratio: phase_res.metrics_config.wait_ratio,
         },
         export_config: ExportConfigSnapshot {
             auto_on_finished: export_config.auto_on_finished,
@@ -655,7 +655,7 @@ pub(super) fn sync_state_to_js(
         phase: PhaseSnapshot {
             phase: phase_res.phase.label().to_string(),
             baseline_throughput: phase_res.baseline.baseline_throughput,
-            baseline_idle_ratio: phase_res.baseline.baseline_idle_ratio,
+            baseline_wait_ratio: phase_res.baseline.baseline_wait_ratio,
         },
         loading: if current == SimState::Loading {
             let total = loading_progress.total.max(1);

@@ -51,7 +51,7 @@ pub struct ExportAgent {
     pub heat: f32,
     pub total_moves: u32,
     pub cascade_depth: u32,
-    pub idle_ratio: f32,
+    pub wait_ratio: f32,
     pub total_actions: u32,
     pub wait_actions: u32,
 }
@@ -79,7 +79,7 @@ pub struct ExportMetrics {
     pub recovery_rate: f32,
     pub avg_cascade_spread: f32,
     pub throughput: f32,
-    pub idle_ratio: f32,
+    pub wait_ratio: f32,
     pub survival_series: Vec<(u64, f32)>,
 }
 

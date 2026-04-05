@@ -96,7 +96,7 @@ pub fn gather_snapshot(
                 heat: heat_val,
                 total_moves: moves,
                 cascade_depth: depth,
-                idle_ratio: action_stats.map_or(0.0, |s| s.idle_ratio()),
+                wait_ratio: action_stats.map_or(0.0, |s| s.wait_ratio()),
                 total_actions: action_stats.map_or(0, |s| s.total_actions),
                 wait_actions: action_stats.map_or(0, |s| s.wait_actions),
             }
@@ -153,7 +153,7 @@ pub fn gather_snapshot(
         recovery_rate: fault_metrics.recovery_rate,
         avg_cascade_spread: fault_metrics.avg_cascade_spread,
         throughput: fault_metrics.throughput,
-        idle_ratio: fault_metrics.idle_ratio,
+        wait_ratio: fault_metrics.wait_ratio,
         survival_series: fault_metrics.survival_series.iter().copied().collect(),
     };
 
