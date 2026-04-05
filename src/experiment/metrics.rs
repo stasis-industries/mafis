@@ -62,6 +62,65 @@ pub struct RunMetrics {
     pub wall_time_ms: u64,
 }
 
+/// Compute metrics for a baseline run (no faults, self-comparison).
+///
+/// Avoids creating a `BaselineRecord` just to compare against itself.
+/// All fault-related metrics are trivially known (FT=1.0, no cascade, etc.),
+/// only throughput/utilization/timing need computation from the engine.
+pub fn compute_baseline_self_metrics(
+    analysis: &AnalysisEngine,
+    solver_step_times_us: &[f64],
+    wall_time_ms: u64,
+) -> RunMetrics {
+    let tick_count = analysis.tick_count();
+
+    let avg_throughput = if tick_count > 0 {
+        analysis.throughput_series.iter().sum::<f64>() / tick_count as f64
+    } else {
+        0.0
+    };
+    let total_tasks = analysis.tasks_completed_series.last().copied().unwrap_or(0);
+    let wait_ratio = analysis.wait_ratio_series.last().copied().unwrap_or(0.0) as f64;
+
+    let unassigned_ratio = if tick_count > 0 {
+        let total_idle: usize = analysis.idle_count_series.iter().sum();
+        let total_agents: usize =
+            analysis.alive_series.iter().zip(analysis.dead_series.iter()).map(|(a, d)| a + d).sum();
+        if total_agents > 0 { total_idle as f64 / total_agents as f64 } else { 0.0 }
+    } else {
+        0.0
+    };
+
+    let solver_step_time_avg_us = if solver_step_times_us.is_empty() {
+        0.0
+    } else {
+        solver_step_times_us.iter().sum::<f64>() / solver_step_times_us.len() as f64
+    };
+    let solver_step_time_max_us = solver_step_times_us.iter().copied().fold(0.0_f64, f64::max);
+
+    RunMetrics {
+        avg_throughput,
+        total_tasks,
+        unassigned_ratio,
+        wait_ratio,
+        fault_tolerance: 1.0,
+        critical_time: f64::NAN,
+        deficit_recovery: 0.0,
+        throughput_recovery: 0.0,
+        mtbf: None,
+        recovery_tick: None,
+        cascade_spread_avg: 0.0,
+        cascade_depth_avg: 0.0,
+        fleet_utilization: 1.0,
+        survival_rate: 1.0,
+        impacted_area: 0.0,
+        deficit_integral: 0,
+        solver_step_time_avg_us,
+        solver_step_time_max_us,
+        wall_time_ms,
+    }
+}
+
 use crate::constants::CRITICAL_TIME_THRESHOLD as CRITICAL_THRESHOLD;
 
 /// Compute differential metrics from a paired baseline + faulted run.

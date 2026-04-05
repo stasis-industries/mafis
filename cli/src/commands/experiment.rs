@@ -17,33 +17,45 @@ struct ExperimentInfo {
 const EXPERIMENTS: &[ExperimentInfo] = &[
     ExperimentInfo {
         name: "solver_resilience",
-        runs: 75,
-        description: "3 solvers \u{00d7} 5 scenarios \u{00d7} 5 seeds",
+        runs: 1260,
+        description: "6 solvers \u{00d7} 7 scenarios \u{00d7} 30 seeds",
         test_fn: "solver_resilience",
     },
     ExperimentInfo {
         name: "scale_sensitivity",
-        runs: 100,
-        description: "4 agent counts \u{00d7} 5 scenarios \u{00d7} 5 seeds",
+        runs: 840,
+        description: "4 agent counts \u{00d7} 7 scenarios \u{00d7} 30 seeds",
         test_fn: "scale_sensitivity",
     },
     ExperimentInfo {
         name: "scheduler_effect",
-        runs: 50,
-        description: "2 schedulers \u{00d7} 5 scenarios \u{00d7} 5 seeds",
+        runs: 420,
+        description: "2 schedulers \u{00d7} 7 scenarios \u{00d7} 30 seeds",
         test_fn: "scheduler_effect",
     },
     ExperimentInfo {
         name: "topology_medium",
-        runs: 25,
-        description: "warehouse_large, 40 agents, 5 scenarios \u{00d7} 5 seeds",
+        runs: 210,
+        description: "warehouse_large, 40 agents, 7 scenarios \u{00d7} 30 seeds",
         test_fn: "topology_medium",
     },
     ExperimentInfo {
         name: "topology_large",
-        runs: 25,
-        description: "warehouse_large, 100 agents, 5 scenarios \u{00d7} 5 seeds",
+        runs: 210,
+        description: "kiva_warehouse, 80 agents, 7 scenarios \u{00d7} 30 seeds",
         test_fn: "topology_large",
+    },
+    ExperimentInfo {
+        name: "braess_resilience",
+        runs: 9800,
+        description: "7 solvers \u{00d7} 4 densities \u{00d7} 7 scenarios \u{00d7} 50 seeds",
+        test_fn: "braess_resilience",
+    },
+    ExperimentInfo {
+        name: "paams_full",
+        runs: 16170,
+        description: "PAAMS 2026: 7 solvers \u{00d7} 3 topologies \u{00d7} 7 scenarios \u{00d7} 30 seeds",
+        test_fn: "paams_full",
     },
 ];
 
