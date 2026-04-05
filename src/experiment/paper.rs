@@ -101,24 +101,10 @@ fn intermittent() -> FaultScenario {
     }
 }
 
-fn perm_zone_outage() -> FaultScenario {
-    // PermanentZoneOutage: entire busiest zone converted to obstacles at tick 100.
-    // Category 3 (permanent-localized) — models zone flooding, structural collapse,
-    // or fire suppression sealing off a warehouse section permanently.
-    FaultScenario {
-        enabled: true,
-        scenario_type: FaultScenarioType::PermanentZoneOutage,
-        perm_zone_at_tick: 100,
-        perm_zone_block_percent: 100.0,
-        ..Default::default()
-    }
-}
-
-/// All fault scenarios used in the paper (7 total: 3 categories).
+/// All fault scenarios used in the paper (6 total: 2 categories).
 ///
-/// Category 1 — Recoverable: ZoneOutage, IntermittentFault
+/// Category 1 — Recoverable: ZoneOutage (spatial strip, 50t), IntermittentFault
 /// Category 2 — Permanent-distributed: BurstFailure (20%/50%), WearBased (medium/high)
-/// Category 3 — Permanent-localized: PermanentZoneOutage
 fn paper_scenarios() -> Vec<Option<FaultScenario>> {
     vec![
         Some(burst_20()),
@@ -127,7 +113,6 @@ fn paper_scenarios() -> Vec<Option<FaultScenario>> {
         Some(wear_high()),
         Some(zone_outage()),
         Some(intermittent()),
-        Some(perm_zone_outage()),
     ]
 }
 
@@ -142,7 +127,7 @@ fn paper_scenarios() -> Vec<Option<FaultScenario>> {
 ///
 /// Produces Table 1: Solver × Scenario matrix with FT, NRR, Critical Time.
 ///
-/// 8 solvers x 6 scenarios x 30 seeds = 1440 runs
+/// 6 solvers x 6 scenarios x 30 seeds = 1,080 runs
 pub fn solver_resilience() -> ExperimentMatrix {
     ExperimentMatrix {
         solvers: vec![
@@ -174,7 +159,7 @@ pub fn solver_resilience() -> ExperimentMatrix {
 /// Agent counts scaled to topology capacity.
 /// Tests whether layout structure (aisles vs open vs dense) affects fault impact.
 ///
-/// 5 topologies x 7 scenarios x 30 seeds = 1050 runs
+/// 5 topologies x 6 scenarios x 30 seeds = 900 runs
 ///
 /// Note: agent counts are per-topology, not Cartesian. This function returns
 /// 5 separate matrices (one per topology) to be run and merged.
@@ -294,7 +279,7 @@ pub fn scheduler_effect() -> ExperimentMatrix {
 /// can paradoxically improve throughput for reactive solvers by reducing
 /// corridor competition, while coordinated solvers suffer.
 ///
-/// 8 solvers x 4 densities x 6 scenarios x 50 seeds = 9,600 runs
+/// 7 solvers x 4 densities x 6 scenarios x 50 seeds = 8,400 runs
 pub fn braess_resilience() -> ExperimentMatrix {
     ExperimentMatrix {
         solvers: vec![
@@ -317,7 +302,7 @@ pub fn braess_resilience() -> ExperimentMatrix {
 
 /// All experiment matrices for the paper.
 ///
-/// Total: 720 + 900 + 720 + 360 = 2700 runs
+/// Total: 1080 + 900 + 720 + 360 = 3060 runs
 /// At ~0.5s per run (500 ticks x 2 sims), ~20 minutes total.
 ///
 /// Some configs overlap (e.g. pibt/medium/40/random appears in multiple
@@ -365,9 +350,9 @@ fn paams_solvers() -> Vec<String> {
 /// Design: per-topology matrices (agent counts vary per map capacity).
 /// Three density levels per topology: low / default / high.
 ///
-/// E1: 7 solvers × 7 scenarios × 3 agent counts × 3 topologies × 30 seeds = 13,230 runs
-/// E2: 7 solvers × 7 scenarios × 2 schedulers × 1 topology × 30 seeds = 2,940 runs
-/// Total: ~16,170 runs (~3-5 hours on 8 cores)
+/// E1: 7 solvers × 6 scenarios × 3 agent counts × 3 topologies × 30 seeds = 11,340 runs
+/// E2: 7 solvers × 6 scenarios × 2 schedulers × 1 topology × 30 seeds = 2,520 runs
+/// Total: 13,860 runs
 pub fn paams_experiments() -> Vec<(&'static str, ExperimentMatrix)> {
     let solvers = paams_solvers();
     let scenarios = paper_scenarios();
@@ -479,102 +464,48 @@ mod tests {
     #[test]
     fn solver_resilience_count() {
         let m = solver_resilience();
-        assert_eq!(m.total_runs(), 1260); // 6 x 7 x 30
+        assert_eq!(m.total_runs(), 1080); // 6 x 6 x 30
     }
 
     #[test]
     fn topology_effect_count() {
         let matrices = topology_effect();
         let total: usize = matrices.iter().map(|m| m.total_runs()).sum();
-        assert_eq!(total, 1050); // 5 x (7 x 30)
+        assert_eq!(total, 900); // 5 x (6 x 30)
     }
 
     #[test]
     fn scale_sensitivity_count() {
         let m = scale_sensitivity();
-        assert_eq!(m.total_runs(), 840); // 4 x 7 x 30
+        assert_eq!(m.total_runs(), 720); // 4 x 6 x 30
     }
 
     #[test]
     fn scheduler_effect_count() {
         let m = scheduler_effect();
-        assert_eq!(m.total_runs(), 420); // 2 x 7 x 30
+        assert_eq!(m.total_runs(), 360); // 2 x 6 x 30
     }
 
     #[test]
     fn all_paper_total() {
         let all = all_paper_experiments();
         let total: usize = all.iter().map(|(_, m)| m.total_runs()).sum();
-        assert_eq!(total, 3570); // 1260+1050+840+420
+        assert_eq!(total, 3060); // 1080+900+720+360
     }
 
     #[test]
     fn paams_experiment_counts() {
         let experiments = paams_experiments();
         let total: usize = experiments.iter().map(|(_, m)| m.total_runs()).sum();
-        // E1: 7 solvers × 7 scenarios × 3 counts × 30 seeds × 3 topos = 13,230
-        // E2: 7 solvers × 7 scenarios × 2 schedulers × 30 seeds = 2,940
-        assert_eq!(total, 16170);
+        // E1: 7 solvers × 6 scenarios × 3 counts × 30 seeds × 3 topos = 11,340
+        // E2: 7 solvers × 6 scenarios × 2 schedulers × 30 seeds = 2,520
+        assert_eq!(total, 13860);
     }
 
     #[test]
     fn braess_resilience_count() {
         let m = braess_resilience();
-        assert_eq!(m.total_runs(), 9800); // 7 x 4 x 7 x 50
-    }
-
-    /// Run the Category 3 (permanent zone outage) slice of the Braess experiment.
-    ///
-    /// Produces: results/braess_perm_zone_runs.csv + results/braess_perm_zone_summary.csv
-    /// Merge with braess_resilience_runs.csv for full 7-scenario analysis.
-    ///
-    /// Usage: cargo test run_braess_perm_zone -- --ignored --nocapture
-    #[test]
-    #[ignore]
-    fn run_braess_perm_zone() {
-        use crate::experiment::export::{write_runs_csv, write_summary_csv};
-        use crate::experiment::runner::run_matrix;
-        use std::fs;
-
-        let matrix = ExperimentMatrix {
-            solvers: vec![
-                "pibt".into(),
-                "rhcr_pibt".into(),
-                "rhcr_pbs".into(),
-                "rhcr_priority_astar".into(),
-                "token_passing".into(),
-            ],
-            topologies: vec!["warehouse_large".into()],
-            scenarios: vec![Some(perm_zone_outage())],
-            schedulers: vec!["random".into()],
-            agent_counts: vec![10, 20, 40, 80],
-            seeds: SEEDS_50.to_vec(),
-            tick_count: TICK_COUNT,
-        };
-
-        use crate::experiment::runner::ExperimentProgress;
-        use std::sync::{Arc, Mutex};
-
-        let total = matrix.total_runs();
-        eprintln!("Running {} runs...", total);
-        let progress =
-            Arc::new(Mutex::new(ExperimentProgress { current: 0, total, label: String::new() }));
-        let result = run_matrix(&matrix, Some(&progress));
-        eprintln!("Done in {}ms", result.wall_time_total_ms);
-
-        fs::create_dir_all("results").unwrap();
-
-        let mut f = fs::File::create("results/braess_perm_zone_runs.csv").unwrap();
-        write_runs_csv(&mut f, &result.runs).unwrap();
-
-        let mut f = fs::File::create("results/braess_perm_zone_summary.csv").unwrap();
-        write_summary_csv(&mut f, &result.summaries).unwrap();
-
-        eprintln!(
-            "Saved: braess_perm_zone_runs.csv ({} rows), braess_perm_zone_summary.csv ({} rows)",
-            result.runs.len() * 2,
-            result.summaries.len()
-        );
+        assert_eq!(m.total_runs(), 8400); // 7 x 4 x 6 x 50
     }
 
     /// Cross-topology validation: does the Braess effect replicate on other layouts?

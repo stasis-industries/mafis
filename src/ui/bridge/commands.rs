@@ -890,7 +890,6 @@ fn parse_fault_list_json(json: &str) -> Option<crate::fault::scenario::FaultList
             "wear_based" => FaultScenarioType::WearBased,
             "zone_outage" => FaultScenarioType::ZoneOutage,
             "intermittent_fault" => FaultScenarioType::IntermittentFault,
-            "permanent_zone_outage" => FaultScenarioType::PermanentZoneOutage,
             _ => continue,
         };
 
@@ -922,11 +921,6 @@ fn parse_fault_list_json(json: &str) -> Option<crate::fault::scenario::FaultList
                 item.intermittent_mtbf_ticks = v.get("mtbf").and_then(|v| v.as_u64()).unwrap_or(80);
                 item.intermittent_recovery_ticks =
                     v.get("recovery").and_then(|v| v.as_u64()).unwrap_or(15) as u32;
-            }
-            FaultScenarioType::PermanentZoneOutage => {
-                item.perm_zone_at_tick = v.get("at_tick").and_then(|v| v.as_u64()).unwrap_or(100);
-                item.perm_zone_block_percent =
-                    v.get("block_percent").and_then(|v| v.as_f64()).unwrap_or(100.0) as f32;
             }
         }
 

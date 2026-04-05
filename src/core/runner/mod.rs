@@ -24,7 +24,7 @@ use super::grid::GridMap;
 use super::queue::{DeliveryQueuePolicy, QueueManager};
 use super::seed::SeededRng;
 use super::task::{TaskAgentSnapshot, TaskLeg, TaskScheduler, recycle_goals_core};
-use super::topology::{ZoneMap, ZoneType};
+use super::topology::ZoneMap;
 use crate::constants::THROUGHPUT_WINDOW_SIZE;
 use crate::fault::config::{FaultConfig, FaultSource, FaultType};
 use crate::fault::scenario::{FaultSchedule, ScheduledAction};
@@ -106,6 +106,9 @@ pub struct SimulationRunner {
     /// Number of post-hoc collision violations detected (release mode only).
     /// Always 0 if solver and collision resolution are correct.
     pub collision_violations: u64,
+    /// Active spatial zone strip bounds (x_min, x_max) during a zone outage.
+    /// Set when ZoneLatency fires, cleared when all latency expires.
+    pub zone_strip: Option<(i32, i32)>,
 }
 
 impl SimulationRunner {
@@ -162,6 +165,7 @@ impl SimulationRunner {
             available_agents_buf: Vec::new(),
             faults_buf: Vec::new(),
             collision_violations: 0,
+            zone_strip: None,
         }
     }
 
@@ -309,6 +313,7 @@ impl SimulationRunner {
         self.scheduled_actions_buf.clear();
         self.available_agents_buf.clear();
         self.faults_buf.clear();
+        self.zone_strip = None;
         // Re-sample Weibull failure ticks with reset fault_rng
         if self.fault_config.weibull_enabled {
             self.fault_rng = SeededRng::new(self.rng.seed() ^ FAULT_RNG_SALT);
@@ -489,211 +494,32 @@ impl SimulationRunner {
                     }
                 }
                 ScheduledAction::ZoneLatency { duration } => {
-                    // Find the zone type with the most alive agents currently in it.
-                    // Deterministic tie-break: Pickup > Delivery > Corridor (order below).
-                    let zone_types = [
-                        ZoneType::Pickup,
-                        ZoneType::Delivery,
-                        ZoneType::Corridor,
-                        ZoneType::CrossAisle,
-                        ZoneType::Open,
-                        ZoneType::Recharging,
-                    ];
-                    let mut best_zone = None;
-                    let mut best_count = 0usize;
-                    for &zt in &zone_types {
-                        let count = (0..n)
-                            .filter(|&i| {
-                                self.agents[i].alive
-                                    && self.zones.zone_type.get(&self.agents[i].pos) == Some(&zt)
-                            })
-                            .count();
-                        if count > best_count {
-                            best_count = count;
-                            best_zone = Some(zt);
-                        }
-                    }
+                    // Spatial zone outage: divide the map into 4 equal vertical strips and select
+                    // one strip using fault_rng (solver-independent, deterministic per seed).
+                    // Models: network dead zone or power failure in a specific warehouse aisle section.
+                    let grid_width = self.grid.width;
+                    let strip_width = (grid_width / 4).max(1);
+                    let strip_idx = self.fault_rng.rng.random_range(0i32..4);
+                    let x_min = strip_idx * strip_width;
+                    let x_max = if strip_idx == 3 { grid_width } else { x_min + strip_width };
 
-                    if let Some(target_zone) = best_zone {
-                        for i in 0..n {
-                            if !self.agents[i].alive {
-                                continue;
-                            }
-                            if self.zones.zone_type.get(&self.agents[i].pos) == Some(&target_zone) {
-                                self.agents[i].latency_remaining = duration;
-                                fault_events.push(FaultRecord {
-                                    agent_index: i,
-                                    fault_type: FaultType::Latency,
-                                    source: FaultSource::Scheduled,
-                                    tick,
-                                    position: self.agents[i].pos,
-                                    paths_invalidated: 0,
-                                });
-                            }
-                        }
-                    }
-                }
-                ScheduledAction::ZoneBlock { block_percent } => {
-                    // Find the zone type with the most alive agents (same as ZoneLatency).
-                    let zone_types = [
-                        ZoneType::Pickup,
-                        ZoneType::Delivery,
-                        ZoneType::Corridor,
-                        ZoneType::CrossAisle,
-                        ZoneType::Open,
-                        ZoneType::Recharging,
-                    ];
-                    let mut best_zone = None;
-                    let mut best_count = 0usize;
-                    for &zt in &zone_types {
-                        let count = (0..n)
-                            .filter(|&i| {
-                                self.agents[i].alive
-                                    && self.zones.zone_type.get(&self.agents[i].pos) == Some(&zt)
-                            })
-                            .count();
-                        if count > best_count {
-                            best_count = count;
-                            best_zone = Some(zt);
-                        }
-                    }
+                    self.zone_strip = Some((x_min, x_max));
 
-                    if let Some(target_zone) = best_zone {
-                        // Collect all walkable cells in the target zone.
-                        let mut zone_cells: Vec<IVec2> = self
-                            .zones
-                            .zone_type
-                            .iter()
-                            .filter(|(pos, zt)| **zt == target_zone && self.grid.is_walkable(**pos))
-                            .map(|(pos, _)| *pos)
-                            .collect();
-                        // Sort for deterministic selection when block_percent < 100%
-                        zone_cells.sort_by(|a, b| a.y.cmp(&b.y).then(a.x.cmp(&b.x)));
-
-                        // Spatial quadrant fallback: on non-warehouse maps every cell has
-                        // ZoneType::Open, so "the busiest zone" is the entire map.  Instead,
-                        // divide the walkable area into four quadrants and target only the one
-                        // with the most alive agents (~25 % of cells rather than 100 %).
-                        if target_zone == ZoneType::Open && !zone_cells.is_empty() {
-                            let min_x = zone_cells.iter().map(|c| c.x).min().unwrap_or(0);
-                            let max_x = zone_cells.iter().map(|c| c.x).max().unwrap_or(0);
-                            let min_y = zone_cells.iter().map(|c| c.y).min().unwrap_or(0);
-                            let max_y = zone_cells.iter().map(|c| c.y).max().unwrap_or(0);
-                            let mid_x = (min_x + max_x) / 2;
-                            let mid_y = (min_y + max_y) / 2;
-                            // Quadrant index: bit-0 = east half, bit-1 = south half.
-                            let mut quad_counts = [0usize; 4];
-                            for i in 0..n {
-                                if !self.agents[i].alive {
-                                    continue;
-                                }
-                                let p = self.agents[i].pos;
-                                let qi = (if p.x >= mid_x { 1 } else { 0 })
-                                    + (if p.y >= mid_y { 2 } else { 0 });
-                                quad_counts[qi] += 1;
-                            }
-                            let best_quad = quad_counts
-                                .iter()
-                                .enumerate()
-                                .max_by_key(|(_, c)| *c)
-                                .map(|(i, _)| i)
-                                .unwrap_or(0);
-                            zone_cells.retain(|c| {
-                                let in_x =
-                                    if best_quad & 1 == 1 { c.x >= mid_x } else { c.x < mid_x };
-                                let in_y =
-                                    if best_quad & 2 == 2 { c.y >= mid_y } else { c.y < mid_y };
-                                in_x && in_y
+                    for i in 0..n {
+                        if !self.agents[i].alive {
+                            continue;
+                        }
+                        let x = self.agents[i].pos.x;
+                        if x >= x_min && x < x_max {
+                            self.agents[i].latency_remaining = duration;
+                            fault_events.push(FaultRecord {
+                                agent_index: i,
+                                fault_type: FaultType::Latency,
+                                source: FaultSource::Scheduled,
+                                tick,
+                                position: self.agents[i].pos,
+                                paths_invalidated: 0,
                             });
-                        }
-
-                        // Determine how many cells to block.
-                        let block_count = if block_percent >= 100.0 {
-                            zone_cells.len()
-                        } else {
-                            ((zone_cells.len() as f32 * block_percent / 100.0).round() as usize)
-                                .max(1)
-                                .min(zone_cells.len())
-                        };
-
-                        // Partial block: Fisher-Yates shuffle for deterministic subset.
-                        if block_count < zone_cells.len() {
-                            for i in 0..block_count {
-                                let j = self.rng.rng.random_range(i..zone_cells.len());
-                                zone_cells.swap(i, j);
-                            }
-                            zone_cells.truncate(block_count);
-                        }
-
-                        // Convert cells to a HashSet for O(1) agent-position lookups.
-                        let blocked_set: HashSet<IVec2> = zone_cells.iter().copied().collect();
-
-                        // Block cells in grid and remove from zone vectors.
-                        for cell in &zone_cells {
-                            self.grid.set_obstacle(*cell);
-                            self.zones.zone_type.remove(cell);
-                        }
-                        self.zones.pickup_cells.retain(|c| !blocked_set.contains(c));
-                        self.zones.delivery_cells.retain(|c| !blocked_set.contains(c));
-                        self.zones.corridor_cells.retain(|c| !blocked_set.contains(c));
-                        self.zones.recharging_cells.retain(|c| !blocked_set.contains(c));
-                        self.zones.queue_lines.retain(|ql| {
-                            !blocked_set.contains(&ql.delivery_cell)
-                                && !ql.cells.iter().any(|c| blocked_set.contains(c))
-                        });
-
-                        // Kill agents standing on blocked cells.
-                        for i in 0..n {
-                            if !self.agents[i].alive {
-                                continue;
-                            }
-                            if blocked_set.contains(&self.agents[i].pos) {
-                                let invalidated =
-                                    count_paths_through_cell(&self.agents, self.agents[i].pos, i);
-                                self.agents[i].alive = false;
-                                self.agents[i].planned_path.clear();
-                                fault_events.push(FaultRecord {
-                                    agent_index: i,
-                                    fault_type: FaultType::Breakdown,
-                                    source: FaultSource::Scheduled,
-                                    tick,
-                                    position: self.agents[i].pos,
-                                    paths_invalidated: invalidated,
-                                });
-                            }
-                        }
-
-                        // Rebuild queue manager — queue_lines changed.
-                        self.queue_manager.reset(&self.zones.queue_lines);
-
-                        // Reset goals for agents whose targets are now blocked.
-                        for i in 0..n {
-                            if !self.agents[i].alive {
-                                continue;
-                            }
-                            if !self.grid.is_walkable(self.agents[i].goal) {
-                                self.agents[i].goal = self.agents[i].pos;
-                                self.agents[i].task_leg = TaskLeg::Free;
-                                self.agents[i].planned_path.clear();
-                            }
-                        }
-
-                        // Also reset agents whose queue targets were removed.
-                        for i in 0..n {
-                            if !self.agents[i].alive {
-                                continue;
-                            }
-                            match &self.agents[i].task_leg {
-                                TaskLeg::TravelToQueue { line_index, .. }
-                                | TaskLeg::Queuing { line_index, .. }
-                                    if *line_index >= self.zones.queue_lines.len() =>
-                                {
-                                    self.agents[i].goal = self.agents[i].pos;
-                                    self.agents[i].task_leg = TaskLeg::Free;
-                                    self.agents[i].planned_path.clear();
-                                }
-                                _ => {}
-                            }
                         }
                     }
                 }
@@ -702,12 +528,19 @@ impl SimulationRunner {
     }
 
     /// Apply latency faults: force Wait by clearing planned path, decrement counter.
+    /// Clears zone_strip when all latency expires.
     fn apply_latency_faults(&mut self) {
         for agent in &mut self.agents {
             if agent.latency_remaining > 0 && agent.alive {
                 agent.planned_path.clear();
                 agent.latency_remaining = agent.latency_remaining.saturating_sub(1);
             }
+        }
+        // Clear zone strip overlay when no latency remains
+        if self.zone_strip.is_some()
+            && !self.agents.iter().any(|a| a.alive && a.latency_remaining > 0)
+        {
+            self.zone_strip = None;
         }
     }
 
@@ -1780,7 +1613,7 @@ mod tests {
 
     // ── ZoneOutage test ─────────────────────────────────────────────
 
-    /// Verify that ZoneOutage applies latency to agents in the busiest zone
+    /// Verify that ZoneOutage applies latency to agents in the selected spatial strip
     /// at the scheduled tick, and agents recover after the duration.
     #[test]
     fn zone_outage_applies_latency_and_recovers() {

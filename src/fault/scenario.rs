@@ -1,4 +1,4 @@
-//! Fault Scenarios — 3 named presets with per-scenario parameters.
+//! Fault Scenarios — 4 named presets with per-scenario parameters.
 //!
 //! Researchers pick a scenario and configure its specific parameters.
 //! The system translates these into `FaultConfig` settings and a `FaultSchedule`
@@ -11,7 +11,7 @@ use std::str::FromStr;
 use super::config::FaultConfig;
 
 // ---------------------------------------------------------------------------
-// Scenario types (3 only)
+// Scenario types (4 total)
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
@@ -21,12 +21,10 @@ pub enum FaultScenarioType {
     BurstFailure,
     /// Busiest robots fail permanently via Weibull wear model (continuous).
     WearBased,
-    /// Latency on all robots in highest-traffic zone for N ticks.
+    /// Latency on all robots in a randomly-selected spatial strip for N ticks.
     ZoneOutage,
     /// Each robot independently fails temporarily via exponential inter-arrival times.
     IntermittentFault,
-    /// Permanently block all walkable cells in the busiest zone at tick T.
-    PermanentZoneOutage,
 }
 
 impl FaultScenarioType {
@@ -36,7 +34,6 @@ impl FaultScenarioType {
             Self::WearBased => "Wear-Based",
             Self::ZoneOutage => "Zone Outage",
             Self::IntermittentFault => "Intermittent Fault",
-            Self::PermanentZoneOutage => "Permanent Zone Outage",
         }
     }
 
@@ -46,7 +43,6 @@ impl FaultScenarioType {
             Self::WearBased => "wear_based",
             Self::ZoneOutage => "zone_outage",
             Self::IntermittentFault => "intermittent_fault",
-            Self::PermanentZoneOutage => "permanent_zone_outage",
         }
     }
 }
@@ -60,7 +56,6 @@ impl FromStr for FaultScenarioType {
             "wear_based" => Self::WearBased,
             "zone_outage" => Self::ZoneOutage,
             "intermittent_fault" => Self::IntermittentFault,
-            "permanent_zone_outage" => Self::PermanentZoneOutage,
             _ => Self::BurstFailure,
         })
     }
@@ -157,12 +152,6 @@ pub struct FaultScenario {
     /// Ticks an agent is unavailable per fault event (latency injection).
     pub intermittent_recovery_ticks: u32,
 
-    // -- Permanent Zone Outage params --
-    /// Tick at which the busiest zone becomes permanently blocked.
-    pub perm_zone_at_tick: u64,
-    /// Percentage of zone cells to block (1-100, default 100).
-    pub perm_zone_block_percent: f32,
-
     // -- Custom Weibull override --
     /// When set, overrides `wear_heat_rate` preset with custom (beta, eta).
     #[serde(skip)]
@@ -182,8 +171,6 @@ impl Default for FaultScenario {
             zone_latency_duration: 50,
             intermittent_mtbf_ticks: 80,
             intermittent_recovery_ticks: 15,
-            perm_zone_at_tick: 100,
-            perm_zone_block_percent: 30.0,
             custom_weibull: None,
         }
     }
@@ -224,7 +211,7 @@ impl FaultScenario {
                 intermittent_recovery_ticks: self.intermittent_recovery_ticks,
                 ..Default::default()
             },
-            // Burst + Zone + PermanentZone use scheduled events -- automatic fault model disabled
+            // Burst + Zone use scheduled events -- automatic fault model disabled
             _ => FaultConfig { enabled: false, ..Default::default() },
         }
     }
@@ -264,16 +251,6 @@ impl FaultScenario {
                     fired: false,
                 });
             }
-            FaultScenarioType::PermanentZoneOutage => {
-                let at_tick = self.perm_zone_at_tick.min(total_ticks);
-                events.push(ScheduledEvent {
-                    tick: at_tick,
-                    action: ScheduledAction::ZoneBlock {
-                        block_percent: self.perm_zone_block_percent,
-                    },
-                    fired: false,
-                });
-            }
         }
 
         FaultSchedule { events, initialized: true }
@@ -300,9 +277,6 @@ pub struct FaultItem {
     // Intermittent
     pub intermittent_mtbf_ticks: u64,
     pub intermittent_recovery_ticks: u32,
-    // Permanent Zone Outage
-    pub perm_zone_at_tick: u64,
-    pub perm_zone_block_percent: f32,
 }
 
 impl Default for FaultItem {
@@ -317,8 +291,6 @@ impl Default for FaultItem {
             zone_latency_duration: 50,
             intermittent_mtbf_ticks: 80,
             intermittent_recovery_ticks: 15,
-            perm_zone_at_tick: 100,
-            perm_zone_block_percent: 30.0,
         }
     }
 }
@@ -410,18 +382,6 @@ impl FaultList {
             });
         }
 
-        // --- Scheduled events: permanent zone outage (max one, first wins) ---
-        if let Some(pz) =
-            self.items.iter().find(|i| i.fault_type == FaultScenarioType::PermanentZoneOutage)
-        {
-            let tick = pz.perm_zone_at_tick.min(total_ticks);
-            events.push(ScheduledEvent {
-                tick,
-                action: ScheduledAction::ZoneBlock { block_percent: pz.perm_zone_block_percent },
-                fired: false,
-            });
-        }
-
         // Sort by tick for deterministic execution
         events.sort_by_key(|e| e.tick);
 
@@ -452,10 +412,9 @@ pub struct ScheduledEvent {
 pub enum ScheduledAction {
     /// Kill N random alive agents.
     KillRandomAgents(usize),
-    /// Inject latency on all agents in highest-traffic zone for N ticks.
+    /// Inject latency on all agents in a randomly-selected vertical strip for N ticks
+    /// (spatial, solver-independent).
     ZoneLatency { duration: u32 },
-    /// Permanently block walkable cells in the busiest zone.
-    ZoneBlock { block_percent: f32 },
 }
 
 #[derive(Resource, Debug, Clone, Default)]
@@ -657,13 +616,7 @@ mod tests {
 
     #[test]
     fn scenario_type_roundtrip() {
-        for id in [
-            "burst_failure",
-            "wear_based",
-            "zone_outage",
-            "intermittent_fault",
-            "permanent_zone_outage",
-        ] {
+        for id in ["burst_failure", "wear_based", "zone_outage", "intermittent_fault"] {
             let t: FaultScenarioType = id.parse().unwrap();
             assert_eq!(t.id(), id, "roundtrip failed for {id}");
         }
@@ -830,70 +783,7 @@ mod tests {
     }
 
     #[test]
-    fn permanent_zone_outage_schedule() {
-        let s = FaultScenario {
-            enabled: true,
-            scenario_type: FaultScenarioType::PermanentZoneOutage,
-            perm_zone_at_tick: 150,
-            perm_zone_block_percent: 100.0,
-            ..Default::default()
-        };
-        let sched = s.generate_schedule(500, 30);
-        assert_eq!(sched.events.len(), 1);
-        assert_eq!(sched.events[0].tick, 150);
-        match &sched.events[0].action {
-            ScheduledAction::ZoneBlock { block_percent } => assert_eq!(*block_percent, 100.0),
-            _ => panic!("expected ZoneBlock"),
-        }
-    }
-
-    #[test]
-    fn permanent_zone_outage_partial_block() {
-        let s = FaultScenario {
-            enabled: true,
-            scenario_type: FaultScenarioType::PermanentZoneOutage,
-            perm_zone_at_tick: 200,
-            perm_zone_block_percent: 50.0,
-            ..Default::default()
-        };
-        let sched = s.generate_schedule(500, 20);
-        match &sched.events[0].action {
-            ScheduledAction::ZoneBlock { block_percent } => assert_eq!(*block_percent, 50.0),
-            _ => panic!("expected ZoneBlock"),
-        }
-    }
-
-    #[test]
-    fn fault_list_permanent_zone_max_one() {
-        let list = FaultList {
-            items: vec![
-                FaultItem {
-                    fault_type: FaultScenarioType::PermanentZoneOutage,
-                    perm_zone_at_tick: 100,
-                    perm_zone_block_percent: 50.0,
-                    ..Default::default()
-                },
-                FaultItem {
-                    fault_type: FaultScenarioType::PermanentZoneOutage,
-                    perm_zone_at_tick: 200,
-                    perm_zone_block_percent: 80.0,
-                    ..Default::default()
-                },
-            ],
-        };
-        let (_, sched) = list.compile(500, 20);
-        // Only one ZoneBlock event (first wins)
-        let zone_blocks: Vec<_> = sched
-            .events
-            .iter()
-            .filter(|e| matches!(e.action, ScheduledAction::ZoneBlock { .. }))
-            .collect();
-        assert_eq!(zone_blocks.len(), 1);
-        assert_eq!(zone_blocks[0].tick, 100);
-    }
-
-    #[test]
-    fn fault_list_combined_all_five() {
+    fn fault_list_combined_all_four() {
         let list = FaultList {
             items: vec![
                 FaultItem {
@@ -919,19 +809,13 @@ mod tests {
                     intermittent_recovery_ticks: 10,
                     ..Default::default()
                 },
-                FaultItem {
-                    fault_type: FaultScenarioType::PermanentZoneOutage,
-                    perm_zone_at_tick: 300,
-                    perm_zone_block_percent: 75.0,
-                    ..Default::default()
-                },
             ],
         };
         let (config, sched) = list.compile(500, 30);
         assert!(config.enabled);
         assert!(config.weibull_enabled);
         assert!(config.intermittent_enabled);
-        assert_eq!(sched.events.len(), 3); // burst + zone_latency + zone_block
+        assert_eq!(sched.events.len(), 2); // burst + zone_latency
     }
 
     #[test]

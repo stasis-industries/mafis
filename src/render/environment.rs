@@ -320,10 +320,58 @@ pub fn spawn_obstacles(
     }
 }
 
+// ---------------------------------------------------------------------------
+// Zone strip overlay — shows the affected area during a spatial zone outage
+// ---------------------------------------------------------------------------
+
+#[derive(Component)]
+struct ZoneOverlayMarker;
+
+/// Spawns/despawns a semi-transparent overlay plane showing the active zone
+/// strip during a ZoneOutage fault. Reads the strip bounds from `LiveSim`.
+fn update_zone_overlay(
+    mut commands: Commands,
+    sim: Option<Res<crate::core::live_sim::LiveSim>>,
+    grid: Res<GridMap>,
+    overlay_q: Query<Entity, With<ZoneOverlayMarker>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    let zone_strip = sim.as_ref().and_then(|s| s.runner.zone_strip);
+
+    match zone_strip {
+        Some((x_min, x_max)) if overlay_q.is_empty() => {
+            let strip_w = (x_max - x_min) as f32 * CELL_SIZE;
+            let grid_h = grid.height as f32 * CELL_SIZE;
+            let center_x = (x_min as f32 + x_max as f32) * 0.5 * CELL_SIZE - CELL_SIZE * 0.5;
+            let center_z = (grid.height as f32 - 1.0) * CELL_SIZE * 0.5;
+
+            commands.spawn((
+                Mesh3d(meshes.add(Cuboid::new(strip_w, 0.001, grid_h))),
+                MeshMaterial3d(materials.add(StandardMaterial {
+                    base_color: Color::srgba(0.6, 0.15, 0.85, 0.18),
+                    alpha_mode: AlphaMode::Blend,
+                    unlit: true,
+                    ..default()
+                })),
+                Transform::from_xyz(center_x, 0.025, center_z),
+                ZoneOverlayMarker,
+            ));
+        }
+        None => {
+            for entity in &overlay_q {
+                commands.entity(entity).despawn();
+            }
+        }
+        _ => {} // already spawned, still active — do nothing
+    }
+}
+
 pub struct EnvironmentPlugin;
 
 impl Plugin for EnvironmentPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, setup_environment);
+        app.add_systems(Update, update_zone_overlay);
     }
 }
