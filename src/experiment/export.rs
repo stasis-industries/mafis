@@ -196,9 +196,9 @@ pub fn write_matrix_json<W: Write>(writer: &mut W, result: &MatrixResult) -> std
         std::collections::HashMap::new();
     for run in &result.runs {
         let key = baseline_key_str(&run.config);
-        if !baseline_map.contains_key(&key) {
-            baseline_order.push(key.clone());
-            baseline_map.insert(key, &run.baseline_metrics);
+        if let std::collections::hash_map::Entry::Vacant(e) = baseline_map.entry(key.clone()) {
+            baseline_order.push(key);
+            e.insert(&run.baseline_metrics);
         }
     }
 
