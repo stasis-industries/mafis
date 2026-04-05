@@ -157,7 +157,25 @@ pub fn write_summary_csv<W: Write>(
     Ok(())
 }
 
+/// Build the deduplication key for a run's baseline.
+/// Configs sharing `(solver, topology, scheduler, num_agents, seed)` produce identical baselines.
+fn baseline_key_str(config: &super::config::ExperimentConfig) -> String {
+    format!(
+        "{}|{}|{}|{}|{}",
+        config.solver_name,
+        config.topology_name,
+        config.scheduler_name,
+        config.num_agents,
+        config.seed,
+    )
+}
+
 /// Serialize the full matrix result to JSON.
+///
+/// Baselines are hoisted into a top-level `baselines` map keyed by
+/// `"solver|topology|scheduler|num_agents|seed"`. Each run references its
+/// baseline via `baseline_key` instead of embedding a full copy, eliminating
+/// N-1 duplicates per scenario group (e.g. 6× savings for a 7-scenario matrix).
 pub fn write_matrix_json<W: Write>(writer: &mut W, result: &MatrixResult) -> std::io::Result<()> {
     // Manual JSON serialization to avoid serde dependency in this module.
     // Keeps it lightweight and self-contained.
@@ -171,7 +189,31 @@ pub fn write_matrix_json<W: Write>(writer: &mut W, result: &MatrixResult) -> std
         result.wall_time_total_ms
     )?;
 
-    // Runs array
+    // Collect unique baselines in order of first appearance.
+    // Uses HashMap for O(1) dedup; Vec preserves insertion order for deterministic output.
+    let mut baseline_order: Vec<String> = Vec::new();
+    let mut baseline_map: std::collections::HashMap<String, &super::metrics::RunMetrics> =
+        std::collections::HashMap::new();
+    for run in &result.runs {
+        let key = baseline_key_str(&run.config);
+        if !baseline_map.contains_key(&key) {
+            baseline_order.push(key.clone());
+            baseline_map.insert(key, &run.baseline_metrics);
+        }
+    }
+
+    // Write deduplicated baselines section
+    write!(writer, "\"baselines\":{{")?;
+    for (i, key) in baseline_order.iter().enumerate() {
+        if i > 0 {
+            write!(writer, ",")?;
+        }
+        write!(writer, "\"{}\":", key)?;
+        write_metrics_json(writer, baseline_map[key])?;
+    }
+    write!(writer, "}},")?;
+
+    // Runs array — reference baseline by key instead of embedding a full copy
     write!(writer, "\"runs\":[")?;
     for (i, run) in result.runs.iter().enumerate() {
         if i > 0 {
@@ -208,8 +250,7 @@ fn write_run_json<W: Write>(writer: &mut W, run: &RunResult) -> std::io::Result<
         run.config.seed,
         run.config.tick_count,
     )?;
-    write!(writer, "\"baseline\":")?;
-    write_metrics_json(writer, &run.baseline_metrics)?;
+    write!(writer, "\"baseline_key\":\"{}\"", baseline_key_str(&run.config))?;
     write!(writer, ",\"faulted\":")?;
     write_metrics_json(writer, &run.faulted_metrics)?;
     write!(writer, "}}")?;
@@ -763,6 +804,8 @@ mod tests {
         write_matrix_json(&mut buf, &result).unwrap();
         let json = String::from_utf8(buf).unwrap();
         assert!(json.starts_with("{"));
+        assert!(json.contains("\"baselines\":{"));
+        assert!(json.contains("\"baseline_key\":"));
         assert!(json.contains("\"runs\":["));
         assert!(json.contains("\"summaries\":[]"));
     }
