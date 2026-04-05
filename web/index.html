@@ -349,9 +349,8 @@
                                 <select class="input-select" id="input-fault-type" title="Choose fault type" aria-label="Fault type">
                                     <option value="burst_failure" selected>Burst Failure</option>
                                     <option value="wear_based">Wear-Based</option>
-                                    <option value="zone_outage">Zone Outage</option>
+                                    <option value="zone_outage">Spatial Zone Outage</option>
                                     <option value="intermittent_fault">Intermittent</option>
-                                    <option value="permanent_zone_outage">Perm. Zone Outage</option>
                                 </select>
                             </div>
 
@@ -418,24 +417,6 @@
                                     <div class="slider-row">
                                         <input type="range" id="fl-inter-rec" min="1" max="100" value="15" step="1">
                                         <span class="slider-value" id="fl-inter-rec-val">15</span>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <!-- Permanent zone outage params -->
-                            <div id="fl-params-perm-zone" class="fl-params" style="display:none">
-                                <div class="input-group" title="Tick at which zone becomes permanently blocked">
-                                    <label class="input-label">At tick</label>
-                                    <div class="slider-row">
-                                        <input type="range" id="fl-perm-zone-tick" min="1" max="500" value="100" step="1">
-                                        <span class="slider-value" id="fl-perm-zone-tick-val">100</span>
-                                    </div>
-                                </div>
-                                <div class="input-group" title="Percentage of zone cells to permanently block">
-                                    <label class="input-label">Block %</label>
-                                    <div class="slider-row">
-                                        <input type="range" id="fl-perm-zone-pct" min="1" max="100" value="30" step="1">
-                                        <span class="slider-value" id="fl-perm-zone-pct-val">30%</span>
                                     </div>
                                 </div>
                             </div>
@@ -1030,7 +1011,7 @@
                                     <label class="checkbox-label"><input type="checkbox" value="wear_low"><span>Wear Low</span></label>
                                     <label class="checkbox-label"><input type="checkbox" value="wear_medium" checked><span>Wear Medium</span></label>
                                     <label class="checkbox-label"><input type="checkbox" value="wear_high"><span>Wear High</span></label>
-                                    <label class="checkbox-label"><input type="checkbox" value="zone" checked><span>Zone Outage</span></label>
+                                    <label class="checkbox-label"><input type="checkbox" value="zone" checked><span>Spatial Zone Outage</span></label>
                                     <label class="checkbox-label"><input type="checkbox" value="intermittent"><span>Intermittent</span></label>
                                 </div>
                                 <!-- Custom scenario builder -->
@@ -1044,7 +1025,7 @@
                                         <select class="input-field" id="exp-custom-type">
                                             <option value="burst">Burst Failure</option>
                                             <option value="wear">Wear-Based</option>
-                                            <option value="zone">Zone Outage</option>
+                                            <option value="zone">Spatial Zone Outage</option>
                                             <option value="intermittent">Intermittent</option>
                                         </select>
                                         <div class="exp-custom-params" id="exp-custom-params-burst">
@@ -1178,9 +1159,9 @@
                         </div>
                         <div class="exp-drilldown-body" id="exp-drilldown-body"></div>
                         <div class="exp-drilldown-footer">
+                            <button class="btn-primary exp-sim3d-btn" id="btn-exp-sim3d">SIMULATE IN OBSERVATORY</button>
                             <span class="exp-seed-label" id="exp-drilldown-seed-label"></span>
                             <select class="exp-seed-select" id="exp-drilldown-seed-select" style="display:none"></select>
-                            <button class="btn-primary exp-sim3d-btn" id="btn-exp-sim3d">SIMULATE IN OBSERVATORY</button>
                         </div>
                     </div>
                 </div>

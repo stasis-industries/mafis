@@ -145,8 +145,6 @@ pub(super) struct FaultScenarioSnapshot {
     wear_threshold: f32,
     zone_at_tick: u64,
     zone_latency_duration: u32,
-    perm_zone_at_tick: u64,
-    perm_zone_block_percent: f32,
 }
 
 #[derive(Serialize)]
@@ -745,8 +743,6 @@ pub(super) fn sync_state_to_js(
                 wear_threshold: sc.wear_threshold,
                 zone_at_tick: sc.zone_at_tick,
                 zone_latency_duration: sc.zone_latency_duration,
-                perm_zone_at_tick: sc.perm_zone_at_tick,
-                perm_zone_block_percent: sc.perm_zone_block_percent,
             }
         },
         baseline_diff: {
@@ -829,11 +825,7 @@ pub(super) fn sync_state_to_js(
                     }
                     ScheduledAction::ZoneLatency { duration } => (
                         "zone_outage".to_string(),
-                        format!("Zone Outage — {} tick latency", duration),
-                    ),
-                    ScheduledAction::ZoneBlock { block_percent } => (
-                        "permanent_zone_outage".to_string(),
-                        format!("Permanent Zone Outage — {}% cells blocked", *block_percent as u32),
+                        format!("Spatial Zone Outage — {} tick latency", duration),
                     ),
                 };
                 ScheduleMarkerSnapshot { tick: ev.tick, marker_type, label, fired: ev.fired }

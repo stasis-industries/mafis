@@ -1533,7 +1533,6 @@ input[type="range"]:disabled::-webkit-slider-thumb {
 .fault-type-badge.wear { background: rgb(230, 140, 0); }
 .fault-type-badge.zone { background: rgb(143, 58, 222); }
 .fault-type-badge.intermittent { background: rgb(59, 176, 184); }
-.fault-type-badge.perm-zone { background: rgb(180, 0, 90); }
 
 .fault-item-summary {
     flex: 1;
@@ -5511,15 +5510,22 @@ body[data-phase="experiment"] #toolbar {
 
 .exp-seed-label {
     font-family: 'DM Mono', monospace;
-    font-size: 10px;
+    font-size: 11px;
     color: var(--text-muted);
     letter-spacing: 0.3px;
+    border: 1px solid var(--border);
+    background: var(--bg-input);
+    padding: 0 12px;
+    align-self: stretch;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
 .exp-seed-select {
     font-family: 'DM Mono', monospace;
-    font-size: 10px;
-    padding: 3px 6px;
+    font-size: 11px;
+    padding: 0 12px;
     background: var(--bg-input);
     color: var(--text-primary);
     border: 1px solid var(--border);
@@ -5527,6 +5533,9 @@ body[data-phase="experiment"] #toolbar {
     cursor: pointer;
     -webkit-appearance: none;
     appearance: none;
+    align-self: stretch;
+    text-align: center;
+    text-align-last: center;
 }
 
 /* ==========================================================================
