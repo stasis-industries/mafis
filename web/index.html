@@ -809,9 +809,9 @@
                         <div class="ctx-metric-baseline" id="baseline-tasks_completed"></div>
                     </div>
 
-                    <div class="ctx-metric" data-metric="idle_ratio" title="Fraction of time agents spend waiting instead of moving. High = congestion or insufficient tasks. Spikes after faults indicate cascading delays.">
+                    <div class="ctx-metric" data-metric="idle_ratio" title="Fraction of actions where alive agents wait instead of moving. High = congestion or blockage. Spikes after faults indicate cascading delays.">
                         <div class="ctx-metric-header">
-                            <span class="ctx-metric-label">Idle Ratio</span>
+                            <span class="ctx-metric-label">Wait Ratio</span>
                             <span class="ctx-metric-delta" id="delta-idle_ratio"></span>
                         </div>
                         <div class="ctx-metric-value" id="metric-idle-ratio">0.00</div>
@@ -1472,9 +1472,12 @@
                     <tr><td>MVA</td><td>Chart display only — a 10-sample moving average applied to the throughput series for visual smoothness. Not a metric definition. The underlying throughput values are already a 100-tick rolling mean computed by the simulation (the actual reported metric).</td></tr>
                     <tr><td>MTTR</td><td>Mean recovery time of cascade-affected neighbors (not dead agents).</td></tr>
                     <tr><td>MTBF</td><td>Mean interval between fault events. Requires 2+ events.</td></tr>
-                    <tr><td>Propagation Rate</td><td>Average fraction of alive fleet affected per fault event.</td></tr>
+                    <tr><td>Propagation Rate</td><td>Average fraction of alive fleet affected per fault event (ADG cascade-based, observatory only).</td></tr>
                     <tr><td>Survival Rate</td><td>Fraction of initial fleet still alive.</td></tr>
-                    <tr><td>Idle Ratio</td><td>Fraction of agent-ticks spent waiting (not moving). Includes solver waits, collision holds, and latency.</td></tr>
+                    <tr><td>Wait Ratio</td><td>Fraction of actions where alive agents wait instead of moving. Includes solver waits, collision holds, and latency. Dead agents excluded.</td></tr>
+                    <tr><td>Cascade Depth</td><td>Average BFS depth reached in the Action Dependency Graph per fault event. Deeper = longer dependency chains disrupted.</td></tr>
+                    <tr><td>Cascade Spread</td><td>Average number of agents affected per fault event via ADG BFS. Higher = wider impact per incident.</td></tr>
+                    <tr><td>Fleet Utilization</td><td>Fraction of initial fleet that is alive and actively tasked (not idle), averaged post-fault.</td></tr>
                     <tr><td>Tasks Completed</td><td>Total pickup-to-delivery tasks completed since simulation start. Compared against the fault-free baseline to show cumulative productivity loss.</td></tr>
                     <tr><td>Impacted Area</td><td>Throughput deviation vs baseline: <span class="formula">(live &minus; baseline)&thinsp;/&thinsp;baseline &times; 100</span>. Negative = behind.</td></tr>
                     <tr><td>Deficit Integral</td><td>Cumulative sum of ticks where live tasks fell behind the baseline. Higher = more total productivity lost to faults.</td></tr>
