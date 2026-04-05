@@ -135,20 +135,15 @@ pub fn run_single_experiment(config: &ExperimentConfig) -> RunResult {
 
         let bl_wall_ms = wall_start.elapsed().as_millis() as u64;
 
-        // Build baseline record from analysis
-        baseline_record = analysis.clone().into_baseline_record(
+        // Baseline self-metrics (no clone needed — computed directly from engine)
+        baseline_metrics =
+            super::metrics::compute_baseline_self_metrics(&analysis, &step_times, bl_wall_ms);
+
+        // Consume engine into baseline record (no clone!)
+        baseline_record = analysis.into_baseline_record(
             0, // config_hash not needed for experiment
             config.tick_count,
             config.num_agents,
-        );
-
-        // Baseline metrics: compare against itself (FT=1.0, diff=0)
-        baseline_metrics = compute_run_metrics(
-            &baseline_record,
-            &analysis,
-            &analysis.fault_events,
-            &step_times,
-            bl_wall_ms,
         );
     }
 
@@ -182,8 +177,8 @@ pub fn run_single_experiment(config: &ExperimentConfig) -> RunResult {
 
         let mut analysis = AnalysisEngine::new(config.tick_count as usize);
         let mut step_times = Vec::with_capacity(config.tick_count as usize);
-        let mut cascade_depths: Vec<f64> = Vec::new();
-        let mut cascade_spreads: Vec<f64> = Vec::new();
+        let mut cascade_depths: Vec<f64> = Vec::with_capacity(actual_agents);
+        let mut cascade_spreads: Vec<f64> = Vec::with_capacity(actual_agents);
 
         let faulted_start = Instant::now();
         for _ in 0..config.tick_count {
@@ -239,6 +234,195 @@ pub fn run_single_experiment(config: &ExperimentConfig) -> RunResult {
     RunResult { config: config.clone(), baseline_metrics, faulted_metrics }
 }
 
+// ---------------------------------------------------------------------------
+// Baseline caching — eliminates redundant baseline simulations in run_matrix
+// ---------------------------------------------------------------------------
+
+/// Identity of a baseline — configs sharing this key produce identical fault-free runs.
+/// Only the fault scenario differs between configs with the same baseline key.
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct BaselineKey {
+    solver_name: String,
+    topology_name: String,
+    scheduler_name: String,
+    num_agents: usize,
+    seed: u64,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl BaselineKey {
+    fn from_config(config: &ExperimentConfig) -> Self {
+        Self {
+            solver_name: config.solver_name.clone(),
+            topology_name: config.topology_name.clone(),
+            scheduler_name: config.scheduler_name.clone(),
+            num_agents: config.num_agents,
+            seed: config.seed,
+        }
+    }
+}
+
+/// Cached result from a baseline run, reusable across fault scenarios.
+#[cfg(not(target_arch = "wasm32"))]
+struct CachedBaseline {
+    record: crate::analysis::baseline::BaselineRecord,
+    metrics: RunMetrics,
+}
+
+/// Run only the baseline simulation (no faults) for caching.
+#[cfg(not(target_arch = "wasm32"))]
+fn run_baseline_only(config: &ExperimentConfig) -> CachedBaseline {
+    let wall_start = Instant::now();
+
+    let (grid, zones) = if let Some((g, z)) = &config.custom_map {
+        (g.clone(), z.clone())
+    } else {
+        let topo = ActiveTopology::from_name(&config.topology_name);
+        let output = topo.topology().generate(config.seed);
+        (output.grid, output.zones)
+    };
+
+    let grid_area = (grid.width * grid.height) as usize;
+    let actual_agents = config.num_agents.min(grid.walkable_count());
+
+    let scheduler = ActiveScheduler::from_name(&config.scheduler_name);
+    let queue_policy = ActiveQueuePolicy::from_name("closest");
+
+    let mut rng = SeededRng::new(config.seed);
+    let agents = place_agents(actual_agents, &grid, &zones, &mut rng);
+
+    let solver =
+        crate::solver::lifelong_solver_from_name(&config.solver_name, grid_area, actual_agents)
+            .unwrap_or_else(|| Box::new(crate::solver::pibt::PibtLifelongSolver::new()));
+
+    let fault_config = FaultConfig { enabled: false, ..Default::default() };
+    let mut runner = SimulationRunner::new(
+        grid,
+        zones,
+        agents,
+        solver,
+        rng,
+        fault_config,
+        FaultSchedule::default(),
+    );
+
+    let mut analysis = AnalysisEngine::new(config.tick_count as usize);
+    let mut step_times = Vec::with_capacity(config.tick_count as usize);
+
+    for _ in 0..config.tick_count {
+        let tick_start = Instant::now();
+        let mut result = runner.tick(scheduler.scheduler(), queue_policy.policy());
+        step_times.push(tick_start.elapsed().as_micros() as f64);
+        analysis.record_tick(&runner, &mut result);
+    }
+    analysis.compute_aggregates();
+
+    let bl_wall_ms = wall_start.elapsed().as_millis() as u64;
+    let metrics = super::metrics::compute_baseline_self_metrics(&analysis, &step_times, bl_wall_ms);
+    let record = analysis.into_baseline_record(0, config.tick_count, config.num_agents);
+
+    CachedBaseline { record, metrics }
+}
+
+/// Run only the faulted simulation, using a cached baseline for differential metrics.
+#[cfg(not(target_arch = "wasm32"))]
+fn run_faulted_only(config: &ExperimentConfig, cached: &CachedBaseline) -> RunResult {
+    // Regenerate topology + agents from same seed (deterministic, < 1ms).
+    // Both run_baseline_only and run_faulted_only start from SeededRng::new(seed)
+    // then place_agents — producing identical initial state.
+    let (grid, zones) = if let Some((g, z)) = &config.custom_map {
+        (g.clone(), z.clone())
+    } else {
+        let topo = ActiveTopology::from_name(&config.topology_name);
+        let output = topo.topology().generate(config.seed);
+        (output.grid, output.zones)
+    };
+
+    let grid_area = (grid.width * grid.height) as usize;
+    let actual_agents = config.num_agents.min(grid.walkable_count());
+
+    let scheduler = ActiveScheduler::from_name(&config.scheduler_name);
+    let queue_policy = ActiveQueuePolicy::from_name("closest");
+
+    let mut rng = SeededRng::new(config.seed);
+    let agents = place_agents(actual_agents, &grid, &zones, &mut rng);
+
+    let solver =
+        crate::solver::lifelong_solver_from_name(&config.solver_name, grid_area, actual_agents)
+            .unwrap_or_else(|| Box::new(crate::solver::pibt::PibtLifelongSolver::new()));
+
+    let (fault_config, fault_schedule) = match &config.scenario {
+        Some(scenario) => {
+            let fc = scenario.to_fault_config();
+            let fs = scenario.generate_schedule(config.tick_count, config.num_agents);
+            (fc, fs)
+        }
+        None => (FaultConfig { enabled: false, ..Default::default() }, FaultSchedule::default()),
+    };
+
+    let mut runner =
+        SimulationRunner::new(grid, zones, agents, solver, rng, fault_config, fault_schedule);
+
+    let mut analysis = AnalysisEngine::new(config.tick_count as usize);
+    let mut step_times = Vec::with_capacity(config.tick_count as usize);
+    let mut cascade_depths: Vec<f64> = Vec::with_capacity(actual_agents);
+    let mut cascade_spreads: Vec<f64> = Vec::with_capacity(actual_agents);
+
+    let faulted_start = Instant::now();
+    for _ in 0..config.tick_count {
+        let tick_start = Instant::now();
+        let mut result = runner.tick(scheduler.scheduler(), queue_policy.policy());
+        step_times.push(tick_start.elapsed().as_micros() as f64);
+
+        if !result.fault_events.is_empty() {
+            let adg = crate::analysis::dependency::build_adg_from_agents(
+                &runner.agents,
+                crate::constants::ADG_LOOKAHEAD,
+            );
+            for fault in &result.fault_events {
+                let (spread, depth) = crate::analysis::cascade::cascade_bfs_standalone(
+                    &adg,
+                    fault.agent_index,
+                    crate::constants::MAX_CASCADE_DEPTH,
+                );
+                cascade_spreads.push(spread as f64);
+                cascade_depths.push(depth as f64);
+            }
+        }
+
+        analysis.record_tick(&runner, &mut result);
+    }
+    analysis.compute_aggregates();
+
+    let faulted_wall_ms = faulted_start.elapsed().as_millis() as u64;
+
+    let mut fm = compute_run_metrics(
+        &cached.record,
+        &analysis,
+        &analysis.fault_events,
+        &step_times,
+        faulted_wall_ms,
+    );
+
+    fm.cascade_depth_avg = if cascade_depths.is_empty() {
+        0.0
+    } else {
+        cascade_depths.iter().sum::<f64>() / cascade_depths.len() as f64
+    };
+    fm.cascade_spread_avg = if cascade_spreads.is_empty() {
+        0.0
+    } else {
+        cascade_spreads.iter().sum::<f64>() / cascade_spreads.len() as f64
+    };
+
+    RunResult {
+        config: config.clone(),
+        baseline_metrics: cached.metrics.clone(),
+        faulted_metrics: fm,
+    }
+}
+
 /// Shared progress state for tracking experiment execution.
 pub struct ExperimentProgress {
     pub current: usize,
@@ -248,9 +432,12 @@ pub struct ExperimentProgress {
 
 /// Run the full experiment matrix and compute statistical summaries.
 ///
-/// Uses rayon for parallel execution on native, sequential on WASM.
-/// Each experiment is fully independent (own RNG, own solver instance),
-/// so parallelism is trivially safe.
+/// Two-phase execution with baseline caching:
+/// 1. Deduplicate configs by baseline identity, run each unique baseline once
+/// 2. Run faulted variants using cached baselines (skips redundant simulations)
+///
+/// For a 7-scenario matrix this eliminates ~85% of baseline computation.
+/// Uses rayon with N-1 threads to maintain system responsiveness.
 ///
 /// If `progress` is provided, it is updated after each run completes.
 #[cfg(not(target_arch = "wasm32"))]
@@ -263,38 +450,106 @@ pub fn run_matrix(
     let configs = matrix.expand();
     let total = configs.len();
 
-    // Parallel execution via rayon — each run is independent
+    // Reserve 1 core for OS/UI responsiveness — prevents system freeze during
+    // long experiment runs. Falls back to 4 threads if detection fails.
     use rayon::prelude::*;
+    use std::collections::HashSet;
+    use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
+    let num_threads =
+        std::thread::available_parallelism().map(|n| n.get().saturating_sub(1).max(1)).unwrap_or(4);
+
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(num_threads)
+        .build()
+        .expect("failed to create experiment thread pool");
+
+    // ── Phase 1: Compute unique baselines ─────────────────────────────
+    // Configs that share (solver, topology, scheduler, agents, seed) produce
+    // identical baselines — only the fault scenario differs.
+    let baseline_entries: Vec<(BaselineKey, usize)> = {
+        let mut seen = HashSet::new();
+        configs
+            .iter()
+            .enumerate()
+            .filter_map(|(i, config)| {
+                let key = BaselineKey::from_config(config);
+                if seen.insert(key.clone()) { Some((key, i)) } else { None }
+            })
+            .collect()
+    };
+    let n_baselines = baseline_entries.len();
+    let n_cached = total.saturating_sub(n_baselines);
+    eprintln!(
+        "Experiment: {total} configs, {n_baselines} unique baselines \
+         ({n_cached} cached), {num_threads} threads"
+    );
+
+    let baseline_counter = AtomicUsize::new(0);
+    let baselines: std::collections::HashMap<BaselineKey, Arc<CachedBaseline>> =
+        pool.install(|| {
+            baseline_entries
+                .par_iter()
+                .map(|(key, config_idx)| {
+                    let config = &configs[*config_idx];
+                    let i = baseline_counter.fetch_add(1, Ordering::Relaxed) + 1;
+                    eprintln!(
+                        "[baseline {i}/{n_baselines}] {} / {} / {} / {} agents / seed {}",
+                        config.solver_name,
+                        config.topology_name,
+                        config.scheduler_name,
+                        config.num_agents,
+                        config.seed,
+                    );
+                    (key.clone(), Arc::new(run_baseline_only(config)))
+                })
+                .collect()
+        });
+
+    // ── Phase 2: Run faulted variants using cached baselines ──────────
     let counter = AtomicUsize::new(0);
     let progress_ref = progress.cloned();
-    let runs: Vec<RunResult> = configs
-        .par_iter()
-        .map(|config| {
-            let i = counter.fetch_add(1, Ordering::Relaxed) + 1;
-            let label = format!(
-                "{} / {} / {} / {} agents / seed {}",
-                config.solver_name,
-                config.topology_name,
-                config.scenario_label(),
-                config.num_agents,
-                config.seed,
-            );
-            eprintln!("[{i}/{total}] {label}");
+    let runs: Vec<RunResult> = pool.install(|| {
+        configs
+            .par_iter()
+            .map(|config| {
+                let i = counter.fetch_add(1, Ordering::Relaxed) + 1;
+                let label = format!(
+                    "{} / {} / {} / {} agents / seed {}",
+                    config.solver_name,
+                    config.topology_name,
+                    config.scenario_label(),
+                    config.num_agents,
+                    config.seed,
+                );
+                eprintln!("[{i}/{total}] {label}");
 
-            let result = run_single_experiment(config);
+                let key = BaselineKey::from_config(config);
+                let cached = &baselines[&key];
 
-            if let Some(ref p) = progress_ref
-                && let Ok(mut prog) = p.lock()
-            {
-                prog.current = i;
-                prog.label = label;
-            }
+                let result = if config.scenario.is_none() {
+                    // No faults — faulted run is identical to baseline, skip simulation
+                    RunResult {
+                        config: config.clone(),
+                        baseline_metrics: cached.metrics.clone(),
+                        faulted_metrics: cached.metrics.clone(),
+                    }
+                } else {
+                    run_faulted_only(config, cached)
+                };
 
-            result
-        })
-        .collect();
+                if let Some(ref p) = progress_ref
+                    && let Ok(mut prog) = p.lock()
+                {
+                    prog.current = i;
+                    prog.label = label;
+                }
+
+                result
+            })
+            .collect()
+    });
 
     // Compute statistical summaries grouped by (solver, topology, scenario, scheduler, agents)
     let summaries = compute_summaries(&runs);
@@ -929,5 +1184,117 @@ mod tests {
         // Wall time may be 0ms on fast machines (sub-millisecond runs).
         // Just verify the field exists and the matrix completed.
         assert!(result.wall_time_total_ms < 60_000, "matrix should complete in under 60s");
+    }
+
+    /// Verify baseline caching produces identical results to uncached path.
+    /// Runs a 2-scenario matrix (cached) and compares against individual
+    /// run_single_experiment calls (uncached).
+    #[test]
+    fn baseline_cache_correctness() {
+        use crate::fault::scenario::{FaultScenario, FaultScenarioType};
+
+        let burst = FaultScenario {
+            enabled: true,
+            scenario_type: FaultScenarioType::BurstFailure,
+            burst_kill_percent: 20.0,
+            burst_at_tick: 20,
+            ..Default::default()
+        };
+
+        // Cached path: run_matrix with 2 scenarios sharing same baseline
+        let matrix = ExperimentMatrix {
+            solvers: vec!["pibt".into()],
+            topologies: vec!["warehouse_large".into()],
+            scenarios: vec![None, Some(burst.clone())],
+            schedulers: vec!["random".into()],
+            agent_counts: vec![10],
+            seeds: vec![42],
+            tick_count: 100,
+        };
+        let cached_result = run_matrix(&matrix, None);
+        assert_eq!(cached_result.runs.len(), 2);
+
+        // Uncached path: individual run_single_experiment calls
+        let config_none = ExperimentConfig {
+            solver_name: "pibt".into(),
+            topology_name: "warehouse_large".into(),
+            scenario: None,
+            scheduler_name: "random".into(),
+            num_agents: 10,
+            seed: 42,
+            tick_count: 100,
+            custom_map: None,
+        };
+        let config_burst = ExperimentConfig { scenario: Some(burst), ..config_none.clone() };
+
+        let uncached_none = run_single_experiment(&config_none);
+        let uncached_burst = run_single_experiment(&config_burst);
+
+        // Compare no-fault results
+        let cached_none = &cached_result.runs[0];
+        assert_eq!(
+            cached_none.baseline_metrics.total_tasks, uncached_none.baseline_metrics.total_tasks,
+            "no-fault baseline tasks mismatch"
+        );
+        assert_eq!(
+            cached_none.faulted_metrics.total_tasks, uncached_none.faulted_metrics.total_tasks,
+            "no-fault faulted tasks mismatch"
+        );
+
+        // Compare burst-fault results
+        let cached_burst = &cached_result.runs[1];
+        assert_eq!(
+            cached_burst.baseline_metrics.total_tasks, uncached_burst.baseline_metrics.total_tasks,
+            "burst baseline tasks mismatch"
+        );
+        assert_eq!(
+            cached_burst.faulted_metrics.total_tasks, uncached_burst.faulted_metrics.total_tasks,
+            "burst faulted tasks mismatch"
+        );
+        assert!(
+            (cached_burst.faulted_metrics.fault_tolerance
+                - uncached_burst.faulted_metrics.fault_tolerance)
+                .abs()
+                < 1e-10,
+            "burst FT mismatch: cached={} uncached={}",
+            cached_burst.faulted_metrics.fault_tolerance,
+            uncached_burst.faulted_metrics.fault_tolerance,
+        );
+    }
+
+    /// Verify compute_baseline_self_metrics produces values matching
+    /// the original compute_run_metrics self-comparison path.
+    #[test]
+    fn baseline_self_metrics_match() {
+        let config = ExperimentConfig {
+            solver_name: "pibt".into(),
+            topology_name: "warehouse_large".into(),
+            scenario: None,
+            scheduler_name: "random".into(),
+            num_agents: 10,
+            seed: 42,
+            tick_count: 100,
+            custom_map: None,
+        };
+
+        let result = run_single_experiment(&config);
+
+        // For no-fault runs, baseline and faulted metrics should be identical
+        // (both come from compute_baseline_self_metrics now)
+        assert_eq!(result.baseline_metrics.total_tasks, result.faulted_metrics.total_tasks);
+        assert!(
+            (result.baseline_metrics.avg_throughput - result.faulted_metrics.avg_throughput).abs()
+                < 1e-10,
+            "throughput mismatch: baseline={} faulted={}",
+            result.baseline_metrics.avg_throughput,
+            result.faulted_metrics.avg_throughput,
+        );
+        assert!(
+            (result.baseline_metrics.fault_tolerance - 1.0).abs() < 1e-10,
+            "baseline FT should be 1.0, got {}",
+            result.baseline_metrics.fault_tolerance,
+        );
+        assert_eq!(result.baseline_metrics.survival_rate, 1.0);
+        assert!(result.baseline_metrics.total_tasks > 0, "baseline should complete some tasks");
     }
 }

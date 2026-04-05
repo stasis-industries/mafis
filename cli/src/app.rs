@@ -66,7 +66,7 @@ pub enum ExperimentCommand {
     List,
     /// Run a specific experiment
     Run {
-        /// Experiment name (solver_resilience, scale_sensitivity, scheduler_effect, topology_medium, topology_large)
+        /// Experiment name (see `experiment list` for available experiments)
         name: String,
     },
     /// Quick smoke test (~1s)
