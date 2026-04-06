@@ -776,6 +776,7 @@ fn parse_config_json(json: &str) -> Option<ExperimentConfig> {
                     .get("recovery")
                     .and_then(|r| r.as_u64())
                     .unwrap_or(15) as u32,
+                intermittent_start_tick: s.get("start_tick").and_then(|t| t.as_u64()).unwrap_or(0),
                 ..Default::default()
             }),
             "none" | _ => None,

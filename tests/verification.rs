@@ -1894,3 +1894,270 @@ fn rewind_determinism_reset_matches_fresh() {
         eprintln!("  {solver_name}: rewind determinism OK (tasks={fresh_tasks})");
     }
 }
+
+// ═══════════════════════════════════════════════════════════════════════
+// Intermittent start_tick + rewind tests
+// ═══════════════════════════════════════════════════════════════════════
+
+/// Regression: FaultConfig::default() must have intermittent_start_tick == 0
+/// (backward-compatible for manual runs that don't set a warm-up).
+#[test]
+fn fault_config_default_start_tick_zero() {
+    let cfg = FaultConfig::default();
+    assert_eq!(
+        cfg.intermittent_start_tick, 0,
+        "default start_tick must be 0 for backward compatibility"
+    );
+}
+
+/// Warm-up floor: no intermittent faults may fire before `start_tick`.
+/// After `start_tick`, at least one fault must fire within 3×MTBF ticks.
+#[test]
+fn intermittent_respects_start_tick() {
+    let start_tick: u64 = 200;
+    let mtbf: u64 = 40;
+    let recovery: u32 = 5;
+    let total_ticks: u64 = start_tick + 3 * mtbf; // enough window to see faults
+
+    let topo = ActiveTopology::from_name("warehouse_large");
+    let output = topo.topology().generate(42);
+    let grid_area = (output.grid.width * output.grid.height) as usize;
+    let mut rng = SeededRng::new(42);
+    let agents = place_agents(20, &output.grid, &output.zones, &mut rng);
+
+    let scheduler = ActiveScheduler::from_name("random");
+    let queue_policy = ActiveQueuePolicy::from_name("closest");
+
+    let fault_config = FaultConfig {
+        enabled: true,
+        intermittent_enabled: true,
+        intermittent_mtbf_ticks: mtbf,
+        intermittent_recovery_ticks: recovery,
+        intermittent_start_tick: start_tick,
+        ..Default::default()
+    };
+    let solver = mafis::solver::lifelong_solver_from_name("pibt", grid_area, 20).unwrap();
+    let mut runner = SimulationRunner::new(
+        output.grid.clone(),
+        output.zones.clone(),
+        agents,
+        solver,
+        rng,
+        fault_config,
+        FaultSchedule::default(),
+    );
+
+    let mut early_faults = 0u64;
+    let mut late_faults = 0u64;
+    for _ in 1..=total_ticks {
+        let result = runner.tick(scheduler.scheduler(), queue_policy.policy());
+        let latency_events = result
+            .fault_events
+            .iter()
+            .filter(|fe| matches!(fe.fault_type, mafis::fault::config::FaultType::Latency))
+            .count() as u64;
+        if result.tick < start_tick {
+            early_faults += latency_events;
+        } else {
+            late_faults += latency_events;
+        }
+    }
+
+    assert_eq!(
+        early_faults, 0,
+        "no intermittent faults should fire before start_tick={start_tick}, got {early_faults}"
+    );
+    assert!(
+        late_faults > 0,
+        "expected at least one intermittent fault after start_tick={start_tick} in {}t window",
+        total_ticks - start_tick
+    );
+    eprintln!("  intermittent start_tick={start_tick}: early={early_faults} late={late_faults} OK");
+}
+
+/// Statistical: median per-agent first-fire tick for Exp(MTBF=100) from start_tick=0
+/// should be ≈ ln(2)·100 ≈ 69.3. We run with 1 agent to isolate per-agent semantics.
+/// Assert median ∈ [MTBF*ln2 - 20, MTBF*ln2 + 20].
+#[test]
+fn intermittent_first_fire_median() {
+    let mtbf: u64 = 100;
+    let num_seeds: u64 = 120;
+    let max_ticks = 800u64; // generous window: P(no fire by 800t) = e^{-8} ≈ 0.03%
+
+    let topo = ActiveTopology::from_name("warehouse_large");
+    let output = topo.topology().generate(7);
+    let grid_area = (output.grid.width * output.grid.height) as usize;
+
+    let scheduler = ActiveScheduler::from_name("random");
+    let queue_policy = ActiveQueuePolicy::from_name("closest");
+
+    let mut first_fire_ticks: Vec<u64> = Vec::new();
+
+    for seed in 0..num_seeds {
+        // 1 agent → first-fire = per-agent first-fire (no min-of-N distortion)
+        let mut rng = SeededRng::new(seed * 1009 + 3); // spread seeds
+        let agents = place_agents(1, &output.grid, &output.zones, &mut rng);
+        let fault_config = FaultConfig {
+            enabled: true,
+            intermittent_enabled: true,
+            intermittent_mtbf_ticks: mtbf,
+            intermittent_recovery_ticks: 5,
+            intermittent_start_tick: 0,
+            ..Default::default()
+        };
+        let solver = mafis::solver::lifelong_solver_from_name("pibt", grid_area, 1).unwrap();
+        let mut runner = SimulationRunner::new(
+            output.grid.clone(),
+            output.zones.clone(),
+            agents,
+            solver,
+            rng,
+            fault_config,
+            FaultSchedule::default(),
+        );
+
+        let mut first_fire: Option<u64> = None;
+        for _ in 1..=max_ticks {
+            let result = runner.tick(scheduler.scheduler(), queue_policy.policy());
+            let has_latency = result
+                .fault_events
+                .iter()
+                .any(|fe| matches!(fe.fault_type, mafis::fault::config::FaultType::Latency));
+            if has_latency && first_fire.is_none() {
+                first_fire = Some(result.tick);
+                break;
+            }
+        }
+        if let Some(t) = first_fire {
+            first_fire_ticks.push(t);
+        }
+    }
+
+    // Almost all seeds should have fired within the generous window
+    assert!(
+        first_fire_ticks.len() >= (num_seeds * 95 / 100) as usize,
+        "expected ≥95% seeds to fire, got {}/{}",
+        first_fire_ticks.len(),
+        num_seeds
+    );
+
+    first_fire_ticks.sort_unstable();
+    let median = first_fire_ticks[first_fire_ticks.len() / 2];
+    // Per-agent theoretical median = MTBF * ln(2) ≈ 69.3
+    let ln2_mtbf = (2.0f64.ln() * mtbf as f64) as u64;
+    assert!(
+        median >= ln2_mtbf.saturating_sub(20) && median <= ln2_mtbf + 20,
+        "median first-fire {median} not in [{}, {}], theoretical ln(2)·MTBF={ln2_mtbf}",
+        ln2_mtbf.saturating_sub(20),
+        ln2_mtbf + 20
+    );
+    eprintln!("  intermittent first-fire median={median} (theoretical ln(2)·{mtbf}={ln2_mtbf}) OK");
+}
+
+/// Rewind determinism: run to T, reset to T/2 (restoring next_fault_tick),
+/// replay forward to T — fault event sequence must have identical count.
+#[test]
+fn intermittent_rewind_determinism() {
+    let total_ticks: u64 = 300;
+    let rewind_tick: u64 = 150;
+    let mtbf: u64 = 50;
+
+    let topo = ActiveTopology::from_name("warehouse_large");
+    let output = topo.topology().generate(99);
+    let grid_area = (output.grid.width * output.grid.height) as usize;
+
+    let scheduler = ActiveScheduler::from_name("random");
+    let queue_policy = ActiveQueuePolicy::from_name("closest");
+
+    let make_runner = |grid: mafis::core::grid::GridMap,
+                       zones: mafis::core::topology::ZoneMap,
+                       agents: Vec<mafis::core::runner::SimAgent>| {
+        let mut rng = SeededRng::new(99);
+        // Consume the same RNG as place_agents did
+        let solver =
+            mafis::solver::lifelong_solver_from_name("pibt", grid_area, agents.len()).unwrap();
+        let fc = FaultConfig {
+            enabled: true,
+            intermittent_enabled: true,
+            intermittent_mtbf_ticks: mtbf,
+            intermittent_recovery_ticks: 8,
+            intermittent_start_tick: 0,
+            ..Default::default()
+        };
+        SimulationRunner::new(grid, zones, agents, solver, rng, fc, FaultSchedule::default())
+    };
+
+    let mut rng_seed = SeededRng::new(99);
+    let agents_orig = place_agents(15, &output.grid, &output.zones, &mut rng_seed);
+
+    // ── Pass 1: run to `total_ticks`, count faults ONLY in (rewind_tick..total_ticks] ──
+    let mut runner1 = make_runner(output.grid.clone(), output.zones.clone(), agents_orig.clone());
+    let mut pass1_second_half_faults = 0usize;
+    // Save snapshot at rewind_tick
+    let mut snap_agent_data: Vec<(bevy::math::IVec2, bevy::math::IVec2, bool, f32, Option<u64>)> =
+        Vec::new();
+    let mut snap_rng_word: u128 = 0;
+    let mut snap_fault_rng_word: u128 = 0;
+
+    for t in 1..=total_ticks {
+        let result = runner1.tick(scheduler.scheduler(), queue_policy.policy());
+        if t == rewind_tick {
+            snap_agent_data = runner1
+                .agents
+                .iter()
+                .map(|a| (a.pos, a.goal, a.alive, a.heat, a.next_fault_tick))
+                .collect();
+            snap_rng_word = runner1.rng().rng.get_word_pos();
+            snap_fault_rng_word = runner1.fault_rng().rng.get_word_pos();
+        }
+        if result.tick > rewind_tick {
+            pass1_second_half_faults += result
+                .fault_events
+                .iter()
+                .filter(|fe| matches!(fe.fault_type, mafis::fault::config::FaultType::Latency))
+                .count();
+        }
+    }
+
+    // ── Pass 2: run to rewind_tick, restore state, run the second half ────
+    let mut runner2 = make_runner(output.grid.clone(), output.zones.clone(), agents_orig.clone());
+    for _ in 1..=rewind_tick {
+        runner2.tick(scheduler.scheduler(), queue_policy.policy());
+    }
+
+    // Simulate apply_rewind: restore agent state + next_fault_tick
+    for (i, (pos, goal, alive, heat, nft)) in snap_agent_data.iter().enumerate() {
+        if i < runner2.agents.len() {
+            runner2.agents[i].pos = *pos;
+            runner2.agents[i].goal = *goal;
+            runner2.agents[i].alive = *alive;
+            runner2.agents[i].heat = *heat;
+            runner2.agents[i].next_fault_tick = *nft; // key: restored from snapshot
+            runner2.agents[i].latency_remaining = 0;
+        }
+    }
+    runner2.rng_mut().rng.set_word_pos(snap_rng_word);
+    runner2.fault_rng_mut().rng.set_word_pos(snap_fault_rng_word);
+    runner2.tick = rewind_tick;
+
+    let mut pass2_faults = 0usize;
+    for _ in (rewind_tick + 1)..=total_ticks {
+        let result = runner2.tick(scheduler.scheduler(), queue_policy.policy());
+        pass2_faults += result
+            .fault_events
+            .iter()
+            .filter(|fe| matches!(fe.fault_type, mafis::fault::config::FaultType::Latency))
+            .count();
+    }
+
+    // [rewind_tick+1..total_ticks] fault events must be identical whether we
+    // arrived there directly (pass1) or via a simulated rewind (pass2).
+    assert_eq!(
+        pass1_second_half_faults, pass2_faults,
+        "fault count differs after simulated rewind: direct={pass1_second_half_faults} rewound={pass2_faults}"
+    );
+    assert!(pass1_second_half_faults > 0, "expected at least one fault in the second half");
+    eprintln!(
+        "  intermittent rewind determinism OK (post-rewind fault_count={pass1_second_half_faults})"
+    );
+}

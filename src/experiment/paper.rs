@@ -91,12 +91,15 @@ fn zone_outage() -> FaultScenario {
 
 fn intermittent() -> FaultScenario {
     // IntermittentFault: exponential inter-arrival, 80-tick MTBF, 15-tick recovery.
+    // start_tick = MTBF (80): warm-up floor ensures cross-seed baseline comparability
+    // by deferring first-fire until after the baseline establishment window.
     // Models sensor recalibration, momentary communication loss, battery reconnect.
     FaultScenario {
         enabled: true,
         scenario_type: FaultScenarioType::IntermittentFault,
         intermittent_mtbf_ticks: 80,
         intermittent_recovery_ticks: 15,
+        intermittent_start_tick: 80,
         ..Default::default()
     }
 }

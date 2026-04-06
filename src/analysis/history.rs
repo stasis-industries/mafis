@@ -79,6 +79,11 @@ pub struct FullTickSnapshot {
     /// doesn't drop to 0.0 after seek/rewind.
     #[serde(skip)]
     pub completion_ticks: std::collections::VecDeque<u64>,
+    /// Per-agent intermittent `next_fault_tick` at this snapshot. Restored on
+    /// rewind so intermittent faults replay deterministically and don't double-fire.
+    /// Indexed by `AgentIndex` (matches runner.agents order).
+    #[serde(skip)]
+    pub intermittent_next_fault_tick: Vec<Option<u64>>,
 }
 
 // ---------------------------------------------------------------------------
@@ -319,6 +324,10 @@ pub fn record_tick_snapshot(
         lifelong_tasks_completed: lifelong.tasks_completed,
         solver_priorities: solver.save_priorities(),
         completion_ticks: lifelong.completion_ticks().clone(),
+        intermittent_next_fault_tick: sim
+            .as_ref()
+            .map(|s| s.runner.agents.iter().map(|sa| sa.next_fault_tick).collect())
+            .unwrap_or_default(),
     };
 
     history.snapshots.push_back(snapshot);

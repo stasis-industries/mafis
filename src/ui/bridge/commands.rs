@@ -341,6 +341,9 @@ pub(super) fn process_js_commands(
                                 sim_res.fault_config.intermittent_recovery_ticks =
                                     (value as u32).clamp(1, 200)
                             }
+                            "intermittent_start_tick" => {
+                                sim_res.fault_config.intermittent_start_tick = value as u64
+                            }
                             _ => {}
                         }
                     }
@@ -921,6 +924,8 @@ fn parse_fault_list_json(json: &str) -> Option<crate::fault::scenario::FaultList
                 item.intermittent_mtbf_ticks = v.get("mtbf").and_then(|v| v.as_u64()).unwrap_or(80);
                 item.intermittent_recovery_ticks =
                     v.get("recovery").and_then(|v| v.as_u64()).unwrap_or(15) as u32;
+                item.intermittent_start_tick =
+                    v.get("start_tick").and_then(|v| v.as_u64()).unwrap_or(0);
             }
         }
 

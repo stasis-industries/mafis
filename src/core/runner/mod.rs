@@ -1037,6 +1037,15 @@ impl SimulationRunner {
         let tick = self.tick;
         let mtbf = self.fault_config.intermittent_mtbf_ticks as f64;
         let recovery = self.fault_config.intermittent_recovery_ticks;
+        let start_tick = self.fault_config.intermittent_start_tick;
+
+        // Warm-up floor: no sampling, no firing, no RNG consumption before start_tick.
+        // First Phase 1 init then happens on the first tick at or after start_tick,
+        // so first fire lands at `start_tick + Exp(MTBF)` — giving a deterministic
+        // warm-up window while preserving memoryless inter-arrivals in the active phase.
+        if tick < start_tick {
+            return;
+        }
 
         // Phase 1: initialize next_fault_tick for agents that don't have one.
         for i in 0..n {

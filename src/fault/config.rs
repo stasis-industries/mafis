@@ -69,6 +69,12 @@ pub struct FaultConfig {
     pub intermittent_mtbf_ticks: u64,
     /// How many ticks an agent is unavailable per intermittent fault event.
     pub intermittent_recovery_ticks: u32,
+    /// Earliest tick at which intermittent faults can fire. Before this tick,
+    /// `check_intermittent_faults` is a no-op (no sampling, no events).
+    /// First fire becomes `start_tick + Exp(MTBF)` giving a deterministic
+    /// warm-up window across seeds while preserving memoryless inter-arrivals.
+    /// Default 0 = backward-compatible (sample from tick 0 as before).
+    pub intermittent_start_tick: u64,
 }
 
 impl FaultConfig {
@@ -91,6 +97,7 @@ impl Default for FaultConfig {
             intermittent_enabled: false,
             intermittent_mtbf_ticks: 100,
             intermittent_recovery_ticks: 20,
+            intermittent_start_tick: 0,
         }
     }
 }

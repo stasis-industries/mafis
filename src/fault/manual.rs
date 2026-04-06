@@ -405,6 +405,10 @@ fn restore_runner_state(
             agent.latency_remaining = 0; // transient, can't reconstruct duration
             agent.last_action = crate::core::action::Action::Wait;
             agent.operational_age = snap.operational_age;
+            // Restore intermittent fault sampling state so re-running forward
+            // doesn't re-initialize Phase 1 and double-fire events.
+            agent.next_fault_tick =
+                snapshot.intermittent_next_fault_tick.get(snap.index).copied().flatten();
         }
     }
 

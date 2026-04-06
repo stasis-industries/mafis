@@ -151,6 +151,9 @@ pub struct FaultScenario {
     pub intermittent_mtbf_ticks: u64,
     /// Ticks an agent is unavailable per fault event (latency injection).
     pub intermittent_recovery_ticks: u32,
+    /// Warm-up floor: no intermittent faults fire before this tick.
+    /// First fire then lands at `start_tick + Exp(MTBF)`. Default 0 = no warm-up.
+    pub intermittent_start_tick: u64,
 
     // -- Custom Weibull override --
     /// When set, overrides `wear_heat_rate` preset with custom (beta, eta).
@@ -171,6 +174,7 @@ impl Default for FaultScenario {
             zone_latency_duration: 50,
             intermittent_mtbf_ticks: 80,
             intermittent_recovery_ticks: 15,
+            intermittent_start_tick: 0,
             custom_weibull: None,
         }
     }
@@ -209,6 +213,7 @@ impl FaultScenario {
                 intermittent_enabled: true,
                 intermittent_mtbf_ticks: self.intermittent_mtbf_ticks,
                 intermittent_recovery_ticks: self.intermittent_recovery_ticks,
+                intermittent_start_tick: self.intermittent_start_tick,
                 ..Default::default()
             },
             // Burst + Zone use scheduled events -- automatic fault model disabled
@@ -277,6 +282,9 @@ pub struct FaultItem {
     // Intermittent
     pub intermittent_mtbf_ticks: u64,
     pub intermittent_recovery_ticks: u32,
+    /// Warm-up floor for intermittent faults. No faults fire before this tick.
+    #[serde(default)]
+    pub intermittent_start_tick: u64,
 }
 
 impl Default for FaultItem {
@@ -291,6 +299,7 @@ impl Default for FaultItem {
             zone_latency_duration: 50,
             intermittent_mtbf_ticks: 80,
             intermittent_recovery_ticks: 15,
+            intermittent_start_tick: 0,
         }
     }
 }
@@ -346,6 +355,7 @@ impl FaultList {
             fault_config.intermittent_enabled = true;
             fault_config.intermittent_mtbf_ticks = inter.intermittent_mtbf_ticks;
             fault_config.intermittent_recovery_ticks = inter.intermittent_recovery_ticks;
+            fault_config.intermittent_start_tick = inter.intermittent_start_tick;
         }
 
         // --- Scheduled events: burst (sum same-tick) ---

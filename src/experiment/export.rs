@@ -241,7 +241,8 @@ fn write_run_json<W: Write>(writer: &mut W, run: &RunResult) -> std::io::Result<
     write!(
         writer,
         "{{\"config\":{{\"solver\":\"{}\",\"topology\":\"{}\",\"scenario\":\"{}\",\
-         \"scheduler\":\"{}\",\"num_agents\":{},\"seed\":{},\"tick_count\":{}}},",
+         \"scheduler\":\"{}\",\"num_agents\":{},\"seed\":{},\"tick_count\":{},\
+         \"fault_scenario\":",
         run.config.solver_name,
         run.config.topology_name,
         run.config.scenario_label(),
@@ -250,11 +251,46 @@ fn write_run_json<W: Write>(writer: &mut W, run: &RunResult) -> std::io::Result<
         run.config.seed,
         run.config.tick_count,
     )?;
+    write_fault_scenario_json(writer, run.config.scenario.as_ref())?;
+    write!(writer, "}},")?;
     write!(writer, "\"baseline_key\":\"{}\"", baseline_key_str(&run.config))?;
     write!(writer, ",\"faulted\":")?;
     write_metrics_json(writer, &run.faulted_metrics)?;
     write!(writer, "}}")?;
     Ok(())
+}
+
+fn write_fault_scenario_json<W: Write>(
+    writer: &mut W,
+    scenario: Option<&crate::fault::scenario::FaultScenario>,
+) -> std::io::Result<()> {
+    use crate::fault::scenario::FaultScenarioType;
+    let Some(s) = scenario else {
+        write!(writer, "null")?;
+        return Ok(());
+    };
+    match s.scenario_type {
+        FaultScenarioType::BurstFailure => write!(
+            writer,
+            "{{\"type\":\"burst_failure\",\"kill_percent\":{},\"at_tick\":{}}}",
+            s.burst_kill_percent, s.burst_at_tick
+        ),
+        FaultScenarioType::WearBased => write!(
+            writer,
+            "{{\"type\":\"wear_based\",\"heat_rate\":\"{}\"}}",
+            s.wear_heat_rate.id()
+        ),
+        FaultScenarioType::ZoneOutage => write!(
+            writer,
+            "{{\"type\":\"zone_outage\",\"at_tick\":{},\"duration\":{}}}",
+            s.zone_at_tick, s.zone_latency_duration
+        ),
+        FaultScenarioType::IntermittentFault => write!(
+            writer,
+            "{{\"type\":\"intermittent_fault\",\"start_tick\":{},\"mtbf\":{},\"recovery\":{}}}",
+            s.intermittent_start_tick, s.intermittent_mtbf_ticks, s.intermittent_recovery_ticks
+        ),
+    }
 }
 
 /// Format an f64 for JSON: NaN → "null", finite → formatted number.

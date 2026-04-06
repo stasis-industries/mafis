@@ -36,9 +36,13 @@ impl ExperimentConfig {
                     format!("zone_{}t", s.zone_latency_duration)
                 }
                 FaultScenarioType::IntermittentFault => {
+                    // Format: intermittent_{start}s{mtbf}m{recovery}r
+                    // `start` = warm-up floor tick (0 = no warm-up).
                     format!(
-                        "intermittent_{}m{}r",
-                        s.intermittent_mtbf_ticks, s.intermittent_recovery_ticks
+                        "intermittent_{}s{}m{}r",
+                        s.intermittent_start_tick,
+                        s.intermittent_mtbf_ticks,
+                        s.intermittent_recovery_ticks
                     )
                 }
             },
