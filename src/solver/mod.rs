@@ -1,3 +1,4 @@
+pub mod lacam3;
 pub mod lifelong;
 pub mod pibt;
 pub mod rhcr;
@@ -16,6 +17,7 @@ pub use shared::traits;
 
 use bevy::prelude::*;
 
+use self::lacam3::LaCAM3LifelongSolver;
 use self::lifelong::LifelongSolver;
 use self::pibt::{PibtLifelongSolver, default_active_solver};
 use self::rhcr::{RhcrConfig, RhcrSolver};
@@ -33,6 +35,7 @@ pub const SOLVER_NAMES: &[(&str, &str)] = &[
     ("pibt", "PIBT — Priority Inheritance with Backtracking"),
     ("rhcr_pbs", "RHCR (PBS) — Rolling-Horizon with Priority-Based Search"),
     ("token_passing", "Token Passing — Decentralized Sequential Planning"),
+    ("lacam3_lifelong", "LaCAM3 — Engineered LaCAM* (AAMAS 2024) Lifelong Wrapper"),
 ];
 
 /// Create a LifelongSolver by name with auto-computed defaults.
@@ -49,6 +52,7 @@ pub fn lifelong_solver_from_name(
             Some(Box::new(RhcrSolver::new(cfg)))
         }
         "token_passing" => Some(Box::new(TokenPassingSolver::new())),
+        "lacam3_lifelong" => Some(Box::new(LaCAM3LifelongSolver::new())),
         _ => None,
     }
 }
@@ -92,7 +96,7 @@ mod factory_tests {
     }
 
     #[test]
-    fn solver_names_has_three_entries() {
-        assert_eq!(SOLVER_NAMES.len(), 3);
+    fn solver_names_has_four_entries() {
+        assert_eq!(SOLVER_NAMES.len(), 4);
     }
 }

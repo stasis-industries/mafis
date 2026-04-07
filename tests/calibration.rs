@@ -164,7 +164,7 @@ fn property_solver_paradigm_consistency() {
     let ticks = 300;
     let agents = 20;
 
-    let solvers = ["pibt", "rhcr_pbs", "token_passing"];
+    let solvers = ["pibt", "rhcr_pbs", "token_passing", "lacam3_lifelong"];
 
     let mut results = Vec::new();
 

@@ -37,6 +37,13 @@ fn solver_info(id: &str) -> SolverInfo {
             source: "Ma et al., AAMAS 2017",
             warning: Some("Recommended ≤100 agents"),
         },
+        "lacam3_lifelong" => SolverInfo {
+            optimality: "Suboptimal",
+            scalability: "Excellent",
+            description: "Engineered LaCAM* (AAMAS 2024) — configuration-space search wrapped in lifelong replan loop. SOTA single-shot MAPF.",
+            source: "Okumura, AAMAS 2024",
+            warning: None,
+        },
         _ => SolverInfo {
             optimality: "?",
             scalability: "?",

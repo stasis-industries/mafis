@@ -26,7 +26,7 @@ use mafis::fault::scenario::FaultSchedule;
 /// All faithful solvers — used for MR3 (collision freedom) and MR4 (determinism),
 /// which only require that the solver runs without panic and produces consistent
 /// results. They do NOT require meaningful throughput.
-const SOLVERS: &[&str] = &["pibt", "rhcr_pbs", "token_passing"];
+const SOLVERS: &[&str] = &["pibt", "rhcr_pbs", "token_passing", "lacam3_lifelong"];
 
 /// Solvers expected to produce meaningful throughput on synthetic open grids
 /// (16x16 / 20x20 with random zone assignments). RHCR-PBS is excluded because

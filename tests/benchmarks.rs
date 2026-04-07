@@ -13,7 +13,7 @@ use mafis::experiment::runner::run_single_experiment;
 const TICK_COUNT: u64 = 300;
 const NUM_AGENTS: usize = 15;
 
-const SOLVERS: &[&str] = &["pibt", "rhcr_pbs", "token_passing"];
+const SOLVERS: &[&str] = &["pibt", "rhcr_pbs", "token_passing", "lacam3_lifelong"];
 
 // ═══════════════════════════════════════════════════════════════════════
 // Inline MovingAI-format maps

@@ -350,7 +350,7 @@ fn solver_factory_empty_name_returns_none() {
 #[test]
 fn solver_factory_zero_agents() {
     // All solvers should accept 0 agents without panic
-    for name in ["pibt", "rhcr_pbs", "token_passing"] {
+    for name in ["pibt", "rhcr_pbs", "token_passing", "lacam3_lifelong"] {
         let solver = lifelong_solver_from_name(name, 100, 0);
         assert!(solver.is_some(), "{name} should accept 0 agents");
     }
@@ -360,7 +360,7 @@ fn solver_factory_zero_agents() {
 fn solver_factory_zero_grid_area() {
     // grid_area=0 might cause division by zero in auto-config
     // Should not panic
-    for name in ["pibt", "rhcr_pbs", "token_passing"] {
+    for name in ["pibt", "rhcr_pbs", "token_passing", "lacam3_lifelong"] {
         let _ = lifelong_solver_from_name(name, 0, 10);
     }
 }
@@ -368,7 +368,7 @@ fn solver_factory_zero_grid_area() {
 #[test]
 fn solver_factory_agents_exceed_grid() {
     // More agents than could possibly fit — factory shouldn't care
-    for name in ["pibt", "rhcr_pbs", "token_passing"] {
+    for name in ["pibt", "rhcr_pbs", "token_passing", "lacam3_lifelong"] {
         let solver = lifelong_solver_from_name(name, 4, 1000);
         assert!(solver.is_some(), "{name} should accept large agent count at factory level");
     }

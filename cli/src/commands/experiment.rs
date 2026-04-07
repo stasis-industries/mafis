@@ -17,8 +17,8 @@ struct ExperimentInfo {
 const EXPERIMENTS: &[ExperimentInfo] = &[
     ExperimentInfo {
         name: "solver_resilience",
-        runs: 540,
-        description: "3 solvers \u{00d7} 6 scenarios \u{00d7} 30 seeds",
+        runs: 720,
+        description: "4 solvers \u{00d7} 6 scenarios \u{00d7} 30 seeds",
         test_fn: "solver_resilience",
     },
     ExperimentInfo {
@@ -47,14 +47,14 @@ const EXPERIMENTS: &[ExperimentInfo] = &[
     },
     ExperimentInfo {
         name: "braess_resilience",
-        runs: 3600,
-        description: "3 solvers \u{00d7} 4 densities \u{00d7} 6 scenarios \u{00d7} 50 seeds",
+        runs: 4800,
+        description: "4 solvers \u{00d7} 4 densities \u{00d7} 6 scenarios \u{00d7} 50 seeds",
         test_fn: "braess_resilience",
     },
     ExperimentInfo {
         name: "paams_full",
-        runs: 5940,
-        description: "PAAMS 2026: 3 solvers \u{00d7} 3 topologies \u{00d7} 6 scenarios \u{00d7} 30 seeds (becomes 7,920 once LaCAM3 is added)",
+        runs: 7920,
+        description: "PAAMS 2026: 4 solvers \u{00d7} 3 topologies \u{00d7} 6 scenarios \u{00d7} 30 seeds",
         test_fn: "paams_full",
     },
 ];

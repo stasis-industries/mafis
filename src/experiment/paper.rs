@@ -130,14 +130,14 @@ fn paper_scenarios() -> Vec<Option<FaultScenario>> {
 ///
 /// Produces Table 1: Solver × Scenario matrix with FT, NRR, Critical Time.
 ///
-/// 3 solvers x 6 scenarios x 30 seeds = 540 runs
-/// (LaCAM3-Lifelong will be added in Step 4 of solver-refocus refactor → 4 solvers)
+/// 4 solvers x 6 scenarios x 30 seeds = 720 runs
 pub fn solver_resilience() -> ExperimentMatrix {
     ExperimentMatrix {
         solvers: vec![
             "pibt".into(),
             "rhcr_pbs".into(),
             "token_passing".into(),
+            "lacam3_lifelong".into(),
         ],
         topologies: vec!["warehouse_large".into()],
         scenarios: paper_scenarios(),
@@ -273,20 +273,21 @@ pub fn scheduler_effect() -> ExperimentMatrix {
 
 /// **RQ5: Does fault type interact with fleet density and solver architecture?**
 ///
-/// Independent variables: solver (3), fleet size (4), fault scenario (6)
+/// Independent variables: solver (4), fleet size (4), fault scenario (6)
 /// Controlled: topology (medium), scheduler (random)
 ///
 /// Tests the Braess hypothesis: under congestion, permanent agent removal
 /// can paradoxically improve throughput for reactive solvers by reducing
 /// corridor competition, while coordinated solvers suffer.
 ///
-/// 3 solvers x 4 densities x 6 scenarios x 50 seeds = 3,600 runs
+/// 4 solvers x 4 densities x 6 scenarios x 50 seeds = 4,800 runs
 pub fn braess_resilience() -> ExperimentMatrix {
     ExperimentMatrix {
         solvers: vec![
             "pibt".into(),
             "rhcr_pbs".into(),
             "token_passing".into(),
+            "lacam3_lifelong".into(),
         ],
         topologies: vec!["warehouse_large".into()],
         scenarios: paper_scenarios(),
@@ -333,12 +334,12 @@ pub fn all_paper_experiments() -> Vec<(&'static str, ExperimentMatrix)> {
 ///
 /// Fidelity discipline: every solver in this list has a faithful Rust implementation
 /// traceable to public reference source code under `docs/papers_codes/`.
-/// LaCAM3-Lifelong will be added in Step 4 of the solver-refocus refactor.
 fn paams_solvers() -> Vec<String> {
     vec![
         "pibt".into(),
         "rhcr_pbs".into(),
         "token_passing".into(),
+        "lacam3_lifelong".into(),
     ]
 }
 
@@ -347,9 +348,9 @@ fn paams_solvers() -> Vec<String> {
 /// Design: per-topology matrices (agent counts vary per map capacity).
 /// Three density levels per topology: low / default / high.
 ///
-/// E1: 3 solvers × 6 scenarios × 3 agent counts × 3 topologies × 30 seeds = 4,860 runs
-/// E2: 3 solvers × 6 scenarios × 2 schedulers × 1 topology × 30 seeds = 1,080 runs
-/// Total: 5,940 runs (will become 7,920 once LaCAM3-Lifelong is added in Step 4)
+/// E1: 4 solvers × 6 scenarios × 3 agent counts × 3 topologies × 30 seeds = 6,480 runs
+/// E2: 4 solvers × 6 scenarios × 2 schedulers × 1 topology × 30 seeds = 1,440 runs
+/// Total: 7,920 runs
 pub fn paams_experiments() -> Vec<(&'static str, ExperimentMatrix)> {
     let solvers = paams_solvers();
     let scenarios = paper_scenarios();
@@ -440,6 +441,7 @@ pub fn solver_benchmark() -> ExperimentMatrix {
             "pibt".into(),
             "rhcr_pbs".into(),
             "token_passing".into(),
+            "lacam3_lifelong".into(),
         ],
         topologies: vec!["warehouse_large".into()],
         scenarios: vec![None, Some(burst_20())],
@@ -457,7 +459,7 @@ mod tests {
     #[test]
     fn solver_resilience_count() {
         let m = solver_resilience();
-        assert_eq!(m.total_runs(), 540); // 3 solvers × 6 scenarios × 30 seeds
+        assert_eq!(m.total_runs(), 720); // 4 solvers × 6 scenarios × 30 seeds
     }
 
     #[test]
@@ -483,22 +485,22 @@ mod tests {
     fn all_paper_total() {
         let all = all_paper_experiments();
         let total: usize = all.iter().map(|(_, m)| m.total_runs()).sum();
-        assert_eq!(total, 2520); // 540 + 900 + 720 + 360
+        assert_eq!(total, 2700); // 720 + 900 + 720 + 360
     }
 
     #[test]
     fn paams_experiment_counts() {
         let experiments = paams_experiments();
         let total: usize = experiments.iter().map(|(_, m)| m.total_runs()).sum();
-        // E1: 3 solvers × 6 scenarios × 3 counts × 30 seeds × 3 topos = 4,860
-        // E2: 3 solvers × 6 scenarios × 2 schedulers × 30 seeds = 1,080
-        assert_eq!(total, 5940);
+        // E1: 4 solvers × 6 scenarios × 3 counts × 30 seeds × 3 topos = 6,480
+        // E2: 4 solvers × 6 scenarios × 2 schedulers × 30 seeds = 1,440
+        assert_eq!(total, 7920);
     }
 
     #[test]
     fn braess_resilience_count() {
         let m = braess_resilience();
-        assert_eq!(m.total_runs(), 3600); // 3 solvers × 4 densities × 6 scenarios × 50 seeds
+        assert_eq!(m.total_runs(), 4800); // 4 solvers × 4 densities × 6 scenarios × 50 seeds
     }
 
     /// Cross-topology validation: does the Braess effect replicate on other layouts?

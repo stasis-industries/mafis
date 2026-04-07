@@ -30,7 +30,7 @@ pub struct PresetConfig {
 
 fn preset_solver_resilience() -> PresetConfig {
     PresetConfig {
-        solvers: vec!["pibt".into(), "rhcr_pbs".into(), "token_passing".into()],
+        solvers: vec!["pibt".into(), "rhcr_pbs".into(), "token_passing".into(), "lacam3_lifelong".into()],
         topologies: vec!["warehouse_large".into()],
         schedulers: vec!["random".into()],
         agent_counts: "40".into(),

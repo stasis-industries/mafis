@@ -4910,7 +4910,7 @@ const EXPERIMENT_PRESETS = {
         scenarios: ['burst_20'], agents: '8', seeds: '42, 123', ticks: 50,
     },
     solver: {
-        solvers: ['pibt', 'rhcr_pbs', 'token_passing'], topologies: ['warehouse-medium'],
+        solvers: ['pibt', 'rhcr_pbs', 'token_passing', 'lacam3_lifelong'], topologies: ['warehouse-medium'],
         schedulers: ['random'], scenarios: ['none', 'burst_20', 'burst_50', 'wear_medium', 'wear_high', 'zone'],
         agents: '40', seeds: '42, 123, 456, 789, 1024', ticks: 500,
     },
@@ -5306,7 +5306,7 @@ let padlockState = null;
 function padlockFormatValue(key, value) {
     const v = String(value);
     if (key === 'solver') {
-        const map = { pibt: 'PIBT', token_passing: 'Token Pass', rhcr_pbs: 'RHCR-PBS' };
+        const map = { pibt: 'PIBT', token_passing: 'Token Pass', rhcr_pbs: 'RHCR-PBS', lacam3_lifelong: 'LaCAM3' };
         return map[v] || v;
     }
     if (key === 'scenario_key') {

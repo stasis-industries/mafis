@@ -47,7 +47,7 @@ fn run(
 // 1. Solver × Topology: every solver runs on every topology without panic
 // ═══════════════════════════════════════════════════════════════════════
 
-const SOLVERS: &[&str] = &["pibt", "rhcr_pbs", "token_passing"];
+const SOLVERS: &[&str] = &["pibt", "rhcr_pbs", "token_passing", "lacam3_lifelong"];
 
 const TOPOLOGIES: &[(&str, usize)] = &[
     ("warehouse_medium", 15),
@@ -377,7 +377,7 @@ fn new_topologies_under_fault() {
 
 #[test]
 fn all_solvers_no_collisions_500_ticks() {
-    let solvers = ["pibt", "rhcr_pbs", "token_passing"];
+    let solvers = ["pibt", "rhcr_pbs", "token_passing", "lacam3_lifelong"];
 
     for solver_name in &solvers {
         let topo = ActiveTopology::from_name("warehouse_large");
@@ -584,7 +584,7 @@ fn rhcr_fallback_collision_free() {
 
 #[test]
 fn determinism_all_solvers_all_schedulers() {
-    let solvers = ["pibt", "rhcr_pbs", "token_passing"];
+    let solvers = ["pibt", "rhcr_pbs", "token_passing", "lacam3_lifelong"];
     let schedulers = ["random", "closest"];
 
     for solver in &solvers {
@@ -1707,7 +1707,7 @@ fn solver_throughput_ordering_sanity() {
 
     let mut throughputs: std::collections::HashMap<&str, f64> = std::collections::HashMap::new();
 
-    let all_solvers = ["pibt", "rhcr_pbs", "token_passing"];
+    let all_solvers = ["pibt", "rhcr_pbs", "token_passing", "lacam3_lifelong"];
 
     for &solver in &all_solvers {
         let config = ExperimentConfig {
@@ -1776,7 +1776,7 @@ fn solver_throughput_ordering_sanity() {
 /// visited sets, token paths) that would poison the re-run.
 #[test]
 fn rewind_determinism_reset_matches_fresh() {
-    let solvers_with_state = ["pibt", "rhcr_pbs", "token_passing"];
+    let solvers_with_state = ["pibt", "rhcr_pbs", "token_passing", "lacam3_lifelong"];
 
     let topo = ActiveTopology::from_name("warehouse_large");
     let output = topo.topology().generate(42);
