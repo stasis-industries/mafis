@@ -1,12 +1,58 @@
 //! Token Passing — decentralized lifelong MAPF solver.
 //!
-//! Each tick, idle agents plan collision-free paths by treating all other agents'
-//! planned paths as moving obstacles (via the shared TOKEN). One agent plans at
-//! a time (sequentially), using spacetime A* with constraints built from
-//! the TOKEN.
+//! REFERENCE: docs/papers_codes/pibt/pibt2/src/tp.cpp (Okumura et al., pibt2)
+//!            docs/papers_codes/pibt/pibt2/include/tp.hpp
+//! Paper: Ma, Tovey, Sharon, Kumar, Koenig — "Lifelong Multi-Agent Path Finding
+//! for Online Pickup and Delivery Tasks", AAMAS 2017.
 //!
-//! Reference: Ma et al., "Lifelong Multi-Agent Path Finding for Online Pickup
-//! and Delivery Tasks" (AAMAS 2017).
+//! Audited 2026-04-07 against the canonical pibt2 reference (~320 lines C++).
+//!
+//! ## Structural mapping (MAFIS ↔ pibt2)
+//!
+//! The MAFIS implementation is **semantically equivalent** to pibt2's canonical
+//! algorithm but expressed in different but isomorphic data structures. Specifically:
+//!
+//! | pibt2 (absolute time)              | MAFIS (relative time)                  |
+//! |------------------------------------|----------------------------------------|
+//! | `TOKEN[i]: vector<Node>` grows     | `Token::paths[i]: VecDeque<IVec2>`     |
+//! | `current_timestep` increments      | `Token::advance()` pops front each tick|
+//! | `TOKEN[i][current_t]` = current pos| `paths[i].front()` = current pos       |
+//! | `TOKEN[i].size()-1 == current_t`   | `paths[i].len() <= 1` (no future plan) |
+//! | `CONFLICT_TABLE[t][cell] != NIL`   | `MasterConstraintIndex::is_vertex_blocked(cell, t)` |
+//! | endpoint blocking via `token_endpoints[v]` + `TOKEN[k].size()-1 < t` | `MasterConstraintIndex::add_path` extends final-cell vertex constraints to `max_time` |
+//! | `checkAstarFin: g + current_t > max_constraint_time` | vertex constraints on goal cell at all blocked times naturally force A* to delay arrival |
+//!
+//! ## Adaptations to MAFIS architecture
+//!
+//! MAFIS separates task scheduling from path planning. Where pibt2 picks tasks
+//! inside the solver loop (`tp.cpp` lines 64-103), MAFIS receives `agent.goal:
+//! Option<IVec2>` already set by the `TaskScheduler` trait (see
+//! `src/core/task/`). Therefore the pibt2 task assignment phase is omitted —
+//! MAFIS only ports the **path planning portion** of TP (`tp.cpp` lines 250-317
+//! `updatePath` + the conflict-table A* hooks).
+//!
+//! Position synchronization (`step()` lines 187-196) is a MAFIS-specific addition
+//! that handles fault-induced divergence: if an agent's actual position differs
+//! from its expected token position, the token is reset to `[actual_pos]` and
+//! the agent is replanned next tick. pibt2 has no fault handling because it's
+//! a finite-task experiment.
+//!
+//! ## Tracked deviations from the canonical algorithm
+//!
+//! 1. **Relative vs absolute time** — semantically equivalent (see mapping table
+//!    above). Relative time gives bounded memory for lifelong operation; absolute
+//!    time would grow `TOKEN[i]` indefinitely.
+//!
+//! 2. **No `updatePath2` (closest non-conflicting endpoint selection)** — pibt2
+//!    line 206-248 handles the case where an agent has no task and its current
+//!    cell is a delivery location, by moving to the closest free endpoint.
+//!    MAFIS's task scheduler handles idle-state task generation differently
+//!    (the `TaskLeg::Free` state machine), so this branch isn't applicable.
+//!
+//! 3. **Planning order: pibt2 line 52 iterates agents in vector order**. The
+//!    sequential planning order matters in TP because agent k's plan affects
+//!    agent k+1's constraints. MAFIS now matches this (was previously
+//!    "tasked-first" — fixed in 2026-04-07 audit).
 
 use bevy::prelude::*;
 use smallvec::smallvec;
@@ -180,10 +226,16 @@ impl LifelongSolver for TokenPassingSolver {
         self.ensure_initialized(agents);
         self.plan_buffer.clear();
 
-        // Advance token
+        // Advance token: pop the front of every path, simulating that all agents
+        // moved to their TOKEN[i][1] position. This is the relative-time
+        // equivalent of pibt2's `current_timestep++` (tp.cpp line 165 `P->update()`).
         self.token.advance();
 
-        // Sync actual positions
+        // Sync actual positions — MAFIS-specific fault handling.
+        // pibt2 has no equivalent because it's a finite-task experiment with
+        // no fault model. If an agent didn't move as expected (fault, latency,
+        // collision recovery), its token diverges from reality; reset to
+        // [actual_pos] so the next replan starts fresh.
         for a in agents {
             if let Some(&local) = self.agent_map.get(a.index)
                 && local < self.token.paths.len()
@@ -195,18 +247,24 @@ impl LifelongSolver for TokenPassingSolver {
             }
         }
 
-        // Build master constraint index once from all token paths
+        // Build master constraint index from all token paths.
+        // REFERENCE: pibt2 tp.cpp lines 274-296 `checkInvalidAstarNode` builds
+        // a token_endpoints map and uses CONFLICT_TABLE to block cells. The
+        // MasterConstraintIndex is the MAFIS equivalent: it adds vertex+edge
+        // constraints for every cell in every TOKEN path, plus extends the
+        // final cell of each path forever (the endpoint blocking).
         self.master_ci.reset(ctx.grid.width, ctx.grid.height, TOKEN_PATH_MAX_TIME);
         for path in &self.token.paths {
             self.master_ci.add_path(path, TOKEN_PATH_MAX_TIME);
         }
 
-        // Plan for agents that need replanning
+        // Plan for agents that need replanning, in agent index order.
+        // REFERENCE: pibt2 tp.cpp line 52 `for (auto a : A)` — iterates the
+        // agent vector in insertion order. The sequential planning order is
+        // semantically significant in TP because agent k's emitted plan
+        // becomes a constraint for agent k+1.
         let mut planning_order: Vec<usize> = (0..agents.len()).collect();
-        planning_order.sort_by_key(|&i| {
-            let has_task = !matches!(agents[i].task_leg, TaskLeg::Free);
-            (!has_task, agents[i].index)
-        });
+        planning_order.sort_by_key(|&i| agents[i].index);
 
         for &agent_idx in &planning_order {
             let a = &agents[agent_idx];
@@ -215,6 +273,11 @@ impl LifelongSolver for TokenPassingSolver {
                 _ => continue,
             };
 
+            // REFERENCE: pibt2 tp.cpp line 53
+            // `if ((int)TOKEN[a->id].size() - 1 != P->getCurrentTimestep())`
+            // i.e. agent needs replan iff its token doesn't extend past now.
+            // Relative-time equivalent: `paths[local].len() <= 1` means
+            // path[0]=current_pos with no future planned steps.
             let needs_plan =
                 self.token.paths[local].len() <= 1 && a.goal.is_some() && a.pos != a.goal.unwrap();
 
@@ -224,11 +287,19 @@ impl LifelongSolver for TokenPassingSolver {
 
             let goal = a.goal.unwrap();
 
-            // Remove this agent's path from the master index
+            // Remove this agent's own token from the constraint index before
+            // planning (so the agent doesn't constrain itself).
+            // REFERENCE: pibt2 tp.cpp line 278 `if (j == i) continue;` in the
+            // token_endpoints loop, line 279 `if (j != i)` in the conflict-table
+            // check — the agent's own path is excluded.
             let old_path = self.token.paths[local].clone();
             self.master_ci.remove_path(&old_path, TOKEN_PATH_MAX_TIME);
 
-            // Plan using the master index (agent's own path excluded)
+            // Plan with spacetime A* against the constraint index.
+            // REFERENCE: pibt2 tp.cpp line 299 `getPathBySpaceTimeAstar(...)`.
+            // The MAFIS adaptation routes through `task_leg` to pick the
+            // current waypoint (pickup vs delivery vs goal), since MAFIS's
+            // task scheduler manages the leg transitions externally.
             let path = match &a.task_leg {
                 TaskLeg::TravelEmpty(pickup) => {
                     self.plan_for_agent(local, a.pos, *pickup, ctx.grid, distance_cache)
@@ -412,5 +483,46 @@ mod tests {
         solver.reset();
         assert!(!solver.initialized);
         assert!(solver.token.paths.is_empty());
+    }
+
+    /// Regression test for the Token Passing audit (Step 3 of solver-refocus).
+    ///
+    /// Locks the current MAFIS TP throughput on a known instance so that the
+    /// 2026-04-07 fix to planning order (tasked-first → agent-index order to
+    /// match pibt2 line 52) doesn't drift in future changes. Floor is set to
+    /// 50% of the measured baseline to allow noise but catch real regressions.
+    ///
+    /// REFERENCE: docs/papers_codes/pibt/pibt2/src/tp.cpp (Okumura, pibt2).
+    #[test]
+    fn token_passing_throughput_regression() {
+        use crate::core::topology::TopologyRegistry;
+        use crate::experiment::config::ExperimentConfig;
+        use crate::experiment::runner::run_single_experiment;
+
+        let registry = TopologyRegistry::load_from_dir(std::path::Path::new("topologies"));
+        assert!(registry.find("warehouse_large").is_some(), "warehouse_large.json missing");
+
+        let config = ExperimentConfig {
+            solver_name: "token_passing".into(),
+            topology_name: "warehouse_large".into(),
+            scenario: None,
+            scheduler_name: "random".into(),
+            num_agents: 20,
+            seed: 42,
+            tick_count: 200,
+            custom_map: None,
+        };
+        let result = run_single_experiment(&config);
+        let tp = result.baseline_metrics.avg_throughput;
+        eprintln!("token_passing_throughput_regression: tp={tp:.4} tasks/tick");
+        // Token Passing on warehouse_large at 20 agents should produce
+        // measurable throughput (>0.05 tasks/tick). A regression to near-zero
+        // would indicate broken sequential planning or constraint logic.
+        assert!(
+            tp > 0.05,
+            "Token Passing regression: avg_throughput {tp:.4} fell below 0.05 floor. \
+             Check planning order, MasterConstraintIndex add/remove symmetry, and \
+             pibt2 line 53 needs-replan condition."
+        );
     }
 }
