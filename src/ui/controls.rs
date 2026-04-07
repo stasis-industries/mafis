@@ -126,8 +126,6 @@ pub struct UiState {
     pub rhcr_horizon: Option<usize>,
     /// User override for RHCR replan interval (None = auto).
     pub rhcr_replan_interval: Option<usize>,
-    /// User override for RHCR fallback mode (None = auto).
-    pub rhcr_fallback: Option<String>,
     /// Whether fault injection is enabled.
     pub fault_enabled: bool,
     /// Fault scenario type.
@@ -159,7 +157,6 @@ impl Default for UiState {
             imported_scenario: None,
             rhcr_horizon: None,
             rhcr_replan_interval: None,
-            rhcr_fallback: None,
             fault_enabled: false,
             fault_scenario_type: "burst_failure".to_string(),
             burst_kill_percent: 20.0,

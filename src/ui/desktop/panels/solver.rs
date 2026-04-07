@@ -69,7 +69,6 @@ pub fn solver_panel(ui: &mut egui::Ui, ui_state: &mut UiState, sim_state: SimSta
                         // Clear RHCR overrides when switching solver
                         ui_state.rhcr_horizon = None;
                         ui_state.rhcr_replan_interval = None;
-                        ui_state.rhcr_fallback = None;
                     }
                 }
             },
@@ -143,24 +142,7 @@ pub fn solver_panel(ui: &mut egui::Ui, ui_state: &mut UiState, sim_state: SimSta
                 }
             });
 
-            // Fallback mode
-            ui.horizontal(|ui| {
-                ui.label("Fallback");
-                let current = ui_state.rhcr_fallback.as_deref().unwrap_or("auto").to_owned();
-                egui::ComboBox::from_id_salt("rhcr_fallback").selected_text(&current).show_ui(
-                    ui,
-                    |ui| {
-                        for mode in &["auto", "per_agent", "full", "tiered"] {
-                            if ui.selectable_label(current == *mode, *mode).clicked() && idle {
-                                ui_state.rhcr_fallback =
-                                    if *mode == "auto" { None } else { Some(mode.to_string()) };
-                            }
-                        }
-                    },
-                );
-            });
-
-            ui.weak("Auto-tuned for current grid and agent count.");
+            ui.weak("Auto-tuned for current grid and agent count. PBS uses per-agent LRA fallback.");
         });
     }
 }

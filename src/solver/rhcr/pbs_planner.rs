@@ -3,6 +3,58 @@
 //! Builds a binary priority tree: each node has a priority ordering. When a
 //! conflict is found, the tree branches into two children (agent_i > agent_j
 //! and agent_j > agent_i). Bounded by node limit.
+//!
+//! REFERENCE: docs/papers_codes/rhcr/src/PBS.cpp (Jiaoyang-Li/RHCR, AAAI 2021).
+//! Paper: Li, Tinka, Kiesel, Durham, Kumar, Koenig — "Lifelong Multi-Agent Path
+//! Finding in Large-Scale Warehouses".
+//!
+//! Audited 2026-04-06 against the canonical reference. The MAFIS implementation
+//! corresponds to **lazy-priority PBS** (`lazyPriority = true` in the reference,
+//! see PBS.cpp:477 and driver.cpp:114). The reference defaults to eager mode
+//! (`lazyPriority = false`), which produces tighter solutions at higher cost.
+//!
+//! Tracked deviations from the reference:
+//!
+//! 1. **Lazy vs eager priority mode** — MAFIS only implements lazy mode. When a
+//!    new priority pair (higher → lower) is added, only the lower-priority agent
+//!    is replanned (`try_branch` line ~582). The reference's eager mode would
+//!    iteratively call `find_consistent_paths` (PBS.cpp:410) to replan every
+//!    agent whose path is invalidated by the new constraint, propagating until
+//!    fixed-point. This costs more compute but produces better plans.
+//!    Impact: MAFIS PBS may need more node expansions to reach a conflict-free
+//!    plan on dense instances. The lazy mode is documented in the reference.
+//!
+//! 2. **No `prioritize_start` heuristic** — the reference (PBS.cpp:385) checks
+//!    if either agent in a conflict is still waiting at its start location at
+//!    the conflict timestep, and forces the *other* agent to replan
+//!    (start-preferring). MAFIS branches symmetrically without this preference.
+//!    Impact: MAFIS may explore slightly more priority orderings to discover
+//!    that a starting agent should yield. Quality impact is small.
+//!
+//! 3. **No `choose_conflict` heuristic** — the reference picks which conflict to
+//!    branch on via `choose_conflict` (PBS.cpp:694). MAFIS uses the *earliest*
+//!    conflict found by `ConflictGrid::detect_first`, which is a sensible
+//!    default but not the reference's heuristic.
+//!    Impact: branching order may differ. Doesn't affect correctness.
+//!
+//! 4. **No `nogood` set** — the reference (PBS.cpp:772) records pairs of agents
+//!    where both branches failed, to skip them in future branching. MAFIS
+//!    rediscovers these failures.
+//!    Impact: small slowdown on hard instances; no correctness impact.
+//!
+//! 5. **Best-node tie-break uses `conflicts` instead of `f_val`** — the reference
+//!    sorts by f_val first, num_of_collisions second (PBS.cpp:750). MAFIS uses
+//!    earliest_collision first, conflicts count second. The reference's f_val
+//!    is sum-of-costs; MAFIS doesn't track per-agent path cost since the
+//!    windowed planner discards cost information after committing the window.
+//!    Impact: best-node selection prioritizes "delays the first conflict" over
+//!    "minimizes total cost". Reasonable for a windowed planner.
+//!
+//! Validation: smoke test on warehouse_large (8 agents, 100 ticks) and
+//! `pbs_throughput_regression` (40 agents, 200 ticks) lock in the current
+//! lazy-mode behavior. If the Step 5 validation gate (clean-benchmark
+//! ranking RHCR-PBS > PIBT) fails, eager mode should be implemented as a
+//! follow-up.
 
 use bevy::prelude::*;
 

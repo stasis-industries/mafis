@@ -80,7 +80,6 @@ pub(crate) enum JsCommand {
     SelectAgent(usize),
     SetRhcrHorizon(usize),
     SetRhcrReplanInterval(usize),
-    SetRhcrFallback(String),
     SetQueuePolicy(String),
     SetFaultList(String),
     SetTheme(String),
@@ -172,9 +171,6 @@ pub(super) fn parse_command(json: &str) -> Option<JsCommand> {
         "set_rhcr_horizon" => Some(JsCommand::SetRhcrHorizon(v.get("value")?.as_u64()? as usize)),
         "set_rhcr_replan_interval" => {
             Some(JsCommand::SetRhcrReplanInterval(v.get("value")?.as_u64()? as usize))
-        }
-        "set_rhcr_fallback" => {
-            Some(JsCommand::SetRhcrFallback(v.get("value")?.as_str()?.to_string()))
         }
         "set_queue_policy" => {
             Some(JsCommand::SetQueuePolicy(v.get("value")?.as_str()?.to_string()))
@@ -474,7 +470,6 @@ pub(super) fn process_js_commands(
                             // Clear RHCR overrides when switching solver
                             sim_res.ui_state.rhcr_horizon = None;
                             sim_res.ui_state.rhcr_replan_interval = None;
-                            sim_res.ui_state.rhcr_fallback = None;
                             *sim_res.solver = ActiveSolver::new(new_solver);
                         }
                     }
@@ -739,11 +734,6 @@ pub(super) fn process_js_commands(
                             crate::constants::RHCR_MAX_REPLAN_INTERVAL,
                         );
                         sim_res.ui_state.rhcr_replan_interval = Some(w);
-                    }
-                }
-                JsCommand::SetRhcrFallback(mode) => {
-                    if current == SimState::Idle {
-                        sim_res.ui_state.rhcr_fallback = Some(mode);
                     }
                 }
                 JsCommand::SetFaultList(json) => {

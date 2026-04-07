@@ -1,11 +1,33 @@
-//! RHCR — Rolling-Horizon Collision Resolution
+//! RHCR — Rolling-Horizon Collision Resolution (PBS variant)
 //!
 //! Windowed lifelong solver that replans every W ticks for a horizon of H steps.
-//! Configurable conflict resolution mode: PBS, PIBT-Window, or Priority A*.
-//! Falls back to PIBT when the windowed planner fails.
+//! Uses Priority-Based Search as the inner planner. Falls back to PIBT for
+//! agents the inner planner fails to handle.
 //!
-//! Reference: Li et al., "Lifelong Multi-Agent Path Finding in Large-Scale
-//! Warehouses" (AAAI 2021).
+//! REFERENCE: docs/papers_codes/rhcr/ (Jiaoyang-Li/RHCR)
+//! Paper: Li, Tinka, Kiesel, Durham, Kumar, Koenig — "Lifelong Multi-Agent
+//! Path Finding in Large-Scale Warehouses", AAAI 2021.
+//!
+//! Audited 2026-04-06. Specific reference mappings:
+//! - `update_congestion()` → `BasicSystem::congested()` at BasicSystem.cpp:310.
+//!   Both use the >50% wait threshold over a simulation window. MAFIS extends
+//!   this with per-cell exponentially-decayed wait counts for congestion-aware
+//!   routing — a small additive feature, not a deviation from the canonical
+//!   detection rule.
+//! - `fill_goal_sequences()` → `KivaSystem::update_goal_locations()` at
+//!   KivaSystem.cpp:70. MAFIS uses a simplified version: append random endpoints
+//!   until cumulative distance reaches the horizon. The reference's
+//!   `hold_endpoints` semantics are not implemented because MAFIS's task
+//!   lifecycle (TaskLeg state machine in src/core/task/) handles endpoint
+//!   reservations differently.
+//!
+//! See `pbs_planner.rs` for inner-planner deviations from `PBS.cpp`.
+//!
+//! The MAFIS RHCR-PBS, PIBT-Window, and Priority-A* "modes" that previously
+//! coexisted under a strategy enum were MAFIS-internal extrapolations not
+//! present in the canonical paper, and have been archived on
+//! `archive/cut-solvers`. Only PBS remains, matching Li et al.'s default
+//! configuration.
 
 use bevy::prelude::*;
 use rand::Rng;
@@ -27,14 +49,6 @@ use super::pbs_planner::PbsPlanner;
 // ---------------------------------------------------------------------------
 // Configuration
 // ---------------------------------------------------------------------------
-//
-// MAFIS RHCR is the canonical Li et al. AAAI 2021 algorithm: rolling-horizon
-// windowed planning with Priority-Based Search as the inner planner.
-// Reference: docs/papers_codes/rhcr/ (Jiaoyang-Li/RHCR).
-//
-// The PIBT-Window and Priority-A* "modes" that previously coexisted under a
-// strategy enum were MAFIS-internal extrapolations not present in the canonical
-// paper, and have been archived on `archive/cut-solvers`.
 
 #[derive(Debug, Clone)]
 pub struct RhcrConfig {
@@ -998,5 +1012,54 @@ mod tests {
         // After reset, first call should replan again
         let result = solver.step(&ctx, &agents, &mut cache, &mut rng);
         assert!(matches!(result, StepResult::Replan(_)));
+    }
+
+    /// Regression test for the RHCR-PBS audit (Step 2 of solver-refocus).
+    ///
+    /// Locks the current lazy-priority PBS throughput on a known instance so a
+    /// future change to the planner (e.g. switching to eager mode) is detected.
+    /// The lower bound is set generously below the measured baseline so that
+    /// minor implementation drift doesn't break the test, but a regression that
+    /// drops PBS to all-Wait or all-fallback behavior would trip it.
+    ///
+    /// Measured baseline 2026-04-06: tp = 0.040 tasks/tick on warehouse_large,
+    /// 40 agents, random scheduler, 200 ticks. PBS throughput is genuinely low
+    /// at this density because the windowed planner hits node limits and falls
+    /// back to per-agent PIBT for many agents — this is documented behavior of
+    /// lazy PBS. The Step 5 validation gate (clean_benchmark_validation.rs)
+    /// will run the closest-scheduler configuration where PBS performs much
+    /// better (+117% TP lift was measured in PAAMS data).
+    ///
+    /// Reference: docs/papers_codes/rhcr/src/PBS.cpp (Jiaoyang-Li/RHCR).
+    #[test]
+    fn rhcr_pbs_throughput_regression() {
+        use crate::core::topology::TopologyRegistry;
+        use crate::experiment::config::ExperimentConfig;
+        use crate::experiment::runner::run_single_experiment;
+
+        // Validate the topology loads (defends against silent topology breakage)
+        let registry = TopologyRegistry::load_from_dir(std::path::Path::new("topologies"));
+        assert!(registry.find("warehouse_large").is_some(), "warehouse_large.json missing");
+
+        let config = ExperimentConfig {
+            solver_name: "rhcr_pbs".into(),
+            topology_name: "warehouse_large".into(),
+            scenario: None,
+            scheduler_name: "random".into(),
+            num_agents: 40,
+            seed: 42,
+            tick_count: 200,
+            custom_map: None,
+        };
+        let result = run_single_experiment(&config);
+        let tp = result.baseline_metrics.avg_throughput;
+        eprintln!("rhcr_pbs_throughput_regression: tp={tp:.4} tasks/tick");
+        // Floor: 0.02 (50% of measured baseline 0.040). A regression to 0 or
+        // close to 0 would indicate a planner break. Higher throughput is fine.
+        assert!(
+            tp > 0.02,
+            "RHCR-PBS regression: avg_throughput {tp:.4} fell below 0.02 floor \
+             (baseline measured 2026-04-06: 0.040). Likely a planner break."
+        );
     }
 }

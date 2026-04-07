@@ -4308,7 +4308,6 @@ function bindControls() {
     const rhcrParams = document.getElementById('rhcr-params');
     const rhcrHorizon = document.getElementById('input-rhcr-horizon');
     const rhcrReplan = document.getElementById('input-rhcr-replan');
-    const rhcrFallback = document.getElementById('input-rhcr-fallback');
     const rhcrAutoHint = document.getElementById('rhcr-auto-hint');
 
     function updateRhcrVisibility() {
@@ -4335,11 +4334,6 @@ function bindControls() {
     if (rhcrReplan) {
         rhcrReplan.addEventListener('change', () => {
             sendCommand({ type: 'set_rhcr_replan_interval', value: parseInt(rhcrReplan.value) || 5 });
-        });
-    }
-    if (rhcrFallback) {
-        rhcrFallback.addEventListener('change', () => {
-            sendCommand({ type: 'set_rhcr_fallback', value: rhcrFallback.value });
         });
     }
 
