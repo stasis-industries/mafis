@@ -182,7 +182,7 @@ fn braess_resilience() {
     write_experiment_results("braess_resilience", &result);
 }
 
-/// PAAMS 2026 full experiment matrix — ~16,170 runs (~3-5 hours on 8 cores).
+/// PAAMS 2026 full experiment matrix — 7,920 runs (4 solvers × 6 scenarios × 3 topologies × 30 seeds).
 /// Run with: cargo test --release --test paper_experiments paams_full -- --ignored --nocapture
 #[test]
 #[ignore]
