@@ -1,10 +1,18 @@
 use bevy::prelude::*;
 use rand_chacha::ChaCha8Rng;
+use smallvec::SmallVec;
 use std::collections::{HashSet, VecDeque};
 
 use super::topology::ZoneMap;
-use crate::constants::THROUGHPUT_WINDOW_SIZE;
+use crate::constants::{PBS_GOAL_SEQUENCE_MAX_LEN, THROUGHPUT_WINDOW_SIZE};
 use crate::solver::heuristics::DistanceMapCache;
+
+// `peek_task_chain` returns a `SmallVec<[IVec2; N]>`. Rust does not let us
+// parameterise the inline-array length by a `const usize` import in a generic
+// context, so we hardcode the literal `8` and assert it matches the canonical
+// constant. Bumping `PBS_GOAL_SEQUENCE_MAX_LEN` requires updating the `8` below
+// and the same assertion will fail-loud at compile time.
+const _: () = assert!(PBS_GOAL_SEQUENCE_MAX_LEN == 8);
 
 pub mod closest;
 pub use closest::ClosestFirstScheduler;
@@ -132,6 +140,32 @@ pub trait TaskScheduler: Send + Sync + 'static {
             }
         }
         assignments
+    }
+
+    /// Peek a hypothetical chain of future goals for one agent without committing them.
+    ///
+    /// Used by RHCR's `fill_goal_sequences` to populate `WindowAgent.goal_sequence`.
+    /// Mirrors `KivaSystem::update_goal_locations` (KivaSystem.cpp:143-196): generates
+    /// alternating pickup/delivery goals based on `current_leg`, rejects any goal equal
+    /// to `current_goal` (KivaSystem.cpp:83-85), and terminates when cumulative Manhattan
+    /// distance exceeds `max_cumulative_distance` OR length reaches
+    /// `PBS_GOAL_SEQUENCE_MAX_LEN` OR `PEEK_CHAIN_MAX_RETRIES` consecutive rejections.
+    ///
+    /// **Determinism contract**: must consume RNG only via the passed-in `rng`. Must
+    /// not allocate a private RNG. Fault rewind tests rely on this.
+    ///
+    /// Default impl returns empty `SmallVec` — non-supporting schedulers fall back to
+    /// single-goal planning in RHCR (no regression vs current behavior).
+    fn peek_task_chain(
+        &self,
+        _zones: &ZoneMap,
+        _current_pos: IVec2,
+        _current_goal: IVec2,
+        _current_leg: TaskLeg,
+        _max_cumulative_distance: u64,
+        _rng: &mut ChaCha8Rng,
+    ) -> SmallVec<[IVec2; 8]> {
+        SmallVec::new()
     }
 }
 
