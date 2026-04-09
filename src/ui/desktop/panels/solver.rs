@@ -20,7 +20,7 @@ fn solver_info(id: &str) -> SolverInfo {
             optimality: "Suboptimal",
             scalability: "Excellent",
             description: "Reactive one-step priority inheritance. Replans every tick — fast, handles high density.",
-            source: "Okumura et al., AAAI 2019",
+            source: "Okumura et al., AIJ 2022",
             warning: None,
         },
         "rhcr_pbs" => SolverInfo {

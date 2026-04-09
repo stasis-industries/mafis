@@ -28,7 +28,7 @@ use crate::export::config::ExportTrigger;
 #[cfg(target_arch = "wasm32")]
 use crate::render::orbit_camera as orbit_camera_fns;
 #[cfg(target_arch = "wasm32")]
-use crate::solver::lifelong_solver_from_name;
+use crate::solver::lifelong_solver_from_name_sized;
 #[cfg(target_arch = "wasm32")]
 use crate::ui::controls::ImportedScenario;
 #[cfg(target_arch = "wasm32")]
@@ -461,10 +461,11 @@ pub(super) fn process_js_commands(
                 }
                 JsCommand::SetSolver(name) => {
                     if current == SimState::Idle {
-                        let grid_area = (sim_res.grid.width * sim_res.grid.height) as usize;
+                        let grid_w = sim_res.grid.width as usize;
+                        let grid_h = sim_res.grid.height as usize;
                         let num_agents = sim_res.ui_state.num_agents;
                         if let Some(new_solver) =
-                            lifelong_solver_from_name(&name, grid_area, num_agents)
+                            lifelong_solver_from_name_sized(&name, grid_w, grid_h, num_agents)
                         {
                             sim_res.ui_state.solver_name = name.clone();
                             // Clear RHCR overrides when switching solver

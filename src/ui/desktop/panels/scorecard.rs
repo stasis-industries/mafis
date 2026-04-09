@@ -70,6 +70,12 @@ pub fn scorecard_panel(ui: &mut egui::Ui, scorecard: &ResilienceScorecard) {
     });
 }
 
+/// Coarse 0–5 verdict for the desktop scorecard panel.
+///
+/// ⚠ NOT a research-grade metric. The implicit weights are hand-picked for
+/// at-a-glance UI feedback and have no theoretical derivation. Do not cite
+/// in papers — the PAAMS 2026 paper reports the 5 primary metrics directly.
+/// See `docs/papers/paper1_drafts/paams2026/scope_decisions.md §4`.
 fn composite_score(sc: &ResilienceScorecard) -> usize {
     let mut score = 0.0_f32;
     score += sc.fault_tolerance.min(1.0);

@@ -246,12 +246,17 @@ mod observatory_controls {
         // Recreate solver from ui_state to guarantee same type+config as baseline.
         // Just calling reset() would keep a stale solver type (e.g. RHCR from a
         // previous run) while the baseline creates a fresh one from solver_name.
+        // Use the *_sized factory so RHCR's PBS scratch buffers are pre-allocated
+        // at the actual grid dimensions — eliminates the first-tick allocation
+        // stall that users perceive as "slow simulation start".
         {
-            let grid_area = (res.ui_state.grid_width * res.ui_state.grid_height) as usize;
+            let grid_w = res.ui_state.grid_width as usize;
+            let grid_h = res.ui_state.grid_height as usize;
             let num_agents = res.ui_state.num_agents;
-            if let Some(fresh) = crate::solver::lifelong_solver_from_name(
+            if let Some(fresh) = crate::solver::lifelong_solver_from_name_sized(
                 &res.ui_state.solver_name,
-                grid_area,
+                grid_w,
+                grid_h,
                 num_agents,
             ) {
                 *reset.solver = ActiveSolver::new(fresh);
@@ -370,9 +375,13 @@ mod observatory_controls {
 
             // Create solver — use actual_agents (clamped) so RHCR auto-config
             // matches what the experiment runner and baseline engine compute.
-            let runner_solver = crate::solver::lifelong_solver_from_name(
+            // The *_sized factory pre-allocates RHCR PBS scratch buffers at
+            // the real grid dimensions, avoiding the first-tick allocation
+            // stall.
+            let runner_solver = crate::solver::lifelong_solver_from_name_sized(
                 &res.ui_state.solver_name,
-                (runner_grid.width * runner_grid.height) as usize,
+                runner_grid.width as usize,
+                runner_grid.height as usize,
                 actual_agents,
             )
             .unwrap_or_else(|| Box::new(crate::solver::pibt::PibtLifelongSolver::new()));
