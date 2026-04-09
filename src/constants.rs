@@ -72,6 +72,16 @@ pub const MAX_CASCADE_DEPTH: u32 = 10;
 /// Maximum entries kept in the fault survival time-series.
 pub const MAX_SURVIVAL_ENTRIES: usize = 1000;
 
+/// Maximum entries kept in `FaultMetrics::event_records` and the related
+/// `cascade_spreads` / `recovery_times` deques. Bounds memory and the cost
+/// of any iteration over the full history (e.g., bridge serialization
+/// already takes only the last 100; desktop UI takes only the last 10).
+///
+/// Statistical aggregates (avg cascade spread, MTTR, MTBF, propagation rate)
+/// are tracked via running sums on `FaultMetrics`, so they remain accurate
+/// across the full simulation even when older entries are evicted.
+pub const MAX_FAULT_EVENT_HISTORY: usize = 1000;
+
 /// ADG (Action Dependency Graph) lookahead steps per agent.
 pub const ADG_LOOKAHEAD: usize = 3;
 
@@ -159,6 +169,47 @@ pub const PBS_MAX_NODE_LIMIT: usize = 1_000;
 #[cfg(not(target_arch = "wasm32"))]
 pub const PBS_MAX_NODE_LIMIT: usize = 10_000;
 
+// ── RHCR / PBS (reference-aligned) ──────────────────────────────────
+//
+// Constants for the faithful PBS port (PAAMS 2026 RHCR-PBS fix).
+// Each value cites a specific line in the canonical Jiaoyang-Li/RHCR
+// reference (`docs/papers_codes/rhcr/`) so reviewers can verify fidelity.
+
+/// Default RHCR replan interval (W).
+/// REFERENCE: `docs/papers_codes/rhcr/src/driver.cpp:116` — `simulation_window`.
+pub const RHCR_SIMULATION_WINDOW_DEFAULT: usize = 5;
+
+/// Default RHCR planning horizon (H).
+/// REFERENCE: Li et al. 2021 §5.1 — typical `w + h` lookahead used in the
+/// published warehouse experiments.
+pub const RHCR_PLANNING_HORIZON_DEFAULT: usize = 10;
+
+/// PBS `find_consistent_paths` cycle guard: abort cascade replan if
+/// `count > paths.len() * MULT`.
+/// REFERENCE: `docs/papers_codes/rhcr/src/PBS.cpp:423`.
+pub const PBS_CONSISTENT_PATHS_REPLAN_MULT: usize = 5;
+
+/// Maximum length of the per-agent goal sequence used by `WindowAgent`
+/// and the peek chain. Worst case: `RHCR_SIMULATION_WINDOW_DEFAULT` (=5)
+/// minimum-cost legs of length 1 plus a 3-step safety margin. Matches
+/// the unbounded `KivaSystem.cpp` `goal_locations` vector with a sane cap.
+pub const PBS_GOAL_SEQUENCE_MAX_LEN: usize = 8;
+
+/// Whether PBS uses lazy priority resolution.
+/// REFERENCE: `docs/papers_codes/rhcr/src/driver.cpp:114` — reference default
+/// `lazyP = false` (i.e. eager mode is the canonical default).
+pub const PBS_LAZY_PRIORITY_DEFAULT: bool = false;
+
+/// Whether PBS's `find_replan_agents` skips agents still waiting at start.
+/// REFERENCE: `docs/papers_codes/rhcr/inc/PBS.h:13` — `prioritize_start = true`
+/// declaration.
+pub const PBS_PRIORITIZE_START_DEFAULT: bool = true;
+
+/// Maximum consecutive rejections in `peek_task_chain` before terminating
+/// the chain. Mirrors the implicit retry budget in `KivaSystem.cpp:143–196`
+/// where `update_goal_locations` retries on `next == curr`.
+pub const PEEK_CHAIN_MAX_RETRIES: usize = 10;
+
 /// Maximum spacetime horizon for Token Passing A*. Increase if large topologies
 /// produce NoSolution on paths that require more than 200 steps.
 pub const TOKEN_PATH_MAX_TIME: u64 = 300;
@@ -193,9 +244,11 @@ pub const TICK_SNAPSHOT_INTERVAL: u64 = 3;
 
 /// Critical Time threshold: fraction of baseline avg throughput below which
 /// the system is considered "in critical state."
-/// Based on performability theory (Ghasemieh & Haverkort 2015): systems below
-/// 50% nominal capacity are in degraded state. Industry practice (Amazon
-/// Robotics SLA): throughput below 50% triggers operator intervention.
+///
+/// 50% is an operational rule of thumb consistent with service-level objective
+/// practice in fleet operations (e.g., Amazon Robotics SLA conventions trigger
+/// operator intervention when throughput drops below half of nominal). It is
+/// NOT a derived constant from a specific performability paper
 pub const CRITICAL_TIME_THRESHOLD: f64 = 0.5;
 
 /// How often to recompute scorecard metrics (ticks).

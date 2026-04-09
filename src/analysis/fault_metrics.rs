@@ -48,14 +48,20 @@ pub struct FaultEventRecord {
 #[derive(Resource, Debug)]
 pub struct FaultMetrics {
     recovery_pending: HashMap<Entity, u64>,
-    recovery_times: Vec<u64>,
+    /// Bounded sliding window of recovery durations. Capped at
+    /// `MAX_FAULT_EVENT_HISTORY` to prevent unbounded growth in long
+    /// fault-heavy simulations. Statistical accuracy across the full
+    /// simulation is preserved by `recovery_times_sum` / `recovery_times_count`.
+    recovery_times: VecDeque<u64>,
     pub mttr: f32,
 
     pub total_affected: u32,
     pub total_recovered: u32,
     pub recovery_rate: f32,
 
-    cascade_spreads: Vec<u32>,
+    /// Bounded sliding window of cascade spreads (one entry per fault event).
+    /// Same capping + running-aggregate strategy as `recovery_times`.
+    cascade_spreads: VecDeque<u32>,
     pub avg_cascade_spread: f32,
 
     /// Mean Time Between Faults — average ticks between consecutive fault events.
@@ -70,29 +76,62 @@ pub struct FaultMetrics {
     pub survival_series: VecDeque<(u64, f32)>,
     pub initial_agent_count: u32,
 
-    pub event_records: Vec<FaultEventRecord>,
+    /// Bounded sliding window of fault event records. Capped at
+    /// `MAX_FAULT_EVENT_HISTORY`. The bridge serializer takes only the last
+    /// 100 events per sync (`bridge/serialize.rs:678`); the desktop UI takes
+    /// only the last 10 (`ui/desktop/panels/fault_response.rs:66`); the
+    /// scorecard reads `len()` only. So a 1000-entry cap is plenty.
+    pub event_records: VecDeque<FaultEventRecord>,
 
     last_fault_log_len: usize,
+
+    // ─── Running aggregates (decoupled from storage cap) ────────────────
+    //
+    // These accumulate over the *entire* simulation, even when old entries
+    // are evicted from the bounded VecDeques above. This preserves the
+    // statistical accuracy of derived metrics (avg cascade spread, MTTR,
+    // MTBF, propagation rate) regardless of how many events have been seen.
+    //
+    // Updated incrementally on each push (O(1)), never recomputed by walking
+    // the full history. Reset on `clear()` and `recompute_aggregates_from_remaining()`.
+    cascade_spreads_sum: u64,
+    cascade_spreads_count: u64,
+    recovery_times_sum: u64,
+    recovery_times_count: u64,
+    mtbf_last_tick: Option<u64>,
+    mtbf_intervals_sum: u64,
+    mtbf_intervals_count: u64,
+    propagation_rate_sum: f32,
+    propagation_rate_count: u64,
 }
 
 impl Default for FaultMetrics {
     fn default() -> Self {
         Self {
             recovery_pending: HashMap::new(),
-            recovery_times: Vec::new(),
+            recovery_times: VecDeque::with_capacity(constants::MAX_FAULT_EVENT_HISTORY + 1),
             mttr: 0.0,
             total_affected: 0,
             total_recovered: 0,
             recovery_rate: 0.0,
-            cascade_spreads: Vec::new(),
+            cascade_spreads: VecDeque::with_capacity(constants::MAX_FAULT_EVENT_HISTORY + 1),
             avg_cascade_spread: 0.0,
             mtbf: None,
             propagation_rate: 0.0,
             wait_ratio: 0.0,
             survival_series: VecDeque::with_capacity(constants::MAX_SURVIVAL_ENTRIES + 1),
             initial_agent_count: 0,
-            event_records: Vec::new(),
+            event_records: VecDeque::with_capacity(constants::MAX_FAULT_EVENT_HISTORY + 1),
             last_fault_log_len: 0,
+            cascade_spreads_sum: 0,
+            cascade_spreads_count: 0,
+            recovery_times_sum: 0,
+            recovery_times_count: 0,
+            mtbf_last_tick: None,
+            mtbf_intervals_sum: 0,
+            mtbf_intervals_count: 0,
+            propagation_rate_sum: 0.0,
+            propagation_rate_count: 0,
         }
     }
 }
@@ -102,12 +141,78 @@ impl FaultMetrics {
         *self = Self::default();
     }
 
-    /// Truncate all data after `tick` for rewind support.
+    /// Truncate all data after `tick` for rewind support. After evicting
+    /// entries that no longer fit the rewind tick, the running aggregates
+    /// must be rebuilt from the remaining entries to keep derived metrics
+    /// (MTTR, avg cascade spread, MTBF, propagation rate) consistent with
+    /// the post-rewind state.
     pub fn truncate_after_tick(&mut self, tick: u64) {
         self.event_records.retain(|r| r.tick <= tick);
         self.survival_series.retain(|&(t, _)| t <= tick);
+        // We can't easily filter cascade_spreads/recovery_times by tick
+        // (they don't carry per-entry tick metadata), so on rewind we
+        // truncate them along with event_records by recomputing from the
+        // remaining events. This loses recovery durations and intermediate
+        // event metrics for the evicted suffix — acceptable for rewind which
+        // already drops live state.
+        self.cascade_spreads.clear();
+        for r in &self.event_records {
+            self.cascade_spreads.push_back(r.agents_affected);
+        }
+        self.recompute_aggregates_from_remaining();
         // Will be recalculated by register_fault_recovery
         self.last_fault_log_len = 0;
+    }
+
+    /// Recompute every running aggregate from whatever entries are still
+    /// present in the bounded VecDeques. Called after `truncate_after_tick`
+    /// to restore consistency post-rewind. Intentionally O(remaining) — this
+    /// is the only path that walks the full history; the steady-state push
+    /// path is O(1).
+    fn recompute_aggregates_from_remaining(&mut self) {
+        // cascade_spreads
+        self.cascade_spreads_sum = self.cascade_spreads.iter().map(|&x| x as u64).sum();
+        self.cascade_spreads_count = self.cascade_spreads.len() as u64;
+
+        // recovery_times — note: these are NOT regenerated from event_records
+        // because they don't 1:1 correspond. We just use whatever remains.
+        self.recovery_times_sum = self.recovery_times.iter().sum();
+        self.recovery_times_count = self.recovery_times.len() as u64;
+
+        // MTBF — walk event_records ticks
+        let ticks: Vec<u64> = self.event_records.iter().map(|r| r.tick).collect();
+        self.mtbf_last_tick = ticks.last().copied();
+        self.mtbf_intervals_sum = 0;
+        self.mtbf_intervals_count = 0;
+        for w in ticks.windows(2) {
+            self.mtbf_intervals_sum += w[1].saturating_sub(w[0]);
+            self.mtbf_intervals_count += 1;
+        }
+
+        // Propagation rate
+        self.propagation_rate_sum = self
+            .event_records
+            .iter()
+            .map(|r| {
+                if r.alive_at_event > 0 {
+                    r.agents_affected as f32 / r.alive_at_event as f32
+                } else {
+                    0.0
+                }
+            })
+            .sum();
+        self.propagation_rate_count = self.event_records.len() as u64;
+    }
+
+    /// Push a fault event record onto the bounded deque, evicting the oldest
+    /// entry if at capacity. Returns the assigned event id (which is
+    /// monotonically increasing across the *full* simulation, not just the
+    /// current window — same as before).
+    fn push_event_record(&mut self, record: FaultEventRecord) {
+        self.event_records.push_back(record);
+        while self.event_records.len() > constants::MAX_FAULT_EVENT_HISTORY {
+            self.event_records.pop_front();
+        }
     }
 
     /// Register a manual fault event directly (bypass cascade BFS).
@@ -121,8 +226,10 @@ impl FaultMetrics {
         position: IVec2,
         alive_count: u32,
     ) {
-        let id = self.event_records.len();
-        self.event_records.push(FaultEventRecord {
+        // The event id is the *cumulative* count, NOT `event_records.len()`,
+        // so it stays monotonic even after the deque evicts old entries.
+        let id = self.cascade_spreads_count as usize;
+        self.push_event_record(FaultEventRecord {
             id,
             tick,
             fault_type,
@@ -134,6 +241,33 @@ impl FaultMetrics {
             recovery_tick: None,
             alive_at_event: alive_count,
         });
+
+        // Manual events: agents_affected = 1, treat as a single-cell cascade.
+        self.cascade_spreads.push_back(1);
+        while self.cascade_spreads.len() > constants::MAX_FAULT_EVENT_HISTORY {
+            self.cascade_spreads.pop_front();
+        }
+        self.cascade_spreads_sum += 1;
+        self.cascade_spreads_count += 1;
+
+        // Update MTBF from the new event tick.
+        if let Some(prev) = self.mtbf_last_tick {
+            self.mtbf_intervals_sum += tick.saturating_sub(prev);
+            self.mtbf_intervals_count += 1;
+            self.mtbf = Some(self.mtbf_intervals_sum as f32 / self.mtbf_intervals_count as f32);
+        }
+        self.mtbf_last_tick = Some(tick);
+
+        // Update propagation rate (1/alive_count for manual events).
+        if alive_count > 0 {
+            self.propagation_rate_sum += 1.0 / alive_count as f32;
+            self.propagation_rate_count += 1;
+            self.propagation_rate = self.propagation_rate_sum / self.propagation_rate_count as f32;
+        }
+
+        // Update avg_cascade_spread incrementally.
+        self.avg_cascade_spread =
+            self.cascade_spreads_sum as f32 / self.cascade_spreads_count as f32;
     }
 
     // ── Pure math helpers (exposed for tests) ─────────────────────────────
@@ -217,17 +351,42 @@ pub fn register_fault_recovery(
     let fault_log = &cascade.fault_log;
     let already_processed = fault_metrics.last_fault_log_len;
 
+    // Fast path: nothing new to process. Bail before any work.
+    if fault_log.len() <= already_processed {
+        return;
+    }
+
     // Count alive agents once (used as denominator for propagation rate).
     // This is the alive count at processing time — close enough since cascade
     // processing happens the same tick as the fault event.
     let alive_now = alive_agents.iter().count() as u32;
 
     for entry in fault_log.iter().skip(already_processed) {
-        fault_metrics.cascade_spreads.push(entry.agents_affected);
+        // Push to bounded deque + update running aggregate (O(1)).
+        fault_metrics.cascade_spreads.push_back(entry.agents_affected);
+        while fault_metrics.cascade_spreads.len() > constants::MAX_FAULT_EVENT_HISTORY {
+            fault_metrics.cascade_spreads.pop_front();
+        }
+        fault_metrics.cascade_spreads_sum += entry.agents_affected as u64;
+        fault_metrics.cascade_spreads_count += 1;
 
-        // Create FaultEventRecord
-        let event_id = fault_metrics.event_records.len();
-        fault_metrics.event_records.push(FaultEventRecord {
+        // Update MTBF interval from the previous event's tick.
+        if let Some(prev_tick) = fault_metrics.mtbf_last_tick {
+            fault_metrics.mtbf_intervals_sum += entry.tick.saturating_sub(prev_tick);
+            fault_metrics.mtbf_intervals_count += 1;
+        }
+        fault_metrics.mtbf_last_tick = Some(entry.tick);
+
+        // Update propagation rate running aggregate.
+        if alive_now > 0 {
+            fault_metrics.propagation_rate_sum += entry.agents_affected as f32 / alive_now as f32;
+            fault_metrics.propagation_rate_count += 1;
+        }
+
+        // The event id is the *cumulative* count (monotonic across the full
+        // simulation), not `event_records.len()` which would reset on eviction.
+        let event_id = fault_metrics.cascade_spreads_count as usize - 1;
+        fault_metrics.push_event_record(FaultEventRecord {
             id: event_id,
             tick: entry.tick,
             fault_type: entry.fault_type,
@@ -256,31 +415,22 @@ pub fn register_fault_recovery(
         }
     }
 
-    // Only recompute derived metrics when new fault events were processed.
-    // Avoids O(events) Vec allocation + iteration on ticks with no new faults.
-    let new_events = fault_log.len() > already_processed;
     fault_metrics.last_fault_log_len = fault_log.len();
 
-    if new_events {
-        if !fault_metrics.cascade_spreads.is_empty() {
-            let sum: u32 = fault_metrics.cascade_spreads.iter().sum();
-            fault_metrics.avg_cascade_spread =
-                sum as f32 / fault_metrics.cascade_spreads.len() as f32;
-        }
-
-        // --- MTBF: mean time between fault events (Or 2025) ---
-        let event_ticks: Vec<u64> = fault_metrics.event_records.iter().map(|r| r.tick).collect();
-        fault_metrics.mtbf = FaultMetrics::compute_mtbf(&event_ticks);
-
-        // --- Propagation Rate: use alive-at-event as denominator (not initial fleet) ---
-        if !fault_metrics.event_records.is_empty() {
-            let events: Vec<(u32, u32)> = fault_metrics
-                .event_records
-                .iter()
-                .map(|r| (r.agents_affected, r.alive_at_event))
-                .collect();
-            fault_metrics.propagation_rate = FaultMetrics::compute_propagation_rate(&events);
-        }
+    // Recompute derived metrics from the running aggregates (O(1) — no Vec
+    // allocation, no iteration over event_records).
+    if fault_metrics.cascade_spreads_count > 0 {
+        fault_metrics.avg_cascade_spread =
+            fault_metrics.cascade_spreads_sum as f32 / fault_metrics.cascade_spreads_count as f32;
+    }
+    if fault_metrics.mtbf_intervals_count > 0 {
+        fault_metrics.mtbf = Some(
+            fault_metrics.mtbf_intervals_sum as f32 / fault_metrics.mtbf_intervals_count as f32,
+        );
+    }
+    if fault_metrics.propagation_rate_count > 0 {
+        fault_metrics.propagation_rate =
+            fault_metrics.propagation_rate_sum / fault_metrics.propagation_rate_count as f32;
     }
 }
 
@@ -328,24 +478,35 @@ pub fn update_fault_metrics(
     pending_scratch.clear();
     pending_scratch.extend(fault_metrics.recovery_pending.keys().copied());
     recovered_scratch.clear();
+    let mut new_recoveries_this_tick = false;
     for entity in pending_scratch.iter() {
         let fault_tick = fault_metrics.recovery_pending[entity];
         if let Ok((_, agent, _, _)) = agents.get(*entity)
             && (agent.has_plan() || agent.has_reached_goal())
         {
             let recovery_duration = sim_config.tick.saturating_sub(fault_tick);
-            fault_metrics.recovery_times.push(recovery_duration);
+            // Push to bounded deque + update running aggregate (O(1)).
+            // No more O(|recovery_times|) sum-walk per tick.
+            fault_metrics.recovery_times.push_back(recovery_duration);
+            while fault_metrics.recovery_times.len() > constants::MAX_FAULT_EVENT_HISTORY {
+                fault_metrics.recovery_times.pop_front();
+            }
+            fault_metrics.recovery_times_sum += recovery_duration;
+            fault_metrics.recovery_times_count += 1;
             fault_metrics.total_recovered += 1;
             recovered_scratch.push(*entity);
+            new_recoveries_this_tick = true;
         }
     }
     for entity in recovered_scratch.iter() {
         fault_metrics.recovery_pending.remove(entity);
     }
 
-    if !fault_metrics.recovery_times.is_empty() {
-        let sum: u64 = fault_metrics.recovery_times.iter().sum();
-        fault_metrics.mttr = sum as f32 / fault_metrics.recovery_times.len() as f32;
+    // Update MTTR from running aggregates only when something changed —
+    // avoids O(events) work on ticks with no recovery activity.
+    if new_recoveries_this_tick && fault_metrics.recovery_times_count > 0 {
+        fault_metrics.mttr =
+            fault_metrics.recovery_times_sum as f32 / fault_metrics.recovery_times_count as f32;
     }
 
     // --- Recovery rate ---
@@ -461,6 +622,55 @@ mod tests {
         fm.clear();
         fm.clear();
         assert_eq!(fm.mttr, 0.0);
+    }
+
+    // ── Bounded growth + running aggregates (Phase 5 regression) ──────────
+
+    #[test]
+    fn event_records_bounded_under_sustained_faults() {
+        let mut fm = FaultMetrics::default();
+        // Push 5x the cap. The deque must stay ≤ MAX_FAULT_EVENT_HISTORY.
+        for i in 0..(constants::MAX_FAULT_EVENT_HISTORY * 5) {
+            fm.register_manual_event(
+                i as u64,
+                FaultType::Breakdown,
+                FaultSource::Manual,
+                IVec2::ZERO,
+                40,
+            );
+        }
+        assert!(
+            fm.event_records.len() <= constants::MAX_FAULT_EVENT_HISTORY,
+            "event_records grew past cap: {}",
+            fm.event_records.len()
+        );
+        assert!(
+            fm.cascade_spreads.len() <= constants::MAX_FAULT_EVENT_HISTORY,
+            "cascade_spreads grew past cap: {}",
+            fm.cascade_spreads.len()
+        );
+    }
+
+    #[test]
+    fn running_aggregates_track_full_history_after_eviction() {
+        let mut fm = FaultMetrics::default();
+        let n = constants::MAX_FAULT_EVENT_HISTORY * 3;
+        for i in 0..n {
+            fm.register_manual_event(
+                i as u64,
+                FaultType::Breakdown,
+                FaultSource::Manual,
+                IVec2::ZERO,
+                40,
+            );
+        }
+        // The deque is bounded at MAX, but the running counts must reflect
+        // the full simulation (3× MAX events were registered).
+        assert_eq!(fm.cascade_spreads_count, n as u64);
+        // Manual events all have agents_affected=1, so sum equals count.
+        assert_eq!(fm.cascade_spreads_sum, n as u64);
+        // avg should be 1.0
+        assert!((fm.avg_cascade_spread - 1.0).abs() < 1e-5);
     }
 
     // ── compute_mttr ──────────────────────────────────────────────────────
