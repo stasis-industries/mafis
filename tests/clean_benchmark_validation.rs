@@ -11,13 +11,19 @@
 //!
 //! ## Expected ranking on warehouse_large, n=40 agents, no faults, seed 42, 500 ticks
 //!
-//! 1. **lacam3 should beat or match RHCR-PBS** on throughput. Both are
-//!    "high-quality" planners; lacam3 is the SOTA. If lacam3 is materially
-//!    worse than RHCR-PBS, the port has a fidelity issue.
-//! 2. **RHCR-PBS should beat PIBT** on throughput, OR be at least within
-//!    the documented Braess regime where PBS hits node limits at low density.
-//!    The literature ranking from Li et al. 2021 shows windowed > reactive
-//!    on structured warehouse maps.
+//! After the 2026-04-08 RHCR-PBS faithful port (eager mode + peek-chain +
+//! best-effort sequential A*), the ranking is:
+//!
+//!   RHCR-PBS (0.468) > LaCAM3 (0.446) > PIBT (0.418) > Token Passing (0.392)
+//!
+//! 1. **RHCR-PBS should beat or match PIBT** on throughput. Windowed PBS
+//!    with eager priority resolution outperforms myopic PIBT on structured
+//!    warehouse maps per Li et al. 2021. This is the acceptance gate for
+//!    the PAAMS 2026 RHCR-PBS fidelity port — if this fails, the port has
+//!    regressed.
+//! 2. **lacam3 should be competitive with RHCR-PBS** (within ±10%). Both
+//!    are SOTA-class planners. If lacam3 is materially worse than RHCR-PBS,
+//!    the lacam3 port has a fidelity issue.
 //! 3. **lacam3 should beat PIBT** by a meaningful margin. PIBT is myopic
 //!    (one-step) while lacam3 plans multi-step configurations. The
 //!    paper-published lacam3 numbers show 1.5-3x throughput improvement
@@ -100,17 +106,34 @@ fn clean_benchmark_ranking_gate() {
          Check src/solver/lacam3/pibt.rs port."
     );
 
-    // Invariant 3: lacam3 should not be catastrophically worse than RHCR-PBS
-    // (which is itself low on warehouse_large due to PBS node-limit fallback).
-    // Permissive bound: lacam3 ≥ 50% of RHCR-PBS.
-    // Note: in practice lacam3 will EXCEED RHCR-PBS by 10-20x on this instance
-    // because RHCR-PBS hits its node limit and falls back to per-agent PIBT.
+    // Invariant 3 (PAAMS 2026 RHCR-PBS fidelity gate): After the 2026-04-08
+    // eager-mode + peek-chain + best-effort sequential-A* port, RHCR-PBS
+    // must beat or match PIBT on this baseline instance. Measured 2026-04-08:
+    // rhcr_pbs=0.468, pibt=0.418 — a 12% margin. This is the acceptance
+    // gate for the port: if this fails, `find_consistent_paths`, `plan_agent`,
+    // or the best-partial A* fallback has regressed.
+    //
+    // Reference: docs/papers_codes/rhcr/src/PBS.cpp (Jiaoyang-Li/RHCR) —
+    // see the "Historical deviations closed 2026-04-08" block in
+    // src/solver/rhcr/pbs_planner.rs for the per-deviation citations.
     assert!(
-        lacam3_tp >= rhcr_tp * 0.5,
-        "LaCAM3 ({lacam3_tp:.4}) should be ≥ 50% of RHCR-PBS ({rhcr_tp:.4})."
+        rhcr_tp >= pibt_tp,
+        "RHCR-PBS ({rhcr_tp:.4}) must be ≥ PIBT ({pibt_tp:.4}) after the \
+         PBS fidelity port (Streams B + C, PAAMS 2026 sprint). If this \
+         fails, `find_consistent_paths`, `plan_agent`, or the best-partial \
+         `spacetime_astar_sequential` fallback has regressed."
     );
 
-    // Invariant 4: Token Passing should be within 1 order of magnitude of PIBT.
+    // Invariant 4: lacam3 should be competitive with RHCR-PBS — within ±15%.
+    // Both are SOTA-class windowed planners on this instance.
+    assert!(
+        lacam3_tp >= rhcr_tp * 0.85,
+        "LaCAM3 ({lacam3_tp:.4}) should be ≥ 85% of RHCR-PBS ({rhcr_tp:.4}). \
+         Both are SOTA-class planners — a large gap suggests a lacam3 port \
+         regression."
+    );
+
+    // Invariant 5: Token Passing should be within 1 order of magnitude of PIBT.
     // (i.e., not collapse to ~0 due to broken planning order or constraint bug)
     assert!(
         token_tp >= pibt_tp * 0.1,
