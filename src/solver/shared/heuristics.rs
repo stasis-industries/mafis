@@ -97,18 +97,35 @@ use std::collections::HashMap;
 /// who just completed tasks get new goals. This avoids rerunning N BFS flood-fills
 /// when only 1-5 goals changed.
 ///
-/// Obstacle change strategy: when an obstacle is added (agent dies), only evict
-/// cached maps whose BFS path passes through the new obstacle cell. Maps that
-/// never use that cell remain valid. This avoids the catastrophic N×BFS full
-/// recompute that the previous "clear all on obstacle count change" caused.
+/// **Pooled BFS scratch** (RHCR-PBS perf sprint 2026-04-09): the BFS `VecDeque`
+/// used to flood-fill each goal is pooled on the cache itself so it survives
+/// across the N-per-window cache-miss burst. Eliminates ~N × 15 KB of queue
+/// allocation per cold first tick.
+///
+/// **Obstacle diff eviction** (RHCR-PBS perf sprint 2026-04-09): only walks
+/// cached maps against *newly-added* obstacles (by diffing the current
+/// obstacle set against a stored snapshot), not all current obstacles. The
+/// previous code walked every obstacle for every map and evicted on any
+/// finite-distance hit, which was effectively "evict-all on any fault" —
+/// because cached maps were computed before the obstacle was added, every
+/// walkable obstacle cell was reachable. This made the post-fault FPS dip
+/// worse by forcing a full re-BFS.
 #[derive(Resource, Default)]
 pub struct DistanceMapCache {
     cache: HashMap<IVec2, DistanceMap>,
     /// Grid dimensions when cache was built. Invalidate on grid change.
     grid_w: i32,
     grid_h: i32,
-    /// Obstacle count when cache was built — detect when grid changed.
-    grid_obstacle_count: usize,
+    /// Obstacle snapshot at last `get_or_compute` call. Diffed against the
+    /// current grid to compute `added_obstacles` on entry, so we only evict
+    /// maps that route through a cell that just became blocked.
+    last_obstacles: Vec<IVec2>,
+    /// Pooled BFS queue, reused across `compute_with_pooled_queue` calls.
+    /// Cleared at the start of each BFS, grown on demand.
+    bfs_queue: VecDeque<IVec2>,
+    /// Scratch buffer reused by the obstacle-diff logic across calls —
+    /// avoids a small per-call Vec allocation on fault ticks.
+    added_obstacles_scratch: Vec<IVec2>,
 }
 
 impl DistanceMapCache {
@@ -119,48 +136,123 @@ impl DistanceMapCache {
         grid: &GridMap,
         agents: &[(IVec2, IVec2)],
     ) -> Vec<&DistanceMap> {
-        let obstacle_count = grid.obstacle_count();
-
         // Full invalidation only on grid dimension change
         if grid.width != self.grid_w || grid.height != self.grid_h {
             self.cache.clear();
             self.grid_w = grid.width;
             self.grid_h = grid.height;
-            self.grid_obstacle_count = obstacle_count;
-        } else if obstacle_count != self.grid_obstacle_count {
-            // Obstacle count changed (fault killed agent / placed obstacle).
-            // Selective invalidation: evict only maps that routed through a
-            // now-blocked cell. A cached distance map is invalid if any cell
-            // that is now an obstacle had a finite (reachable) distance in it.
-            // We iterate obstacles and check each cached map's value at that
-            // cell — if it was reachable (not u64::MAX), the map is stale.
+            self.last_obstacles.clear();
+            self.last_obstacles.extend(grid.obstacles().iter().copied());
+        } else if grid.obstacle_count() != self.last_obstacles.len() {
+            // Obstacle set changed — find newly-added cells. A cached map is
+            // invalid iff its BFS routed *through* one of those newly-blocked
+            // cells (i.e., the cell had finite distance in the cached map).
+            // Maps that never touched the new obstacle remain valid.
             //
-            // This is O(obstacles × cached_goals) per obstacle-change tick,
-            // but obstacle changes are rare events (fault ticks), not every-tick.
-            // The alternative (full clear) is O(active_goals × grid_size) BFS
-            // floods which is far more expensive.
-            self.cache.retain(|_goal, dm| {
-                // Keep this map only if no current obstacle was reachable in it.
-                // We only need to check obstacles that were added since last time.
-                // Since we can't easily diff obstacles, check all obstacles —
-                // but this only runs on fault ticks, not every tick.
-                for &obs in grid.obstacles() {
-                    if dm.get(obs) != u64::MAX {
-                        return false; // This map routed through a now-blocked cell
-                    }
+            // For a typical fault tick `added` has length 1, so the
+            // containment check inside the retain loop is O(cached_maps) —
+            // far cheaper than the previous "walk every current obstacle for
+            // every map" approach (which evicted everything unconditionally
+            // because the cached map was computed before the obstacle was
+            // added).
+            self.added_obstacles_scratch.clear();
+            for &obs in grid.obstacles() {
+                if !self.last_obstacles.contains(&obs) {
+                    self.added_obstacles_scratch.push(obs);
                 }
-                true
-            });
-            self.grid_obstacle_count = obstacle_count;
+            }
+
+            if !self.added_obstacles_scratch.is_empty() {
+                let added = &self.added_obstacles_scratch;
+                self.cache.retain(|_goal, dm| {
+                    // Keep the map only if NONE of the newly-added obstacle
+                    // cells were reachable in it.
+                    added.iter().all(|&o| dm.get(o) == u64::MAX)
+                });
+            }
+
+            // Snapshot the new obstacle set for the next diff.
+            self.last_obstacles.clear();
+            self.last_obstacles.extend(grid.obstacles().iter().copied());
         }
 
-        // Ensure all goals are in the cache
+        // Ensure all goals are in the cache. Can't use `entry().or_insert_with`
+        // because the closure would need to borrow `self` mutably while the
+        // entry already holds a mutable borrow on `self.cache` — conflicts
+        // with the pooled `bfs_queue` access inside `compute_with_pooled_queue`.
+        // Two-phase: check-then-compute.
         for &(_, goal) in agents {
-            self.cache.entry(goal).or_insert_with(|| DistanceMap::compute(grid, goal));
+            if !self.cache.contains_key(&goal) {
+                let dm = self.compute_with_pooled_queue(grid, goal);
+                self.cache.insert(goal, dm);
+            }
         }
 
         // Return references aligned with agents
         agents.iter().map(|&(_, goal)| self.cache.get(&goal).unwrap()).collect()
+    }
+
+    /// BFS flood-fill from `goal` using the cache's pooled `VecDeque`, so the
+    /// queue's backing allocation is reused across successive cache-miss
+    /// computes. The returned `DistanceMap` owns a fresh `Vec<u64>` for the
+    /// distance array (which lives as long as the cache entry), so only the
+    /// queue is pooled — not the output.
+    fn compute_with_pooled_queue(&mut self, grid: &GridMap, goal: IVec2) -> DistanceMap {
+        let w = grid.width;
+        let h = grid.height;
+        let size = (w * h) as usize;
+        let mut distances = vec![u64::MAX; size];
+        self.bfs_queue.clear();
+
+        if goal.x >= 0 && goal.x < w && goal.y >= 0 && goal.y < h {
+            let idx = (goal.y * w + goal.x) as usize;
+            distances[idx] = 0;
+            self.bfs_queue.push_back(goal);
+        }
+
+        while let Some(pos) = self.bfs_queue.pop_front() {
+            let d = distances[(pos.y * w + pos.x) as usize];
+            for dir in Direction::ALL {
+                let next = pos + dir.offset();
+                if grid.is_walkable(next) {
+                    let next_idx = (next.y * w + next.x) as usize;
+                    if distances[next_idx] == u64::MAX {
+                        distances[next_idx] = d + 1;
+                        self.bfs_queue.push_back(next);
+                    }
+                }
+            }
+        }
+
+        DistanceMap { distances, width: w }
+    }
+
+    /// Pre-compute distance maps for a set of goal cells, populating the cache
+    /// synchronously on the calling thread. Used by `SimulationRunner::new` to
+    /// move the N-BFS cold-start cost off the first rendered tick: the user
+    /// sees a brief "Start" → "first tick" delay (expected loading behavior)
+    /// instead of a frozen frame-to-frame animation.
+    ///
+    /// Goals already in the cache are skipped. Invalidation rules in
+    /// `get_or_compute` still apply on subsequent calls (obstacle diff /
+    /// dimension change), so this is a pure cold-cache warm-up.
+    pub fn warm_up_goals(&mut self, grid: &GridMap, goals: &[IVec2]) {
+        // Prime the dimension/obstacle state so the next `get_or_compute` call
+        // doesn't undo our work by clearing the cache on a dimension mismatch.
+        if grid.width != self.grid_w || grid.height != self.grid_h {
+            self.cache.clear();
+            self.grid_w = grid.width;
+            self.grid_h = grid.height;
+            self.last_obstacles.clear();
+            self.last_obstacles.extend(grid.obstacles().iter().copied());
+        }
+
+        for &goal in goals {
+            if !self.cache.contains_key(&goal) {
+                let dm = self.compute_with_pooled_queue(grid, goal);
+                self.cache.insert(goal, dm);
+            }
+        }
     }
 
     /// Evict entries for goals no longer in use (call periodically to bound memory).
@@ -178,7 +270,20 @@ impl DistanceMapCache {
         self.cache.clear();
         self.grid_w = 0;
         self.grid_h = 0;
-        self.grid_obstacle_count = 0;
+        self.last_obstacles.clear();
+        // Leave bfs_queue capacity intact — it's a reusable pool.
+    }
+
+    /// Number of cached distance maps. Useful for tests verifying that the
+    /// cache holds the expected unique-goal count, and for runtime memory
+    /// monitoring (each entry is `grid_area × 8 bytes`).
+    pub fn len(&self) -> usize {
+        self.cache.len()
+    }
+
+    /// Whether the cache currently holds any distance maps.
+    pub fn is_empty(&self) -> bool {
+        self.cache.is_empty()
     }
 }
 

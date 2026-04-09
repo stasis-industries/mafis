@@ -30,17 +30,18 @@
 //! configuration.
 
 use bevy::prelude::*;
-use rand::Rng;
 use smallvec::smallvec;
 
 use crate::constants;
 use crate::core::action::Action;
 use crate::core::grid::GridMap;
 use crate::core::seed::SeededRng;
+use crate::core::task::{RandomScheduler, TaskScheduler};
+use crate::core::topology::ZoneMap;
 
 use super::windowed::{WindowAgent, WindowContext, WindowResult, WindowedPlanner};
 use crate::solver::lifelong::{AgentPlan, AgentState, LifelongSolver, SolverContext, StepResult};
-use crate::solver::shared::heuristics::{DistanceMapCache, manhattan};
+use crate::solver::shared::heuristics::DistanceMapCache;
 use crate::solver::shared::pibt_core::PibtCore;
 use crate::solver::shared::traits::{Optimality, Scalability, SolverInfo};
 
@@ -106,8 +107,11 @@ pub struct RhcrSolver {
     ticks_since_replan: usize,
     plan_buffer: Vec<AgentPlan>,
     /// Previous plans from last successful replan, for warm-starting the next window.
-    /// Format: (agent_index, actions_vec).
-    previous_plans: Vec<(usize, Vec<Action>)>,
+    /// Stored as `SmallVec` matching `PlanFragment.actions` storage so the
+    /// per-replan write at the bottom of `step()` is a cheap inline clone
+    /// (zero heap allocations when plans fit in the 20-action inline buffer,
+    /// which is the common case for the default horizon).
+    previous_plans: Vec<(usize, smallvec::SmallVec<[Action; 20]>)>,
     /// Previous positions for congestion detection (reference C++ BasicSystem::congested).
     prev_positions: Vec<IVec2>,
     /// Consecutive ticks where >50% of agents are stuck.
@@ -117,6 +121,16 @@ pub struct RhcrSolver {
     wait_counts: Vec<f32>,
     /// Grid width for indexing into `wait_counts`.
     wait_counts_width: i32,
+    // ─── Per-replan scratch buffers (Phase 2 hoisting) ────────────────
+    //
+    // Cleared and re-extended on every replan instead of allocated fresh.
+    // Bounded by `num_agents`. The reason these can live on the solver
+    // (rather than being function-local) is split-borrow: `WindowContext`
+    // borrows these scratch fields immutably while `self.planner` is
+    // borrowed mutably — disjoint fields, so the borrow checker accepts.
+    scratch_window_agents: Vec<WindowAgent>,
+    scratch_initial_plans: Vec<Option<Vec<Action>>>,
+    scratch_start_constraints: Vec<(IVec2, u64)>,
 }
 
 impl RhcrSolver {
@@ -138,6 +152,42 @@ impl RhcrSolver {
             wait_counts: Vec::new(),
             wait_counts_width: 0,
             congestion_streak: 0,
+            scratch_window_agents: Vec::new(),
+            scratch_initial_plans: Vec::new(),
+            scratch_start_constraints: Vec::new(),
+        }
+    }
+
+    /// Construct an RHCR solver with **pre-sized PBS scratch buffers**. The
+    /// underlying [`PbsPlanner::with_capacity`] reserves the full
+    /// `FlatConstraintIndex` / `SeqGoalGrid` / `FlatCAT` slabs at construction
+    /// (~3 MB total for a 1000-cell × 20-horizon grid) so the first
+    /// `plan_window` call doesn't stall the WASM main thread.
+    ///
+    /// Use this from production paths that know the grid dimensions ahead of
+    /// time (the `lifelong_solver_from_name_sized` factory). Tests and the
+    /// experiment runner can keep using [`RhcrSolver::new`].
+    pub fn with_grid(config: RhcrConfig, grid_w: usize, grid_h: usize) -> Self {
+        let max_goals = constants::PBS_GOAL_SEQUENCE_MAX_LEN + 1;
+        let planner: Box<dyn WindowedPlanner> =
+            Box::new(PbsPlanner::with_capacity(grid_w, grid_h, config.horizon, max_goals));
+
+        let initial_counter = config.replan_interval.saturating_sub(1);
+
+        Self {
+            config,
+            planner,
+            pibt_fallback: PibtCore::new(),
+            ticks_since_replan: initial_counter,
+            plan_buffer: Vec::new(),
+            previous_plans: Vec::new(),
+            prev_positions: Vec::new(),
+            wait_counts: Vec::new(),
+            wait_counts_width: 0,
+            congestion_streak: 0,
+            scratch_window_agents: Vec::new(),
+            scratch_initial_plans: Vec::new(),
+            scratch_start_constraints: Vec::new(),
         }
     }
 
@@ -145,48 +195,51 @@ impl RhcrSolver {
         &self.config
     }
 
-    /// Fill goal sequences for agents whose primary goal is reachable within the
-    /// planning horizon. Appends random zone endpoints until cumulative distance
-    /// reaches the horizon. Reference: KivaSystem::update_goal_locations() in RHCR C++.
+    /// Populate `WindowAgent.goal_sequence` for every agent by querying the
+    /// scheduler's `peek_task_chain`. The chain is the agent's *hypothetical*
+    /// future-task projection — alternating pickup/delivery endpoints starting
+    /// after `agent.goal`, sized so cumulative Manhattan distance is bounded by
+    /// `horizon` and length is bounded by `PBS_GOAL_SEQUENCE_MAX_LEN`.
+    ///
+    /// Reference: `KivaSystem::update_goal_locations()` (KivaSystem.cpp:70).
+    ///
+    /// **No `dist_to_goal >= horizon` skip**. Even agents whose primary goal
+    /// is far from `agent.pos` get a chain — sequential A* in `plan_agent`
+    /// uses the chain to make horizon-bounded best-effort progress. The
+    /// previous early-skip was the root cause of PBS's chronic NoSolution
+    /// failures on warehouse_large (PAAMS 2026 fix).
+    ///
+    /// **Scheduler instance**: this routine constructs a local
+    /// `RandomScheduler` instead of accepting a `&dyn TaskScheduler` from the
+    /// runner. The constraint is that `RhcrSolver::step()` is reached via the
+    /// `LifelongSolver` trait, whose signature is locked outside this stream's
+    /// editable scope. Using a unit-struct `RandomScheduler` is zero-cost
+    /// (the trait method dispatches statically) and gives the same alternation
+    /// semantics as the canonical reference. A future stream may plumb the
+    /// active scheduler reference through `SolverContext` so the locality-
+    /// aware `ClosestFirstScheduler::peek_task_chain` can be used instead.
     fn fill_goal_sequences(
-        agents: &mut [WindowAgent],
-        dist_maps: &[&crate::solver::shared::heuristics::DistanceMap],
-        zones: &crate::core::topology::ZoneMap,
+        window_agents: &mut [WindowAgent],
+        agent_states: &[AgentState],
+        zones: &ZoneMap,
         horizon: usize,
         rng: &mut SeededRng,
     ) {
-        let endpoints: Vec<IVec2> =
-            zones.pickup_cells.iter().chain(zones.delivery_cells.iter()).copied().collect();
-        if endpoints.is_empty() {
-            return;
-        }
+        // Local zero-sized scheduler instance — no allocation, no plumbing.
+        let scheduler = RandomScheduler;
 
-        for (i, agent) in agents.iter_mut().enumerate() {
-            let dist_to_goal = dist_maps[i].get(agent.pos);
-            if dist_to_goal >= horizon as u64 {
-                continue;
-            }
-
-            let mut cumulative = dist_to_goal;
-            let mut last_goal = agent.goal;
-            let max_seq = 4;
-            let mut attempts = 0;
-            while cumulative < horizon as u64 && agent.goal_sequence.len() < max_seq {
-                let idx = rng.rng.random_range(0..endpoints.len());
-                let next = endpoints[idx];
-                if next == last_goal {
-                    attempts += 1;
-                    if attempts > 10 {
-                        break;
-                    }
-                    continue;
-                }
-                attempts = 0;
-                let leg_dist = manhattan(last_goal, next);
-                cumulative += leg_dist;
-                agent.goal_sequence.push(next);
-                last_goal = next;
-            }
+        for (i, wa) in window_agents.iter_mut().enumerate() {
+            wa.goal_sequence.clear();
+            let task_leg = agent_states.get(i).map(|s| s.task_leg.clone()).unwrap_or_default();
+            let chain = scheduler.peek_task_chain(
+                zones,
+                wa.pos,
+                wa.goal,
+                task_leg,
+                horizon as u64,
+                &mut rng.rng,
+            );
+            wa.goal_sequence.extend(chain.into_iter());
         }
     }
 
@@ -301,10 +354,19 @@ impl RhcrSolver {
         // Resolved actions per slot
         let mut resolved: Vec<SmallVec<[Action; 20]>> = vec![SmallVec::new(); n];
 
+        // Per-iteration scratch buffers — hoisted out of the timestep loop so
+        // they allocate once per LRA call instead of `max_steps` times. Each
+        // iteration `clear()`s and re-pushes; the underlying capacity is
+        // reused across iterations, so the inner loop becomes allocation-free
+        // after the first iteration.
+        let mut intended_action: Vec<Action> = Vec::with_capacity(n);
+        let mut intended_pos: Vec<IVec2> = Vec::with_capacity(n);
+        let mut forced_wait: Vec<bool> = Vec::with_capacity(n);
+
         for _t in 0..max_steps {
             // Phase 1: compute intended next position for each slot
-            let mut intended_action: Vec<Action> = Vec::with_capacity(n);
-            let mut intended_pos: Vec<IVec2> = Vec::with_capacity(n);
+            intended_action.clear();
+            intended_pos.clear();
 
             for slot in 0..n {
                 let (_, ref plan) = plans[slot];
@@ -317,7 +379,8 @@ impl RhcrSolver {
             // Phase 2: detect conflicts and force lower-priority agents to Wait.
             // We iterate in priority order (slot 0 = highest priority). An agent
             // forced to Wait does NOT advance its cursor.
-            let mut forced_wait = vec![false; n];
+            forced_wait.clear();
+            forced_wait.resize(n, false);
 
             // Vertex conflicts: two agents want to occupy the same cell at t+1.
             // The lower-priority one (higher slot index) waits.
@@ -500,6 +563,9 @@ impl LifelongSolver for RhcrSolver {
         self.congestion_streak = 0;
         self.wait_counts.clear();
         self.wait_counts_width = 0;
+        self.scratch_window_agents.clear();
+        self.scratch_initial_plans.clear();
+        self.scratch_start_constraints.clear();
     }
 
     fn save_priorities(&self) -> Vec<f32> {
@@ -563,26 +629,29 @@ impl LifelongSolver for RhcrSolver {
             return StepResult::Replan(&self.plan_buffer);
         }
 
-        // Build WindowAgent list
-        let mut window_agents: Vec<WindowAgent> = agents
-            .iter()
-            .map(|a| WindowAgent {
-                index: a.index,
-                pos: a.pos,
-                goal: a.goal.unwrap_or(a.pos),
-                goal_sequence: smallvec::SmallVec::new(),
-            })
-            .collect();
+        // Build WindowAgent list into the scratch buffer (reused across replans).
+        self.scratch_window_agents.clear();
+        self.scratch_window_agents.extend(agents.iter().map(|a| WindowAgent {
+            index: a.index,
+            pos: a.pos,
+            goal: a.goal.unwrap_or(a.pos),
+            goal_sequence: smallvec::SmallVec::new(),
+        }));
 
-        // Build distance maps
-        let pairs: Vec<(IVec2, IVec2)> = window_agents.iter().map(|a| (a.pos, a.goal)).collect();
-        let dist_maps = distance_cache.get_or_compute(ctx.grid, &pairs);
+        // Note: distance maps are no longer pre-computed here. PbsPlanner
+        // populates the persistent `distance_cache` itself with the
+        // augmented goal set (primary + peek-chain) at the top of
+        // `plan_window`, then queries it via `get_cached(goal)` inside the
+        // PBS loop. The previous per-tick `get_or_compute(...)` here held an
+        // immutable borrow on `distance_cache` that would conflict with the
+        // `&mut distance_cache` argument to `plan_window`.
 
-        // Fill goal sequences for agents whose goal is close enough to reach
-        // within the planning horizon (reference: KivaSystem::update_goal_locations).
+        // Fill goal sequences (reference: KivaSystem::update_goal_locations).
+        // No `dist_to_goal >= horizon` skip — see `fill_goal_sequences` doc
+        // comment for the rationale (PAAMS 2026 PBS throughput fix).
         Self::fill_goal_sequences(
-            &mut window_agents,
-            &dist_maps,
+            &mut self.scratch_window_agents,
+            agents,
             ctx.zones,
             self.config.horizon,
             rng,
@@ -590,11 +659,15 @@ impl LifelongSolver for RhcrSolver {
 
         // Build initial plans for warm-starting: reuse previous plans for agents
         // whose goal hasn't changed and whose plan is still valid (all cells walkable).
-        let mut initial_plans: Vec<Option<Vec<Action>>> = vec![None; window_agents.len()];
+        // Reuse the scratch buffer instead of allocating a fresh Vec per replan.
+        self.scratch_initial_plans.clear();
+        self.scratch_initial_plans.resize(self.scratch_window_agents.len(), None);
         for (prev_idx, prev_actions) in &self.previous_plans {
             // Find the agent in the current window
-            if let Some(local_i) = window_agents.iter().position(|a| a.index == *prev_idx) {
-                let agent = &window_agents[local_i];
+            if let Some(local_i) =
+                self.scratch_window_agents.iter().position(|a| a.index == *prev_idx)
+            {
+                let agent = &self.scratch_window_agents[local_i];
                 // Only reuse if plan is non-empty and still valid from current position:
                 // every intermediate cell must be walkable and the plan must reach the goal.
                 if !prev_actions.is_empty() {
@@ -612,7 +685,12 @@ impl LifelongSolver for RhcrSolver {
                         }
                     }
                     if valid && reaches_goal {
-                        initial_plans[local_i] = Some(prev_actions.clone());
+                        // Convert SmallVec → Vec for WindowContext.initial_plans
+                        // type compatibility. This is the same allocation cost
+                        // as the previous Vec→Vec clone — the win from the
+                        // SmallVec storage change is on the *write* side at
+                        // the bottom of this function.
+                        self.scratch_initial_plans[local_i] = Some(prev_actions.to_vec());
                     }
                 }
             }
@@ -620,23 +698,28 @@ impl LifelongSolver for RhcrSolver {
 
         // Cross-window start constraints: vertex constraints at t=0 for all
         // agents' start positions, preventing agent A from planning to be at
-        // agent B's position at t=0 when B hasn't moved yet.
-        let start_constraints: Vec<(IVec2, u64)> =
-            window_agents.iter().map(|a| (a.pos, 0u64)).collect();
+        // agent B's position at t=0 when B hasn't moved yet. Reused scratch
+        // buffer (cleared+extended per replan).
+        self.scratch_start_constraints.clear();
+        self.scratch_start_constraints
+            .extend(self.scratch_window_agents.iter().map(|a| (a.pos, 0u64)));
 
         let window_ctx = WindowContext {
             grid: ctx.grid,
             horizon: self.config.horizon,
             node_limit: self.config.pbs_node_limit,
-            agents: &window_agents,
-            distance_maps: &dist_maps,
-            initial_plans,
-            start_constraints,
+            agents: &self.scratch_window_agents,
+            distance_maps: &[],
+            initial_plans: &self.scratch_initial_plans,
+            start_constraints: &self.scratch_start_constraints,
             travel_penalties: &self.wait_counts,
         };
 
-        // Run windowed planner
-        let result = self.planner.plan_window(&window_ctx, rng);
+        // Run windowed planner. The persistent simulation cache is passed
+        // through so PBS can populate it with the augmented goal set
+        // (primary + peek-chain) once and reuse those distance maps across
+        // every branch of the PBS DFS — no per-window allocation churn.
+        let result = self.planner.plan_window(&window_ctx, distance_cache, rng);
 
         match result {
             WindowResult::Solved(fragments) => {
@@ -695,10 +778,12 @@ impl LifelongSolver for RhcrSolver {
             }
         }
 
-        // Store plans for warm-starting next replan
+        // Store plans for warm-starting next replan. The clone is a cheap
+        // inline copy when the SmallVec is in inline mode (≤20 actions, the
+        // common case for the default horizon) — zero heap allocations.
         self.previous_plans.clear();
         for (idx, actions) in &self.plan_buffer {
-            self.previous_plans.push((*idx, actions.to_vec()));
+            self.previous_plans.push((*idx, actions.clone()));
         }
 
         StepResult::Replan(&self.plan_buffer)
@@ -1014,13 +1099,13 @@ mod tests {
     /// minor implementation drift doesn't break the test, but a regression that
     /// drops PBS to all-Wait or all-fallback behavior would trip it.
     ///
-    /// Measured baseline 2026-04-06: tp = 0.040 tasks/tick on warehouse_large,
-    /// 40 agents, random scheduler, 200 ticks. PBS throughput is genuinely low
-    /// at this density because the windowed planner hits node limits and falls
-    /// back to per-agent PIBT for many agents — this is documented behavior of
-    /// lazy PBS. The Step 5 validation gate (clean_benchmark_validation.rs)
-    /// will run the closest-scheduler configuration where PBS performs much
-    /// better (+117% TP lift was measured in PAAMS data).
+    /// Measured baseline 2026-04-08 (post PAAMS 2026 RHCR-PBS fidelity port):
+    /// tp = 0.435 tasks/tick on warehouse_large, 40 agents, random scheduler,
+    /// 200 ticks. This is a 10× jump from the pre-port `0.040` baseline; the
+    /// fix was the eager-mode + peek-chain + best-effort sequential-A* port
+    /// (Streams B + C of the sprint). The floor is set to `0.20` — well above
+    /// any reasonable noise band but conservative enough that a minor
+    /// tuning change doesn't break CI.
     ///
     /// Reference: docs/papers_codes/rhcr/src/PBS.cpp (Jiaoyang-Li/RHCR).
     #[test]
@@ -1046,12 +1131,16 @@ mod tests {
         let result = run_single_experiment(&config);
         let tp = result.baseline_metrics.avg_throughput;
         eprintln!("rhcr_pbs_throughput_regression: tp={tp:.4} tasks/tick");
-        // Floor: 0.02 (50% of measured baseline 0.040). A regression to 0 or
-        // close to 0 would indicate a planner break. Higher throughput is fine.
+        // Floor: 0.20 — 46% of post-port baseline (0.435 measured 2026-04-08).
+        // A drop below this would indicate a regression in `plan_agent`,
+        // `find_consistent_paths`, or the best-partial sequential-A* fallback.
+        // Higher throughput is fine.
         assert!(
-            tp > 0.02,
-            "RHCR-PBS regression: avg_throughput {tp:.4} fell below 0.02 floor \
-             (baseline measured 2026-04-06: 0.040). Likely a planner break."
+            tp >= 0.20,
+            "RHCR-PBS regression: avg_throughput {tp:.4} fell below the 0.20 \
+             floor (baseline measured 2026-04-08: 0.435). Likely a regression \
+             in eager-mode PBS, plan_agent sequential A*, or the best-partial \
+             fallback. See src/solver/rhcr/pbs_planner.rs."
         );
     }
 }

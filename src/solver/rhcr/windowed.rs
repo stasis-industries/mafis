@@ -6,11 +6,19 @@
 use bevy::prelude::*;
 use smallvec::SmallVec;
 
+use crate::constants::PBS_GOAL_SEQUENCE_MAX_LEN;
 use crate::core::action::Action;
 use crate::core::grid::GridMap;
 use crate::core::seed::SeededRng;
 
-use crate::solver::shared::heuristics::DistanceMap;
+use crate::solver::shared::heuristics::{DistanceMap, DistanceMapCache};
+
+// `WindowAgent.goal_sequence` is a `SmallVec<[IVec2; N]>`. Rust does not let us
+// parameterise the inline-array length by a `const usize` import in a generic
+// context, so we hardcode the literal `8` and assert it matches the canonical
+// constant. Bumping `PBS_GOAL_SEQUENCE_MAX_LEN` requires updating the `8` in
+// `WindowAgent.goal_sequence` and this assertion fail-loud at compile time.
+const _: () = assert!(PBS_GOAL_SEQUENCE_MAX_LEN == 8);
 
 // ---------------------------------------------------------------------------
 // Context for windowed planning
@@ -27,10 +35,15 @@ pub struct WindowContext<'a> {
     /// Warm-start initial plans from previous replan (agent-aligned).
     /// `initial_plans[local_idx] = Some(tail_plan)` if the previous plan is
     /// still valid for that agent, `None` otherwise.
-    pub initial_plans: Vec<Option<Vec<Action>>>,
+    ///
+    /// Borrowed (not owned) so the caller can pool the backing storage on its
+    /// solver struct and reuse it across replans without per-tick allocation.
+    pub initial_plans: &'a [Option<Vec<Action>>],
     /// Vertex constraints at t=0 for all agents' start positions.
     /// Prevents agent A from planning to be at agent B's position at t=0.
-    pub start_constraints: Vec<(IVec2, u64)>,
+    ///
+    /// Borrowed (not owned) — same scratch-pool reasoning as `initial_plans`.
+    pub start_constraints: &'a [(IVec2, u64)],
     /// Per-cell travel penalties (grid-aligned flat array, indexed by y*width+x).
     /// Higher values indicate historically congested cells. Planners may use
     /// this as an additive cost bias. Empty slice = no penalties.
@@ -44,8 +57,9 @@ pub struct WindowAgent {
     pub goal: IVec2,
     /// Additional goals after `goal` is reached within the planning window.
     /// Reference RHCR fills goals until horizon is covered. Optional — planners
-    /// that don't support sequences use only `goal`.
-    pub goal_sequence: SmallVec<[IVec2; 4]>,
+    /// that don't support sequences use only `goal`. Inline cap matches
+    /// `PBS_GOAL_SEQUENCE_MAX_LEN` (literal 8 — see assertion at module top).
+    pub goal_sequence: SmallVec<[IVec2; 8]>,
 }
 
 // ---------------------------------------------------------------------------
@@ -71,7 +85,12 @@ pub enum WindowResult {
 pub trait WindowedPlanner: Send + Sync {
     fn name(&self) -> &'static str;
 
-    fn plan_window(&mut self, ctx: &WindowContext, rng: &mut SeededRng) -> WindowResult;
+    fn plan_window(
+        &mut self,
+        ctx: &WindowContext,
+        dist_cache: &mut DistanceMapCache,
+        rng: &mut SeededRng,
+    ) -> WindowResult;
 
     /// Reset all internal state (for rewind/scenario change).
     /// Default: no-op.

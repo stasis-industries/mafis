@@ -144,12 +144,24 @@ fn dir_ordinal(from: IVec2, to: IVec2) -> usize {
 ///
 /// Vertex constraints indexed by `(y * width + x) * stride + time`.
 /// Edge constraints indexed by `((y * width + x) * 5 + dir) * stride + time`.
+///
+/// **Dirty-list reset** (RHCR-PBS perf sprint 2026-04-09): `reset` walks
+/// `dirty_vertex` / `dirty_edge` instead of `.fill(false)`-ing the full
+/// `vertex` / `edge` arrays. Each `add_vertex` / `add_edge` pushes its index
+/// into the dirty list **only on the `false → true` transition** — idempotent
+/// re-writes (e.g., start-constraints coinciding with a higher-priority agent's
+/// t=0 position) are deduplicated by the `!self.vertex[idx]` guard, so every
+/// dirty entry corresponds to exactly one set cell. Reset cost drops from
+/// `O(cells × 6 × horizon)` memset to `O(|dirty|)` stores. Typical cascade
+/// call has `|dirty|` in the dozens, not the hundreds of thousands.
 pub struct FlatConstraintIndex {
     vertex: Vec<bool>,
     edge: Vec<bool>,
     width: i32,
     stride: usize,
     cells: usize,
+    dirty_vertex: Vec<usize>,
+    dirty_edge: Vec<usize>,
 }
 
 impl FlatConstraintIndex {
@@ -162,6 +174,8 @@ impl FlatConstraintIndex {
             width,
             stride,
             cells,
+            dirty_vertex: Vec::new(),
+            dirty_edge: Vec::new(),
         }
     }
 
@@ -172,14 +186,26 @@ impl FlatConstraintIndex {
         let etotal = cells * 5 * stride;
 
         if self.vertex.len() != vtotal || self.width != width {
+            // Dimension change — full realloc, dirty lists are invalid anyway.
             self.width = width;
             self.stride = stride;
             self.cells = cells;
             self.vertex = vec![false; vtotal];
             self.edge = vec![false; etotal];
+            self.dirty_vertex.clear();
+            self.dirty_edge.clear();
         } else {
-            self.vertex.fill(false);
-            self.edge.fill(false);
+            // Fast path: reset only cells we actually set. Each dirty index is
+            // unique by construction (add_vertex / add_edge gate the push on
+            // `false → true` transition), so a single-pass clear is correct.
+            for &i in &self.dirty_vertex {
+                self.vertex[i] = false;
+            }
+            self.dirty_vertex.clear();
+            for &i in &self.dirty_edge {
+                self.edge[i] = false;
+            }
+            self.dirty_edge.clear();
         }
     }
 
@@ -198,16 +224,23 @@ impl FlatConstraintIndex {
     #[inline]
     pub fn add_vertex(&mut self, pos: IVec2, time: u64) {
         let idx = self.vertex_idx(pos, time);
-        if idx < self.vertex.len() {
+        // Bounds check gates the dirty push — out-of-bounds writes must not
+        // push, or `reset` would index into invalid memory next call.
+        // The `!self.vertex[idx]` guard deduplicates repeated inserts of the
+        // same (pos, time), which happens naturally when start constraints
+        // coincide with a higher-priority agent's t=0 position.
+        if idx < self.vertex.len() && !self.vertex[idx] {
             self.vertex[idx] = true;
+            self.dirty_vertex.push(idx);
         }
     }
 
     #[inline]
     pub fn add_edge(&mut self, from: IVec2, to: IVec2, time: u64) {
         let idx = self.edge_idx(from, to, time);
-        if idx < self.edge.len() {
+        if idx < self.edge.len() && !self.edge[idx] {
             self.edge[idx] = true;
+            self.dirty_edge.push(idx);
         }
     }
 }
@@ -319,9 +352,11 @@ impl CameFromEntry {
 
 /// Reusable flat-array storage for spacetime A*, replacing HashMap/HashSet.
 ///
-/// Indexed by `(y * width + x) * stride + time`. Cleared with `fill()` on
-/// each reset. For typical warehouse grids (840 cells × 41 timesteps = 34K
-/// entries), reset takes ~1µs.
+/// Indexed by `(y * width + x) * stride + time`. For typical warehouse grids
+/// (840 cells × 41 timesteps = 34K entries), reset used to walk the full array.
+/// With the dirty-list reset (RHCR-PBS perf sprint 2026-04-09), reset now walks
+/// only the cells actually touched by the previous A* run, making per-call
+/// overhead O(expansions) instead of O(grid × horizon).
 pub struct SpacetimeGrid {
     width: i32,
     stride: usize,
@@ -331,6 +366,12 @@ pub struct SpacetimeGrid {
     closed: Vec<bool>,
     /// Reusable buffer for path reconstruction (avoids per-call Vec allocation).
     path_buf: Vec<Action>,
+    /// Indices touched by the previous A* call. Walked on reset to clear
+    /// `best_g[i] = u64::MAX` and `closed[i] = false` for each entry, instead
+    /// of `.fill()`-ing the full buffer. `came_from` is not reset (stale entries
+    /// are never reached during reconstruction — the chain only follows cells
+    /// on the actual path, which by construction are all in `dirty`).
+    dirty: Vec<usize>,
 }
 
 impl Default for SpacetimeGrid {
@@ -349,11 +390,12 @@ impl SpacetimeGrid {
             came_from: Vec::new(),
             closed: Vec::new(),
             path_buf: Vec::new(),
+            dirty: Vec::new(),
         }
     }
 
-    /// Prepare for a new A* search. Resizes if dimensions changed, otherwise
-    /// clears with `fill()`.
+    /// Prepare for a new A* search. Resizes on dimension change, otherwise
+    /// walks `dirty` to reset only touched cells (O(expansions), not O(total)).
     pub fn reset(&mut self, width: i32, height: i32, max_time: u64) {
         let stride = (max_time + 1) as usize;
         let total = (width * height) as usize * stride;
@@ -362,15 +404,22 @@ impl SpacetimeGrid {
         self.stride = stride;
 
         if self.total != total {
+            // Dimension change — full realloc. Dirty list is invalid anyway.
             self.total = total;
             self.best_g = vec![u64::MAX; total];
             self.came_from = vec![CameFromEntry::EMPTY; total];
             self.closed = vec![false; total];
+            self.dirty.clear();
         } else {
-            self.best_g.fill(u64::MAX);
-            // came_from: stale entries are never reached during reconstruction
-            // (the chain only follows entries set during this run), so skip clearing.
-            self.closed.fill(false);
+            // Fast path: walk only touched cells. Dirty indices are unique by
+            // construction (the push guard at each write site only fires on
+            // the `u64::MAX → any` transition).
+            for &i in &self.dirty {
+                self.best_g[i] = u64::MAX;
+                self.closed[i] = false;
+            }
+            self.dirty.clear();
+            // came_from: stale entries are never reached during reconstruction.
         }
     }
 
@@ -388,6 +437,12 @@ impl SpacetimeGrid {
 ///
 /// Like `SpacetimeGrid` but with an extra `goal_id` dimension.
 /// Indexed by `((y * width + x) * max_goals + goal_id) * stride + time`.
+///
+/// **Dirty-list reset** (RHCR-PBS perf sprint 2026-04-09): tracks touched
+/// cells in `dirty` and walks that list on reset instead of memset-ing the
+/// full `best_g` / `closed` arrays. For a warehouse_large (1881 × 9 × 16)
+/// call this drops reset cost from ~3 MB of stores to ~|expansions| stores
+/// — a ~250× reduction when `PBS_ASTAR_BUDGET` caps expansions at 2000.
 pub struct SeqGoalGrid {
     width: i32,
     stride: usize,
@@ -398,6 +453,17 @@ pub struct SeqGoalGrid {
     closed: Vec<bool>,
     /// Reusable buffer for path reconstruction.
     path_buf: Vec<Action>,
+    /// Indices touched by the previous A* call. Walked on reset to clear
+    /// `best_g[i] = u64::MAX` and `closed[i] = false` for each entry. Push
+    /// sites in `spacetime_astar_sequential` gate the push on
+    /// `best_g[next_st] == u64::MAX` so every dirty entry is unique.
+    ///
+    /// **Invariant**: every `closed[i] = true` is preceded in the same A*
+    /// call by a `best_g[i] = ...` write (because the only way a state is
+    /// popped from the heap is that it was pushed, and every push is
+    /// preceded by a `best_g` relaxation). Therefore a single dirty list
+    /// covering `best_g` transitions is sufficient to reset both arrays.
+    dirty: Vec<usize>,
 }
 
 impl Default for SeqGoalGrid {
@@ -417,11 +483,12 @@ impl SeqGoalGrid {
             came_from: Vec::new(),
             closed: Vec::new(),
             path_buf: Vec::new(),
+            dirty: Vec::new(),
         }
     }
 
-    /// Prepare for a new sequential A* search. Resizes if dimensions changed,
-    /// otherwise clears with `fill()`.
+    /// Prepare for a new sequential A* search. Resizes on dimension change,
+    /// otherwise walks `dirty` to reset only touched cells.
     pub fn reset(&mut self, width: i32, height: i32, max_time: u64, max_goals: usize) {
         let stride = (max_time + 1) as usize;
         let total = (width * height) as usize * max_goals * stride;
@@ -431,13 +498,19 @@ impl SeqGoalGrid {
         self.max_goals = max_goals;
 
         if self.total != total {
+            // Dimension change — full realloc. Dirty list is invalid anyway.
             self.total = total;
             self.best_g = vec![u64::MAX; total];
             self.came_from = vec![CameFromEntry::EMPTY; total];
             self.closed = vec![false; total];
+            self.dirty.clear();
         } else {
-            self.best_g.fill(u64::MAX);
-            self.closed.fill(false);
+            // Fast path: walk only touched cells.
+            for &i in &self.dirty {
+                self.best_g[i] = u64::MAX;
+                self.closed[i] = false;
+            }
+            self.dirty.clear();
         }
     }
 
@@ -559,12 +632,30 @@ pub fn spacetime_astar_sequential<C: ConstraintChecker>(
     };
 
     let start_st = stg.st_index(start, 0, 0);
+    // First touch of `start_st` after reset — always a MAX → 0 transition,
+    // so unconditionally record it in the dirty list.
     stg.best_g[start_st] = 0;
+    stg.dirty.push(start_st);
 
     let h = heuristic(start, 0);
     let mut open: BinaryHeap<SeqNode> = BinaryHeap::with_capacity(256);
     open.push(SeqNode { pos: start, time: 0, goal_id: 0, g: 0, f: h });
     let mut expansions: u64 = 0;
+
+    // Horizon-bounded best-effort fallback: track the non-terminal node with
+    // the smallest remaining heuristic seen during expansion. When the open
+    // set exhausts without reaching the terminal layer (agent can't reach all
+    // goals within `max_time` under the given constraints), we return the
+    // path to this "closest-to-next-goal" node instead of failing. Mirrors
+    // the reference RHCR's `StateTimeAStar::run` which returns best-effort
+    // progress rather than NoSolution for horizon-bounded replans.
+    //
+    // Ranking: `(goal_id DESC, heuristic ASC, time ASC)` — prefer nodes that
+    // reached more sub-goals, then closer to the next one, then sooner.
+    let mut best_partial_st: usize = start_st;
+    let mut best_partial_gid: usize = 0;
+    let mut best_partial_h: u64 = h;
+    let mut best_partial_time: u64 = 0;
 
     while let Some(current) = open.pop() {
         // Terminal: all goals reached
@@ -600,10 +691,33 @@ pub fn spacetime_astar_sequential<C: ConstraintChecker>(
         if stg.closed[cur_st] {
             continue;
         }
+        // Invariant: every `closed[cur_st] = true` is preceded in this same
+        // A* call by a `best_g[cur_st] = ...` write (the pop comes from a
+        // push, and every push is preceded by a `best_g` relaxation). So
+        // `cur_st` is already in `dirty` — no separate closed-dirty list
+        // needed. Do not add a dirty push here.
         stg.closed[cur_st] = true;
         expansions += 1;
+
+        // Update best-partial tracker BEFORE the max_expansions check so
+        // exhaustion on huge instances still gets a meaningful fallback.
+        if current.goal_id < n_goals {
+            let cur_h = heuristic(current.pos, current.goal_id);
+            let better = current.goal_id > best_partial_gid
+                || (current.goal_id == best_partial_gid && cur_h < best_partial_h)
+                || (current.goal_id == best_partial_gid
+                    && cur_h == best_partial_h
+                    && current.time < best_partial_time);
+            if better {
+                best_partial_gid = current.goal_id;
+                best_partial_h = cur_h;
+                best_partial_time = current.time;
+                best_partial_st = cur_st;
+            }
+        }
+
         if expansions >= max_expansions {
-            return Err(SolverError::NoSolution);
+            break;
         }
 
         // Goal-layer transition: if at current sub-goal, advance goal_id.
@@ -614,6 +728,11 @@ pub fn spacetime_astar_sequential<C: ConstraintChecker>(
             let next_gid = current.goal_id + 1;
             let next_st = stg.st_index(current.pos, next_gid, current.time);
             if !stg.closed[next_st] && current.g < stg.best_g[next_st] {
+                // Dirty push only on first touch (u64::MAX → any).
+                // Subsequent relaxations leave `dirty` unchanged.
+                if stg.best_g[next_st] == u64::MAX {
+                    stg.dirty.push(next_st);
+                }
                 stg.best_g[next_st] = current.g;
                 stg.came_from[next_st] = CameFromEntry {
                     parent_st_idx: cur_st,
@@ -647,6 +766,9 @@ pub fn spacetime_astar_sequential<C: ConstraintChecker>(
             let g = current.g + 1;
             let next_st = stg.st_index(current.pos, current.goal_id, next_time);
             if !stg.closed[next_st] && g < stg.best_g[next_st] {
+                if stg.best_g[next_st] == u64::MAX {
+                    stg.dirty.push(next_st);
+                }
                 stg.best_g[next_st] = g;
                 stg.came_from[next_st] =
                     CameFromEntry { parent_st_idx: cur_st, action: Action::Wait };
@@ -684,6 +806,9 @@ pub fn spacetime_astar_sequential<C: ConstraintChecker>(
                 continue;
             }
 
+            if stg.best_g[next_st] == u64::MAX {
+                stg.dirty.push(next_st);
+            }
             stg.best_g[next_st] = g;
             stg.came_from[next_st] =
                 CameFromEntry { parent_st_idx: cur_st, action: Action::Move(dir) };
@@ -692,7 +817,30 @@ pub fn spacetime_astar_sequential<C: ConstraintChecker>(
         }
     }
 
-    Err(SolverError::NoSolution)
+    // Open set exhausted (or expansions exceeded) without reaching the
+    // terminal layer. Return the path to `best_partial_st` — the "closest
+    // to next goal" node encountered during search. If no expansion
+    // improved on start (best_partial_st == start_st), return an empty
+    // path, meaning the agent should hold position this window.
+    stg.path_buf.clear();
+    if best_partial_st == start_st {
+        return Ok(Vec::new());
+    }
+    let mut cur_st = best_partial_st;
+    while cur_st != start_st {
+        let entry = stg.came_from[cur_st];
+        if entry.parent_st_idx == NO_PARENT {
+            break;
+        }
+        let parent_time_mod = entry.parent_st_idx % stg.stride;
+        let cur_time_mod = cur_st % stg.stride;
+        if parent_time_mod != cur_time_mod {
+            stg.path_buf.push(entry.action);
+        }
+        cur_st = entry.parent_st_idx;
+    }
+    stg.path_buf.reverse();
+    Ok(stg.path_buf.to_vec())
 }
 
 // ---------------------------------------------------------------------------
@@ -740,6 +888,7 @@ pub fn spacetime_astar_fast<C: ConstraintChecker>(
 
     let start_st = stg.st_index(start, 0);
     stg.best_g[start_st] = 0;
+    stg.dirty.push(start_st);
 
     let h = heuristic(start);
     let start_conflicts = cat.map(|c| c.conflicts_at(start, 0) as u32).unwrap_or(0);
@@ -776,6 +925,8 @@ pub fn spacetime_astar_fast<C: ConstraintChecker>(
         if stg.closed[cur_st] {
             continue;
         }
+        // See SeqGoalGrid invariant: every `closed = true` is preceded by a
+        // `best_g` write in the same call, so `cur_st` is already in `dirty`.
         stg.closed[cur_st] = true;
         expansions += 1;
         if expansions >= max_expansions {
@@ -791,6 +942,9 @@ pub fn spacetime_astar_fast<C: ConstraintChecker>(
             let g = current.g + 1;
             let next_st = stg.st_index(current.pos, next_time);
             if !stg.closed[next_st] && g < stg.best_g[next_st] {
+                if stg.best_g[next_st] == u64::MAX {
+                    stg.dirty.push(next_st);
+                }
                 stg.best_g[next_st] = g;
                 stg.came_from[next_st] =
                     CameFromEntry { parent_st_idx: cur_st, action: Action::Wait };
@@ -825,6 +979,9 @@ pub fn spacetime_astar_fast<C: ConstraintChecker>(
                 continue;
             }
 
+            if stg.best_g[next_st] == u64::MAX {
+                stg.dirty.push(next_st);
+            }
             stg.best_g[next_st] = g;
             stg.came_from[next_st] =
                 CameFromEntry { parent_st_idx: cur_st, action: Action::Move(dir) };
@@ -1076,23 +1233,62 @@ mod tests {
     }
 
     #[test]
-    fn spacetime_grid_basic() {
+    fn spacetime_grid_basic_reset_through_astar() {
+        // The dirty-list reset only clears cells that were written through the
+        // A* expansion (each write site pushes to `dirty`). Raw assignments
+        // like `stg.best_g[idx] = 7` bypass the dirty tracking and would not
+        // be cleared by `reset`, so the original test (which poked internal
+        // fields directly) is no longer sound.
+        //
+        // Instead, drive through the public `spacetime_astar_fast` entry point
+        // twice on the same `SpacetimeGrid` and assert that the second run
+        // produces a valid path — confirming the reset correctly prepares the
+        // grid for reuse. Any residual state from run 1 would cause run 2 to
+        // either find a stale path or get wedged in `closed`.
+        let grid = GridMap::new(5, 5);
+        let ci = ConstraintIndex::new();
         let mut stg = SpacetimeGrid::new();
-        stg.reset(5, 5, 10);
 
-        let idx = stg.st_index(IVec2::new(2, 3), 5);
-        assert_eq!(stg.best_g[idx], u64::MAX);
-        assert!(!stg.closed[idx]);
+        // First run: populate the grid with a non-trivial path.
+        let r1 = spacetime_astar_fast(
+            &grid,
+            IVec2::new(0, 0),
+            IVec2::new(4, 4),
+            &ci,
+            20,
+            None,
+            &mut stg,
+            u64::MAX,
+            None,
+        )
+        .unwrap();
+        assert!(!r1.is_empty(), "first run should find a path");
 
-        stg.best_g[idx] = 7;
-        stg.closed[idx] = true;
-        assert_eq!(stg.best_g[idx], 7);
-        assert!(stg.closed[idx]);
+        // Second run with a different start/goal. If `reset` left stale `closed`
+        // or `best_g` entries from run 1, this would either fail or return a
+        // suboptimal path.
+        let r2 = spacetime_astar_fast(
+            &grid,
+            IVec2::new(4, 0),
+            IVec2::new(0, 4),
+            &ci,
+            20,
+            None,
+            &mut stg,
+            u64::MAX,
+            None,
+        )
+        .unwrap();
 
-        // Reset should clear
-        stg.reset(5, 5, 10);
-        assert_eq!(stg.best_g[idx], u64::MAX);
-        assert!(!stg.closed[idx]);
+        // Walk the returned actions and verify they reach the goal.
+        let mut pos = IVec2::new(4, 0);
+        for a in &r2 {
+            pos = a.apply(pos);
+        }
+        assert_eq!(pos, IVec2::new(0, 4), "second run must reach its goal after reset");
+        // Both paths are 8 Manhattan steps on an open 5x5 grid.
+        assert_eq!(r1.len(), 8);
+        assert_eq!(r2.len(), 8);
     }
 
     #[test]
@@ -1328,8 +1524,11 @@ mod tests {
     }
 
     #[test]
-    fn sequential_astar_goal_unreachable_within_horizon() {
-        // Horizon 5, goal at manhattan distance 8 => unreachable
+    fn sequential_astar_goal_unreachable_within_horizon_returns_best_partial() {
+        // Horizon 5, goal at manhattan distance 8 => unreachable in time budget.
+        // With horizon-bounded best-effort, the function returns a partial path
+        // that makes progress toward the goal rather than failing. Mirrors the
+        // reference RHCR `StateTimeAStar::run` fallback behavior.
         let grid = GridMap::new(10, 10);
         let start = IVec2::ZERO;
         let goal = IVec2::new(4, 4); // manhattan = 8
@@ -1338,8 +1537,24 @@ mod tests {
 
         let ci = ConstraintIndex::new();
         let mut stg = SeqGoalGrid::new();
-        let result = spacetime_astar_sequential(&grid, start, &goals, &ci, 5, &mut stg, u64::MAX);
-        assert!(result.is_err(), "should fail when horizon is too short");
+        let path = spacetime_astar_sequential(&grid, start, &goals, &ci, 5, &mut stg, u64::MAX)
+            .expect("best-partial fallback must return Ok instead of NoSolution");
+
+        // Plan must not exceed horizon.
+        assert!(path.len() <= 5, "plan length {} exceeds horizon 5", path.len());
+
+        // The agent must make positive progress toward the goal: end position
+        // is strictly closer (by the DistanceMap) than the start.
+        let mut pos = start;
+        for a in &path {
+            pos = a.apply(pos);
+        }
+        assert!(
+            dm.get(pos) < dm.get(start),
+            "best-partial must move closer to goal: start_d={}, end_d={}",
+            dm.get(start),
+            dm.get(pos)
+        );
     }
 
     #[test]
