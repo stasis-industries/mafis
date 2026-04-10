@@ -14,8 +14,8 @@ const POLL_INTERVAL = 100; // ms
 // ---------------------------------------------------------------------------
 
 // Composite score weights (sum to 1.0 per branch)
-const SCORECARD_WEIGHTS_NRR    = { ft: 0.30, nrr: 0.25, fur: 0.25, crit: 0.20 };
-const SCORECARD_WEIGHTS_NO_NRR = { ft: 0.40,             fur: 0.33, crit: 0.27 };
+const SCORECARD_WEIGHTS_NRR    = { ft: 0.40, nrr: 0.35, crit: 0.25 };
+const SCORECARD_WEIGHTS_NO_NRR = { ft: 0.65,             crit: 0.35 };
 
 // Per-metric scorecard config — single source of truth
 // thresholds: [t1,t2,t3] → 4 tiers: poor(<t1) | low(<t2) | fair(<t3) | good(>=t3)
@@ -23,7 +23,7 @@ const SCORECARD_WEIGHTS_NO_NRR = { ft: 0.40,             fur: 0.33, crit: 0.27 }
 const SC_METRIC_CONFIG = {
     ft:  { thresholds: [0.4, 0.6, 0.8], inverted: false },
     nrr: { thresholds: [0.3, 0.5, 0.7], inverted: false },
-    fur: { thresholds: [0.2, 0.4, 0.6], inverted: false },
+    sr:  { thresholds: [0.5, 0.7, 0.9], inverted: false },
     crit:{ thresholds: [0.1, 0.2, 0.4], inverted: true  },
 };
 
@@ -113,16 +113,14 @@ const METRIC_KEYS = [
 // composite. See docs/papers/paper1_drafts/paams2026/scope_decisions.md §4.
 function computeCompositeScore(sc) {
     const ft = Math.min(sc.fault_tolerance || 0, 1.0); // Cap FT at 1.0 for composite (Braess doesn't inflate verdict)
-    const fur = sc.fleet_utilization || 0;
     const critNorm = Math.max(0, Math.min(1, 1.0 - (sc.critical_time || 0)));
     let composite;
     if (sc.nrr != null) {
         composite = ft * SCORECARD_WEIGHTS_NRR.ft + sc.nrr * SCORECARD_WEIGHTS_NRR.nrr
-                  + fur * SCORECARD_WEIGHTS_NRR.fur + critNorm * SCORECARD_WEIGHTS_NRR.crit;
+                  + critNorm * SCORECARD_WEIGHTS_NRR.crit;
     } else {
         // NRR unavailable — redistribute weights to remaining metrics
-        composite = ft * SCORECARD_WEIGHTS_NO_NRR.ft + fur * SCORECARD_WEIGHTS_NO_NRR.fur
-                  + critNorm * SCORECARD_WEIGHTS_NO_NRR.crit;
+        composite = ft * SCORECARD_WEIGHTS_NO_NRR.ft + critNorm * SCORECARD_WEIGHTS_NO_NRR.crit;
     }
     return { composite, filledDots: Math.round(composite * 5) };
 }
@@ -1534,8 +1532,8 @@ function updateUI(s) {
                 }
             }
 
-            document.getElementById('sc-fleet-utilization').textContent = sc.fleet_utilization.toFixed(2);
-            updateScZone('sc-fleet-utilization', 'fur', sc.fleet_utilization);
+            document.getElementById('sc-survival-rate').textContent = sc.survival_rate.toFixed(2);
+            updateScZone('sc-survival-rate', 'sr', sc.survival_rate);
 
             document.getElementById('sc-crit').textContent = sc.critical_time.toFixed(2);
             updateScZone('sc-crit', 'crit', sc.critical_time);
@@ -2438,7 +2436,7 @@ function populateResultsFromState(s) {
         const metrics = [
             { key: 'ft',   name: 'Fault Tolerance',  value: sc.fault_tolerance || 0 },
             { key: 'nrr',  name: 'NRR',              value: sc.nrr },
-            { key: 'fur',  name: 'Fleet Utilization', value: sc.fleet_utilization || 0 },
+            { key: 'sr',   name: 'Survival Rate',     value: sc.survival_rate || 0 },
             { key: 'crit', name: 'Critical Time',     value: sc.critical_time || 0 },
         ];
         scorecardBars.innerHTML = metrics.map(m => {

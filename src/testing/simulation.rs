@@ -167,7 +167,7 @@ fn scorecard_clear_resets() {
     h.app.world_mut().resource_mut::<crate::analysis::scorecard::ResilienceScorecard>().clear();
     assert_eq!(h.scorecard().fault_tolerance, 1.0);
     assert_eq!(h.scorecard().nrr, None);
-    assert_eq!(h.scorecard().fleet_utilization, 1.0);
+    assert_eq!(h.scorecard().survival_rate, 1.0);
 }
 
 // ===========================================================================

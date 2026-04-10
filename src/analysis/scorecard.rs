@@ -3,7 +3,7 @@
 //! - **Fault Tolerance**: `P_fault / P_nominal` — adapted from classical reliability
 //!   degradation ratio (fraction of baseline throughput retained under faults)
 //! - **NRR**: `1 - MTTR/MTBF` — Normalized Recovery Ratio (Or 2025)
-//! - **Fleet Utilization**: alive+tasked agents / initial fleet size, averaged post-fault
+//! - **Survival Rate**: `alive / initial_fleet` — fraction of initial fleet still alive post-fault
 //! - **Critical Time**: fraction of post-fault ticks below critical threshold
 //!   (operational SLA-style threshold; see `constants::CRITICAL_TIME_THRESHOLD`)
 
@@ -28,10 +28,9 @@ pub struct ResilienceScorecard {
     pub fault_tolerance: f32,
     /// NRR = 1 - MTTR/MTBF. 0-1. (Or 2025)
     pub nrr: Option<f32>,
-    /// Fleet Utilization Ratio: alive+tasked agents / initial fleet size, averaged post-fault.
-    /// Measures how much productive capacity the fleet retains after faults.
-    /// 1.0 = full utilization, 0.0 = all agents dead or idle.
-    pub fleet_utilization: f32,
+    /// Survival Rate: alive agents / initial fleet size, measured post-fault.
+    /// 1.0 = no deaths, 0.0 = all agents dead.
+    pub survival_rate: f32,
     /// Fraction of post-fault ticks below critical threshold. 0-1.
     /// Threshold is an operational SLA heuristic (`constants::CRITICAL_TIME_THRESHOLD`),
     /// not a derived constant from a specific performability paper.
@@ -45,7 +44,7 @@ impl Default for ResilienceScorecard {
         Self {
             fault_tolerance: 1.0,
             nrr: None,
-            fleet_utilization: 1.0,
+            survival_rate: 1.0,
             critical_time: 0.0,
             has_faults: false,
         }
@@ -184,8 +183,8 @@ pub fn update_resilience_scorecard(
         })
     };
 
-    // --- Fleet Utilization Ratio: alive+tasked / initial fleet ---
-    // Captures how much productive capacity is retained post-fault.
+    // --- Survival Rate: alive / initial fleet ---
+    // Honest headcount metric: fraction of the original fleet still alive post-fault.
     if let Some(ls) = live_sim.as_ref() {
         let runner = &ls.runner;
         let total = runner.agents.len();
@@ -194,12 +193,8 @@ pub fn update_resilience_scorecard(
             if state.initial_fleet == 0 {
                 state.initial_fleet = total;
             }
-            let tasked = runner
-                .agents
-                .iter()
-                .filter(|a| a.alive && !matches!(a.task_leg, crate::core::task::TaskLeg::Free))
-                .count();
-            scorecard.fleet_utilization = tasked as f32 / state.initial_fleet as f32;
+            let alive = runner.agents.iter().filter(|a| a.alive).count();
+            scorecard.survival_rate = alive as f32 / state.initial_fleet as f32;
         }
     }
 }
@@ -219,13 +214,13 @@ mod tests {
         let mut sc = ResilienceScorecard::default();
         sc.fault_tolerance = 0.5;
         sc.nrr = Some(0.8);
-        sc.fleet_utilization = 0.5;
+        sc.survival_rate = 0.5;
         sc.critical_time = 0.2;
         sc.has_faults = true;
         sc.clear();
         assert_eq!(sc.fault_tolerance, 1.0);
         assert_eq!(sc.nrr, None);
-        assert_eq!(sc.fleet_utilization, 1.0);
+        assert_eq!(sc.survival_rate, 1.0);
         assert_eq!(sc.critical_time, 0.0);
         assert!(!sc.has_faults);
     }

@@ -38,9 +38,9 @@ pub fn scorecard_panel(ui: &mut egui::Ui, scorecard: &ResilienceScorecard) {
         }
         ui.end_row();
 
-        // Fleet Utilization
-        ui.label("Fleet Utilization");
-        let a = scorecard.fleet_utilization;
+        // Survival Rate
+        ui.label("Survival Rate");
+        let a = scorecard.survival_rate;
         ui.colored_label(score_color(a), format!("{a:.2}"));
         ui.end_row();
 
@@ -74,13 +74,12 @@ pub fn scorecard_panel(ui: &mut egui::Ui, scorecard: &ResilienceScorecard) {
 ///
 /// ⚠ NOT a research-grade metric. The implicit weights are hand-picked for
 /// at-a-glance UI feedback and have no theoretical derivation. Do not cite
-/// in papers — the PAAMS 2026 paper reports the 5 primary metrics directly.
-/// See `docs/papers/paper1_drafts/paams2026/scope_decisions.md §4`.
+/// in papers — the PAAMS 2026 paper reports the 4 primary metrics directly.
 fn composite_score(sc: &ResilienceScorecard) -> usize {
     let mut score = 0.0_f32;
     score += sc.fault_tolerance.min(1.0);
     score += sc.nrr.unwrap_or(0.0);
-    score += sc.fleet_utilization;
+    score += sc.survival_rate;
     score += (1.0 - sc.critical_time).max(0.0);
     ((score / 4.0) * 5.0).round() as usize
 }

@@ -124,7 +124,7 @@ pub(super) struct FaultEventSnapshot {
 pub(super) struct ScorecardSnapshot {
     fault_tolerance: f32,
     nrr: Option<f32>,
-    fleet_utilization: f32,
+    survival_rate: f32,
     critical_time: f32,
     has_faults: bool,
 }
@@ -693,7 +693,7 @@ pub(super) fn sync_state_to_js(
             Some(ScorecardSnapshot {
                 fault_tolerance: analysis.scorecard.fault_tolerance,
                 nrr: analysis.scorecard.nrr,
-                fleet_utilization: analysis.scorecard.fleet_utilization,
+                survival_rate: analysis.scorecard.survival_rate,
                 critical_time: analysis.scorecard.critical_time,
                 has_faults: analysis.scorecard.has_faults,
             })
