@@ -8,8 +8,7 @@
 //! - `c`: the configuration (one cell per agent)
 //! - `parent`: index into the planner's HNode arena
 //! - `g, h, f`: cost values
-//! - `priorities, order`: per-agent priorities used by PIBT (dynamic priorities,
-//!    higher value = higher priority)
+//! - `priorities, order`: per-agent priorities used by PIBT (dynamic priorities; higher value = higher priority)
 //! - `search_tree`: queue of LNode constraints to expand for low-level search
 //!
 //! ## Adaptations

@@ -225,7 +225,7 @@ fn scatter_astar(
         // REFERENCE: scatter.cpp lines 98-106.
         for u in neighbors(grid, node.v) {
             let d_u = d.get(i, u);
-            if u != s_i && !closed_set[u as usize] && d_u + node.g_v + 1 <= cost_ub {
+            if u != s_i && !closed_set[u as usize] && d_u + node.g_v < cost_ub {
                 let new_c = ct.get_collision_cost(node.v, u, node.g_v as usize) + node.c_v;
                 open.push(Node {
                     v: u,

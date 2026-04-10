@@ -303,7 +303,7 @@ impl<'a> Pibt<'a> {
         let mut v_pusher = v_pusher_origin;
         let mut v_puller = v_puller_origin;
         loop {
-            if !(self.d.get(pusher, v_puller) < self.d.get(pusher, v_pusher)) {
+            if self.d.get(pusher, v_puller) >= self.d.get(pusher, v_pusher) {
                 break;
             }
             let neighbors = super::instance::neighbors(self.grid, v_puller);
