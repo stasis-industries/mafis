@@ -36,8 +36,15 @@
     --state-idle: rgb(160, 160, 160);
     --state-moving: rgb(45, 160, 0);
     --state-delayed: rgb(230, 140, 0);
+    --state-caution: rgb(200, 185, 0);
     --state-fault: rgb(191, 10, 10);
     --state-critical: rgb(56, 20, 107);
+
+    /* Scorecard tier fill colors (0.75 opacity for bar fills) */
+    --sc-good: rgba(45,  160,   0, 0.75);
+    --sc-fair: rgba(200, 185,   0, 0.75);
+    --sc-low:  rgba(230, 140,   0, 0.75);
+    --sc-poor: rgba(191,  10,  10, 0.75);
 
     /* Task-leg state colors (match 3D palette) */
     --leg-free: rgb(158, 161, 171);
@@ -1337,7 +1344,8 @@ input[type="range"]:disabled::-webkit-slider-thumb {
 }
 
 .sc-card-zone[data-zone="good"] { color: var(--state-moving); }
-.sc-card-zone[data-zone="fair"] { color: var(--state-delayed); }
+.sc-card-zone[data-zone="fair"] { color: var(--state-caution); }
+.sc-card-zone[data-zone="low"]  { color: var(--state-delayed); }
 .sc-card-zone[data-zone="poor"] { color: var(--state-fault); }
 
 .sc-card-value {
@@ -1360,9 +1368,10 @@ input[type="range"]:disabled::-webkit-slider-thumb {
     height: 100%;
 }
 
-.sc-bar-poor { background: rgba(230, 44, 2, 0.25); }
-.sc-bar-fair { background: rgba(230, 160, 0, 0.25); }
-.sc-bar-good { background: rgba(45, 160, 0, 0.25); }
+.sc-bar-poor { background: rgba(191,  10,  10, 0.25); }
+.sc-bar-low  { background: rgba(230, 140,   0, 0.25); }
+.sc-bar-fair { background: rgba(200, 185,   0, 0.25); }
+.sc-bar-good { background: rgba(45,  160,   0, 0.25); }
 
 .sc-bar-marker {
     position: absolute;
@@ -3189,11 +3198,14 @@ input[type="range"]:disabled::-webkit-slider-thumb {
 .verdict-banner[data-verdict="resilient"] .verdict-label { color: rgb(45, 200, 60); }
 .verdict-banner[data-verdict="resilient"] .verdict-dots { color: rgb(45, 200, 60); }
 
-.verdict-banner[data-verdict="degrading"] .verdict-label { color: rgb(230, 160, 0); }
-.verdict-banner[data-verdict="degrading"] .verdict-dots { color: rgb(230, 160, 0); }
+.verdict-banner[data-verdict="moderate"]  .verdict-label { color: rgb(200, 185, 0); }
+.verdict-banner[data-verdict="moderate"]  .verdict-dots  { color: rgb(200, 185, 0); }
 
-.verdict-banner[data-verdict="collapsing"] .verdict-label { color: rgb(230, 44, 2); }
-.verdict-banner[data-verdict="collapsing"] .verdict-dots { color: rgb(230, 44, 2); }
+.verdict-banner[data-verdict="degraded"]  .verdict-label { color: rgb(230, 140, 0); }
+.verdict-banner[data-verdict="degraded"]  .verdict-dots  { color: rgb(230, 140, 0); }
+
+.verdict-banner[data-verdict="fragile"]   .verdict-label { color: rgb(230, 44, 2);  }
+.verdict-banner[data-verdict="fragile"]   .verdict-dots  { color: rgb(230, 44, 2);  }
 
 /* --- Live Stats (overlaid on viewport, top-right, below verdict banner) --- */
 .live-stats {
@@ -3560,6 +3572,16 @@ body[data-phase="results"] #panel-right > .view-results-wrapper {
     background: var(--state-moving);
     border-color: var(--state-moving);
 }
+
+/* Results verdict label + dots color — mirrors the 3D banner verdict colors */
+.results-verdict-row[data-verdict="resilient"] .results-verdict-label,
+.results-verdict-row[data-verdict="resilient"] .dot.filled { color: rgb(45, 200, 60); background: rgb(45, 200, 60); border-color: rgb(45, 200, 60); }
+.results-verdict-row[data-verdict="moderate"]  .results-verdict-label { color: rgb(200, 185, 0); }
+.results-verdict-row[data-verdict="moderate"]  .dot.filled { background: rgb(200, 185, 0); border-color: rgb(200, 185, 0); }
+.results-verdict-row[data-verdict="degraded"]  .results-verdict-label { color: rgb(230, 140, 0); }
+.results-verdict-row[data-verdict="degraded"]  .dot.filled { background: rgb(230, 140, 0); border-color: rgb(230, 140, 0); }
+.results-verdict-row[data-verdict="fragile"]   .results-verdict-label { color: rgb(230, 44, 2);  }
+.results-verdict-row[data-verdict="fragile"]   .dot.filled { background: rgb(230, 44, 2);  border-color: rgb(230, 44, 2);  }
 
 /* Summary table */
 .results-table {

@@ -1511,13 +1511,15 @@ function updateUI(s) {
     // Resilience scorecard — visible only during fault injection, with color zones
     const scorecardSection = document.getElementById('scorecard-section');
     if (scorecardSection) {
-        if (s.scorecard) {
+        const _scFaultEnabled = s.fault_config && s.fault_config.enabled;
+        const _scHasFaults = s.metrics && s.metrics.fault_count > 0;
+        const _scFaultActive = _scFaultEnabled || _scHasFaults;
+        if (s.scorecard && _scFaultActive) {
             scorecardSection.style.display = '';
             const sc = s.scorecard;
 
-            // Fault Tolerance: 0-1, higher=better. Poor <0.5, Fair 0.5-0.8, Good >0.8
             document.getElementById('sc-ft').textContent = sc.fault_tolerance.toFixed(2);
-            updateScZone('sc-ft', sc.fault_tolerance, [0.5, 0.8], false);
+            updateScZone('sc-ft', 'ft', sc.fault_tolerance);
 
             // NRR: 0-1, higher=better. Hidden entirely when < 2 fault events.
             const nrrCard = document.getElementById('sc-nrr-card');
@@ -1526,19 +1528,17 @@ function updateUI(s) {
                 if (sc.nrr != null) {
                     nrrCard.style.display = '';
                     if (nrrEl) nrrEl.textContent = sc.nrr.toFixed(2);
-                    updateScZone('sc-nrr', sc.nrr, [0.4, 0.7], false);
+                    updateScZone('sc-nrr', 'nrr', sc.nrr);
                 } else {
                     nrrCard.style.display = 'none';
                 }
             }
 
-            // Adaptability: 0-1, higher=better. Poor <0.3, Fair 0.3-0.6, Good >0.6
             document.getElementById('sc-fleet-utilization').textContent = sc.fleet_utilization.toFixed(2);
-            updateScZone('sc-fleet-utilization', sc.fleet_utilization, [0.3, 0.6], false);
+            updateScZone('sc-fleet-utilization', 'fur', sc.fleet_utilization);
 
-            // Critical Time: 0-1, lower=better (inverted). Good <0.1, Fair 0.1-0.3, Poor >0.3
             document.getElementById('sc-crit').textContent = sc.critical_time.toFixed(2);
-            updateScZone('sc-crit', sc.critical_time, [0.1, 0.3], true);
+            updateScZone('sc-crit', 'crit', sc.critical_time);
         } else {
             scorecardSection.style.display = 'none';
         }
@@ -1632,8 +1632,11 @@ function updateVerdictBanner(s) {
     const detail = document.getElementById('verdict-detail');
     const dots = document.querySelectorAll('#verdict-dots .verdict-dot');
 
-    // Compute verdict from scorecard
-    if (s.scorecard) {
+    // Compute verdict from scorecard — only when faults are/were active
+    const _vFaultEnabled = s.fault_config && s.fault_config.enabled;
+    const _vHasFaults = s.metrics && s.metrics.fault_count > 0;
+    const _vFaultActive = _vFaultEnabled || _vHasFaults;
+    if (s.scorecard && _vFaultActive) {
         const { composite, filledDots } = computeCompositeScore(s.scorecard);
         const tier = VERDICT_TIERS.find(t => composite >= t.threshold);
         banner.dataset.verdict = tier.key;
@@ -1830,48 +1833,55 @@ function clearCtxBaseline(metricId) {
     if (baselineEl) baselineEl.textContent = '';
 }
 
-// Scorecard zone helper
-// thresholds = [poor/fair boundary, fair/good boundary]
-// inverted: true when lower=better (e.g. critical_time)
-function updateScZone(prefix, value, thresholds, inverted) {
-    const zoneEl = document.getElementById(prefix + '-zone');
+// Returns tier index 0–3 (0=worst/poor, 3=best/good) using an SC_METRIC_CONFIG entry.
+function scTier(value, cfg) {
+    const t = cfg.thresholds;
+    if (cfg.inverted) {
+        if (value <= t[0]) return 3;
+        if (value <= t[1]) return 2;
+        if (value <= t[2]) return 1;
+        return 0;
+    } else {
+        if (value >= t[2]) return 3;
+        if (value >= t[1]) return 2;
+        if (value >= t[0]) return 1;
+        return 0;
+    }
+}
+
+// Renders a scorecard bar HTML string for the results panel.
+// For inverted metrics (critical_time) a SHORT bar = healthy; color still reflects severity.
+function renderScBar(value, cfg, height) {
+    if (value == null) {
+        return `<div style="flex:1;height:${height}px;background:var(--bg-card);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;"><span style="font-size:8px;color:var(--text-muted);">N/A</span></div>`;
+    }
+    const color = SC_TIER_VARS[scTier(value, cfg)];
+    const pct = Math.min(100, Math.max(0, value * 100)).toFixed(1);
+    return `<div style="flex:1;height:${height}px;background:var(--bg-card);border:1px solid var(--border);position:relative;overflow:hidden;"><div style="width:${pct}%;height:100%;background:${color};"></div></div>`;
+}
+
+// Scorecard zone helper — uses SC_METRIC_CONFIG for per-metric thresholds and 4-tier classification.
+function updateScZone(prefix, metricKey, value) {
+    const cfg = SC_METRIC_CONFIG[metricKey];
+    const zoneEl   = document.getElementById(prefix + '-zone');
     const markerEl = document.getElementById(prefix + '-marker');
 
-    let zone, label;
-    if (inverted) {
-        // lower = better: <threshold[0] = good, threshold[0]-threshold[1] = fair, >threshold[1] = poor
-        if (value <= thresholds[0]) { zone = 'good'; label = 'GOOD'; }
-        else if (value <= thresholds[1]) { zone = 'fair'; label = 'FAIR'; }
-        else { zone = 'poor'; label = 'POOR'; }
-    } else {
-        // higher = better: <threshold[0] = poor, threshold[0]-threshold[1] = fair, >threshold[1] = good
-        if (value < thresholds[0]) { zone = 'poor'; label = 'POOR'; }
-        else if (value <= thresholds[1]) { zone = 'fair'; label = 'FAIR'; }
-        else { zone = 'good'; label = 'GOOD'; }
-    }
+    const tier = scTier(value, cfg);
+    const zoneNames  = ['poor', 'low',  'fair', 'good'];
+    const zoneLabels = ['POOR', 'LOW',  'FAIR', 'GOOD'];
 
     if (zoneEl) {
-        zoneEl.textContent = label;
-        zoneEl.dataset.zone = zone;
+        zoneEl.textContent = zoneLabels[tier];
+        zoneEl.dataset.zone = zoneNames[tier];
     }
 
-    // Position marker on the bar (0-100%)
     if (markerEl) {
         let pct;
-        if (inverted) {
-            // Map value to 0-100% where left=good, right=poor
-            const maxVal = thresholds[1] * 1.5; // extend bar beyond "poor" threshold
+        if (cfg.inverted) {
+            const maxVal = cfg.thresholds[2] * 1.5;
             pct = Math.min(100, Math.max(0, (value / maxVal) * 100));
         } else {
-            // For fault_tolerance/fleet_utilization/NRR (0-1 scale)
-            if (thresholds[1] <= 1) {
-                pct = Math.min(100, Math.max(0, value * 100));
-            } else {
-                // For metrics with non-unit scale
-                const minVal = thresholds[0] * 2;
-                const range = -minVal;
-                pct = Math.min(100, Math.max(0, ((value - minVal) / range) * 100));
-            }
+            pct = Math.min(100, Math.max(0, value * 100));
         }
         markerEl.style.left = pct + '%';
     }
@@ -2724,36 +2734,6 @@ function closeContextMenu() {
     ctxMenuAgentId = null;
     ctxMenuCell = null;
     sendCommand({ type: 'clear_selection' });
-}
-
-// ---------------------------------------------------------------------------
-// Scorecard bar helpers
-// ---------------------------------------------------------------------------
-
-// Returns tier index 0–3 (0=worst/poor, 3=best/good) using an SC_METRIC_CONFIG entry.
-function scTier(value, cfg) {
-    const t = cfg.thresholds;
-    if (cfg.inverted) {
-        if (value <= t[0]) return 3;
-        if (value <= t[1]) return 2;
-        if (value <= t[2]) return 1;
-        return 0;
-    } else {
-        if (value >= t[2]) return 3;
-        if (value >= t[1]) return 2;
-        if (value >= t[0]) return 1;
-        return 0;
-    }
-}
-
-// Renders a scorecard bar HTML string. Caps at 100% (use buildLayeredBar for FT overflow).
-function renderScBar(value, cfg, height) {
-    if (value == null) {
-        return `<div style="flex:1;height:${height}px;background:var(--bg-card);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;"><span style="font-size:8px;color:var(--text-muted);">N/A</span></div>`;
-    }
-    const color = SC_TIER_VARS[scTier(value, cfg)];
-    const pct = Math.min(100, Math.max(0, value * 100)).toFixed(1);
-    return `<div style="flex:1;height:${height}px;background:var(--bg-card);border:1px solid var(--border);position:relative;overflow:hidden;"><div style="width:${pct}%;height:100%;background:${color};"></div></div>`;
 }
 
 // ---------------------------------------------------------------------------
