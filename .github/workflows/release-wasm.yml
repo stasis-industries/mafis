@@ -43,7 +43,7 @@ jobs:
             pkg-config
 
       - name: Install wasm-bindgen-cli
-        run: cargo install wasm-bindgen-cli
+        run: cargo install wasm-bindgen-cli --version 0.2.115 --locked
 
       - name: Install binaryen (wasm-opt)
         run: sudo apt-get install -y binaryen
