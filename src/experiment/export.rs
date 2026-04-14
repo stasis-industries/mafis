@@ -14,7 +14,7 @@ pub fn write_runs_csv<W: Write>(writer: &mut W, runs: &[RunResult]) -> std::io::
          fault_tolerance,critical_time,\
          deficit_recovery,throughput_recovery,mtbf,recovery_tick,\
          survival_rate,impacted_area,deficit_integral,\
-         cascade_depth_avg,cascade_spread_avg,fleet_utilization,\
+         cascade_depth_avg,cascade_spread_avg,itae,rapidity,attack_rate,fleet_utilization,\
          solver_step_avg_us,solver_step_max_us,wall_time_ms"
     )?;
 
@@ -46,8 +46,8 @@ fn write_run_row<W: Write>(
          {},{},\
          {},{},{},{},\
          {},{},{},\
-         {},{},{},\
-         {},{},{}",
+         {},{},{},{},{},\
+         {},{},{},{}",
         config.solver_name,
         config.topology_name,
         config.scenario_label(),
@@ -70,6 +70,9 @@ fn write_run_row<W: Write>(
         m.deficit_integral,
         csv_f64(m.cascade_depth_avg, 2),
         csv_f64(m.cascade_spread_avg, 2),
+        csv_f64(m.itae, 4),
+        csv_f64(m.rapidity, 2),
+        csv_f64(m.attack_rate, 4),
         csv_f64(m.fleet_utilization, 4),
         csv_f64(m.solver_step_time_avg_us, 1),
         csv_f64(m.solver_step_time_max_us, 1),
@@ -97,6 +100,7 @@ pub fn write_summary_csv<W: Write>(
          survival_rate_mean,\
          impacted_area_mean,deficit_integral_mean,\
          cascade_depth_mean,cascade_depth_std,cascade_spread_mean,cascade_spread_std,\
+         itae_mean,itae_std,rapidity_mean,rapidity_std,attack_rate_mean,attack_rate_std,\
          fleet_utilization_mean,fleet_utilization_std,\
          solver_step_us_mean,wall_time_ms_mean"
     )?;
@@ -114,6 +118,7 @@ pub fn write_summary_csv<W: Write>(
              {:.4},\
              {:.4},{:.1},\
              {:.2},{:.2},{:.2},{:.2},\
+             {:.4},{:.4},{:.2},{:.2},{:.4},{:.4},\
              {:.4},{:.4},\
              {:.1},{:.0}",
             s.solver_name,
@@ -147,6 +152,12 @@ pub fn write_summary_csv<W: Write>(
             s.cascade_depth.std,
             s.cascade_spread.mean,
             s.cascade_spread.std,
+            s.itae.mean,
+            s.itae.std,
+            s.rapidity.mean,
+            s.rapidity.std,
+            s.attack_rate.mean,
+            s.attack_rate.std,
             s.fleet_utilization.mean,
             s.fleet_utilization.std,
             s.solver_step_us.mean,
@@ -310,7 +321,9 @@ fn write_metrics_json<W: Write>(
          \"recovery_tick\":{},\
          \"survival_rate\":{},\"impacted_area\":{},\
          \"deficit_integral\":{},\
-         \"cascade_depth_avg\":{},\"cascade_spread_avg\":{},\"fleet_utilization\":{},\
+         \"cascade_depth_avg\":{},\"cascade_spread_avg\":{},\
+         \"itae\":{},\"rapidity\":{},\"attack_rate\":{},\
+         \"fleet_utilization\":{},\
          \"solver_step_avg_us\":{},\"solver_step_max_us\":{},\
          \"wall_time_ms\":{}}}",
         json_f64(m.avg_throughput, 4),
@@ -328,6 +341,9 @@ fn write_metrics_json<W: Write>(
         m.deficit_integral,
         json_f64(m.cascade_depth_avg, 2),
         json_f64(m.cascade_spread_avg, 2),
+        json_f64(m.itae, 4),
+        json_f64(m.rapidity, 2),
+        json_f64(m.attack_rate, 4),
         json_f64(m.fleet_utilization, 4),
         json_f64(m.solver_step_time_avg_us, 1),
         json_f64(m.solver_step_time_max_us, 1),
@@ -371,6 +387,12 @@ fn write_summary_json<W: Write>(writer: &mut W, s: &ConfigSummary) -> std::io::R
     write_stat_json(writer, "cascade_depth", &s.cascade_depth)?;
     write!(writer, ",")?;
     write_stat_json(writer, "cascade_spread", &s.cascade_spread)?;
+    write!(writer, ",")?;
+    write_stat_json(writer, "itae", &s.itae)?;
+    write!(writer, ",")?;
+    write_stat_json(writer, "rapidity", &s.rapidity)?;
+    write!(writer, ",")?;
+    write_stat_json(writer, "attack_rate", &s.attack_rate)?;
     write!(writer, ",")?;
     write_stat_json(writer, "fleet_utilization", &s.fleet_utilization)?;
     write!(writer, ",")?;
@@ -443,6 +465,9 @@ pub fn parse_summaries_from_json(json: &str) -> Result<Vec<ConfigSummary>, Strin
             deficit_integral: parse_stat(s, "deficit_integral"),
             cascade_depth: parse_stat(s, "cascade_depth"),
             cascade_spread: parse_stat(s, "cascade_spread"),
+            itae: parse_stat(s, "itae"),
+            rapidity: parse_stat(s, "rapidity"),
+            attack_rate: parse_stat(s, "attack_rate"),
             fleet_utilization: parse_stat(s, "fleet_utilization"),
             solver_step_us: parse_stat(s, "solver_step_us"),
             wall_time_ms: parse_stat(s, "wall_time_ms"),
@@ -486,6 +511,9 @@ pub enum MetricColumn {
     DeficitIntegral,
     CascadeDepth,
     CascadeSpread,
+    Itae,
+    Rapidity,
+    AttackRate,
     FleetUtilization,
     SolverStepUs,
     WallTimeMs,
@@ -506,6 +534,9 @@ impl MetricColumn {
             Self::DeficitIntegral => "Deficit",
             Self::CascadeDepth => "Casc. Depth",
             Self::CascadeSpread => "Casc. Spread",
+            Self::Itae => "ITAE",
+            Self::Rapidity => "Rapidity",
+            Self::AttackRate => "Attack Rate",
             Self::FleetUtilization => "Fleet Util.",
             Self::SolverStepUs => "Solver µs",
             Self::WallTimeMs => "Wall ms",
@@ -526,6 +557,9 @@ impl MetricColumn {
             Self::DeficitIntegral => "Deficit",
             Self::CascadeDepth => "CascD",
             Self::CascadeSpread => "CascS",
+            Self::Itae => "ITAE",
+            Self::Rapidity => "Rap",
+            Self::AttackRate => "AR",
             Self::FleetUtilization => "FUtil",
             Self::SolverStepUs => "µs",
             Self::WallTimeMs => "ms",
@@ -546,6 +580,9 @@ impl MetricColumn {
             Self::DeficitIntegral => &s.deficit_integral,
             Self::CascadeDepth => &s.cascade_depth,
             Self::CascadeSpread => &s.cascade_spread,
+            Self::Itae => &s.itae,
+            Self::Rapidity => &s.rapidity,
+            Self::AttackRate => &s.attack_rate,
             Self::FleetUtilization => &s.fleet_utilization,
             Self::SolverStepUs => &s.solver_step_us,
             Self::WallTimeMs => &s.wall_time_ms,
@@ -557,6 +594,7 @@ impl MetricColumn {
         match self {
             Self::TotalTasks | Self::DeficitIntegral | Self::WallTimeMs => 0,
             Self::SolverStepUs | Self::DeficitRecovery | Self::ThroughputRecovery => 1,
+            Self::Rapidity => 2,
             Self::Throughput
             | Self::FaultTolerance
             | Self::CriticalTime
@@ -566,6 +604,7 @@ impl MetricColumn {
             | Self::CascadeDepth
             | Self::CascadeSpread
             | Self::FleetUtilization => 2,
+            Self::Itae | Self::AttackRate => 4,
         }
     }
 
@@ -582,6 +621,9 @@ impl MetricColumn {
         Self::DeficitIntegral,
         Self::CascadeDepth,
         Self::CascadeSpread,
+        Self::Itae,
+        Self::Rapidity,
+        Self::AttackRate,
         Self::FleetUtilization,
         Self::SolverStepUs,
         Self::WallTimeMs,

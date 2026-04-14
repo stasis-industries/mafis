@@ -166,6 +166,39 @@ pub fn cascade_bfs_standalone(
     (affected + 1, deepest)
 }
 
+/// Like `cascade_bfs_standalone` but also marks every visited agent
+/// (including the faulted agent) in `affected`. Used by the headless
+/// experiment runner to populate the `ever_affected` trace required for
+/// the Attack Rate metric (Wallinga & Lipsitch 2007).
+///
+/// Out-of-range indices in `affected` are silently skipped — callers are
+/// responsible for sizing the slice to the agent count.
+pub fn cascade_bfs_mark(
+    graph: &IndexedDependencyGraph,
+    dead_agent: usize,
+    max_depth: u32,
+    affected: &mut [bool],
+) {
+    let mut visited = HashSet::new();
+    let mut queue: VecDeque<(usize, u32)> = VecDeque::new();
+    visited.insert(dead_agent);
+    queue.push_back((dead_agent, 0));
+
+    while let Some((idx, depth)) = queue.pop_front() {
+        if let Some(slot) = affected.get_mut(idx) {
+            *slot = true;
+        }
+        if depth >= max_depth {
+            continue;
+        }
+        for &dep in graph.direct_dependents(idx) {
+            if visited.insert(dep) {
+                queue.push_back((dep, depth + 1));
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -251,8 +284,7 @@ mod tests {
 
     #[test]
     fn multiple_clear_calls_are_idempotent() {
-        let mut state = CascadeState::default();
-        state.max_depth = 10;
+        let mut state = CascadeState { max_depth: 10, ..Default::default() };
         state.clear();
         state.clear(); // second clear on already-empty state is safe
         assert_eq!(state.max_depth, 0);
@@ -294,5 +326,68 @@ mod tests {
         let (affected, depth) = cascade_bfs_standalone(&graph, 0, 1);
         assert_eq!(affected, 2); // faulted + agent 1
         assert_eq!(depth, 1);
+    }
+
+    // ── cascade_bfs_mark (Attack Rate trace) ─────────────────────────
+
+    #[test]
+    fn cascade_bfs_mark_marks_linear_chain() {
+        use super::super::dependency::IndexedDependencyGraph;
+        // Chain: 0 → 1 → 2
+        let mut deps = HashMap::new();
+        deps.insert(0, vec![1]);
+        deps.insert(1, vec![2]);
+        let graph = IndexedDependencyGraph { dependents: deps };
+        let mut affected = vec![false; 3];
+        cascade_bfs_mark(&graph, 0, 10, &mut affected);
+        assert_eq!(affected, vec![true, true, true]);
+    }
+
+    #[test]
+    fn cascade_bfs_mark_no_dependents_marks_only_faulted() {
+        use super::super::dependency::IndexedDependencyGraph;
+        let graph = IndexedDependencyGraph { dependents: HashMap::new() };
+        let mut affected = vec![false; 3];
+        cascade_bfs_mark(&graph, 1, 10, &mut affected);
+        assert_eq!(affected, vec![false, true, false]);
+    }
+
+    #[test]
+    fn cascade_bfs_mark_respects_depth_cap() {
+        use super::super::dependency::IndexedDependencyGraph;
+        // Chain: 0 → 1 → 2 → 3, depth cap = 1
+        let mut deps = HashMap::new();
+        deps.insert(0, vec![1]);
+        deps.insert(1, vec![2]);
+        deps.insert(2, vec![3]);
+        let graph = IndexedDependencyGraph { dependents: deps };
+        let mut affected = vec![false; 4];
+        cascade_bfs_mark(&graph, 0, 1, &mut affected);
+        // depth 0 = agent 0, depth 1 = agent 1. Agents 2, 3 NOT marked.
+        assert_eq!(affected, vec![true, true, false, false]);
+    }
+
+    #[test]
+    fn cascade_bfs_mark_accumulates_across_calls() {
+        use super::super::dependency::IndexedDependencyGraph;
+        // Two disjoint chains: 0→1, 2→3
+        let mut deps = HashMap::new();
+        deps.insert(0, vec![1]);
+        deps.insert(2, vec![3]);
+        let graph = IndexedDependencyGraph { dependents: deps };
+        let mut affected = vec![false; 4];
+        cascade_bfs_mark(&graph, 0, 10, &mut affected);
+        cascade_bfs_mark(&graph, 2, 10, &mut affected);
+        assert_eq!(affected, vec![true, true, true, true]);
+    }
+
+    #[test]
+    fn cascade_bfs_mark_out_of_range_safe() {
+        use super::super::dependency::IndexedDependencyGraph;
+        let graph = IndexedDependencyGraph { dependents: HashMap::new() };
+        let mut affected = vec![false; 2];
+        // idx=5 > slice len — must not panic
+        cascade_bfs_mark(&graph, 5, 10, &mut affected);
+        assert_eq!(affected, vec![false, false]);
     }
 }

@@ -47,6 +47,19 @@ pub struct RunMetrics {
     /// Average cascade depth per fault event (max BFS depth).
     pub cascade_depth_avg: f64,
 
+    // ── Tier 1 Resilience Metrics ──────────────────────────────────
+    /// Integral of Time-weighted Absolute Error of throughput ratio post-fault.
+    /// `J_ITAE = Σ (t - t_fault) · |1 - R(t)|` where `R(t) = faulted_tp[t] / baseline_tp[t]`.
+    /// Ogata 2010. Unit: tick² · dimensionless. Lower = better. NaN if no fault.
+    pub itae: f64,
+    /// Rapidity — ticks from first fault until `R(t) ≥ RAPIDITY_THRESHOLD`
+    /// holds for `≥ RAPIDITY_DWELL` consecutive ticks. Bruneau 2003.
+    /// NaN if never recovers within the simulation horizon.
+    pub rapidity: f64,
+    /// Attack Rate — fraction of initial fleet ever materially affected by
+    /// any fault cascade. Wallinga & Lipsitch 2007. Range [0, 1].
+    pub attack_rate: f64,
+
     // ── Fleet utilization ─────────────────────────────────────────
     /// Fleet utilization: average (alive_and_tasked / initial_fleet) post-fault.
     pub fleet_utilization: f64,
@@ -111,6 +124,9 @@ pub fn compute_baseline_self_metrics(
         recovery_tick: None,
         cascade_spread_avg: 0.0,
         cascade_depth_avg: 0.0,
+        itae: 0.0,
+        rapidity: 0.0,
+        attack_rate: 0.0,
         fleet_utilization: 1.0,
         survival_rate: 1.0,
         impacted_area: 0.0,
@@ -266,6 +282,20 @@ pub fn compute_run_metrics(
         _ => 1.0,
     };
 
+    // ── Tier 1 resilience metrics (ITAE, Rapidity) ─────────────────
+    let itae = compute_itae(
+        &baseline.throughput_series,
+        &faulted_analysis.throughput_series,
+        first_fault_idx,
+    );
+    let rapidity = compute_rapidity(
+        &baseline.throughput_series,
+        &faulted_analysis.throughput_series,
+        first_fault_idx,
+        crate::constants::RAPIDITY_THRESHOLD,
+        crate::constants::RAPIDITY_DWELL,
+    );
+
     // ── Solver step timing ─────────────────────────────────────────
     let solver_step_time_avg_us = if solver_step_times_us.is_empty() {
         0.0
@@ -287,6 +317,9 @@ pub fn compute_run_metrics(
         recovery_tick: diff.recovery_tick,
         cascade_spread_avg: 0.0,
         cascade_depth_avg: 0.0,
+        itae,
+        rapidity,
+        attack_rate: 0.0,
         fleet_utilization,
         survival_rate,
         impacted_area: diff.impacted_area,
@@ -358,6 +391,70 @@ fn compute_critical_time(
     if ticks_after_fault > 0 { ticks_below as f64 / ticks_after_fault as f64 } else { 0.0 }
 }
 
+/// Integral of Time-weighted Absolute Error of throughput ratio post-fault.
+/// `J_ITAE = Σ (t - t_fault) · |1 - R(t)|`  where `R(t) = faulted_tp[t] / baseline_tp[t]`.
+///
+/// Skips ticks where `baseline_tp[t] == 0` (ratio undefined).
+/// Returns NaN if `start` is None (no fault occurred), 0.0 if start is past
+/// the series end.
+fn compute_itae(baseline_tp: &[f64], faulted_tp: &[f64], start: Option<usize>) -> f64 {
+    let start = match start {
+        Some(s) => s,
+        None => return f64::NAN,
+    };
+    let len = baseline_tp.len().min(faulted_tp.len());
+    if start >= len {
+        return 0.0;
+    }
+    let mut acc = 0.0_f64;
+    for i in start..len {
+        let b = baseline_tp[i];
+        if b == 0.0 {
+            continue;
+        }
+        let r = faulted_tp[i] / b;
+        let t_weight = (i - start) as f64;
+        acc += t_weight * (1.0 - r).abs();
+    }
+    acc
+}
+
+/// Rapidity — ticks from first fault until `R(t) = faulted_tp[t] / baseline_tp[t]`
+/// meets or exceeds `threshold` for `≥ dwell` consecutive ticks. Returns the
+/// offset (relative to `start`) of the first tick of the confirming dwell window.
+/// NaN if never recovers within the horizon.
+fn compute_rapidity(
+    baseline_tp: &[f64],
+    faulted_tp: &[f64],
+    start: Option<usize>,
+    threshold: f64,
+    dwell: usize,
+) -> f64 {
+    let start = match start {
+        Some(s) => s,
+        None => return f64::NAN,
+    };
+    let len = baseline_tp.len().min(faulted_tp.len());
+    if start >= len {
+        return f64::NAN;
+    }
+    let mut consec = 0_usize;
+    for i in start..len {
+        let b = baseline_tp[i];
+        let r = if b == 0.0 { 0.0 } else { faulted_tp[i] / b };
+        if r >= threshold {
+            consec += 1;
+            if consec >= dwell {
+                // First tick of the confirming dwell window, relative to fault start.
+                return (i + 1 - dwell - start) as f64;
+            }
+        } else {
+            consec = 0;
+        }
+    }
+    f64::NAN
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -398,9 +495,9 @@ mod tests {
     #[test]
     fn ft_known_values() {
         // Baseline: constant 2.0 throughput
-        let bl = vec![2.0; 20];
+        let bl = [2.0_f64; 20];
         // Faulted: normal for 5 ticks, then drops to 1.0
-        let mut faulted = vec![2.0; 20];
+        let mut faulted = [2.0_f64; 20];
         for i in 5..20 {
             faulted[i] = 1.0;
         }
@@ -489,5 +586,72 @@ mod tests {
         // Also verify throughput_recovery returns 0.0 with no faults
         let recovery = compute_throughput_recovery(&[2.0; 10], &[2.0; 10], None);
         assert!((recovery - 0.0).abs() < 1e-10, "recovery should be 0.0 with no faults");
+    }
+
+    // ── compute_itae (Ogata 2010) ────────────────────────────────────
+
+    #[test]
+    fn itae_zero_when_identical() {
+        let bl = vec![1.0; 10];
+        let ft = vec![1.0; 10];
+        assert_eq!(compute_itae(&bl, &ft, Some(3)), 0.0);
+    }
+
+    #[test]
+    fn itae_monotonic_in_deviation() {
+        let bl = vec![2.0; 10];
+        let small = {
+            let mut v = vec![2.0; 10];
+            for i in 3..10 {
+                v[i] = 1.5;
+            }
+            v
+        };
+        let big = {
+            let mut v = vec![2.0; 10];
+            for i in 3..10 {
+                v[i] = 0.5;
+            }
+            v
+        };
+        assert!(compute_itae(&bl, &big, Some(3)) > compute_itae(&bl, &small, Some(3)));
+    }
+
+    #[test]
+    fn itae_nan_when_no_fault() {
+        let bl = vec![1.0; 5];
+        let ft = vec![1.0; 5];
+        assert!(compute_itae(&bl, &ft, None).is_nan());
+    }
+
+    // ── compute_rapidity (Bruneau 2003) ──────────────────────────────
+
+    #[test]
+    fn rapidity_immediate_recovery() {
+        let bl = vec![1.0; 20];
+        let ft = vec![1.0; 20];
+        let r = compute_rapidity(&bl, &ft, Some(3), 0.9, 5);
+        assert!((r - 0.0).abs() < 1e-9, "got {r}");
+    }
+
+    #[test]
+    fn rapidity_nan_when_no_recovery() {
+        let bl = vec![1.0; 20];
+        let mut ft = vec![1.0; 20];
+        for i in 3..20 {
+            ft[i] = 0.3;
+        }
+        assert!(compute_rapidity(&bl, &ft, Some(3), 0.9, 5).is_nan());
+    }
+
+    #[test]
+    fn rapidity_requires_dwell() {
+        // Brief cross (3 ticks) above threshold then dip → not recovered w/ dwell=5
+        let bl = vec![1.0; 20];
+        let mut ft = vec![0.5; 20];
+        ft[5] = 1.0;
+        ft[6] = 1.0;
+        ft[7] = 1.0; // only 3 ticks, dwell=5 → not recovered
+        assert!(compute_rapidity(&bl, &ft, Some(3), 0.9, 5).is_nan());
     }
 }

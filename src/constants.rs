@@ -256,3 +256,15 @@ pub const SCORECARD_RECOMPUTE_INTERVAL: u64 = 50;
 
 /// Moving average window for throughput chart smoothing (ticks).
 pub const THROUGHPUT_MA_WINDOW: usize = 10;
+
+// ── Rapidity (Bruneau 2003) ──────────────────────────────────────────
+
+/// Threshold for Rapidity: R(t) = faulted_tp[t] / baseline_tp[t] must meet
+/// or exceed this fraction to count as recovered.
+/// Bruneau et al. 2003, *A Framework to Quantitatively Assess and Enhance
+/// the Seismic Resilience of Communities*, EERI Spectra 19(4).
+pub const RAPIDITY_THRESHOLD: f64 = 0.9;
+
+/// Minimum consecutive ticks above `RAPIDITY_THRESHOLD` for recovery
+/// confirmation. Guards against oscillatory crossings.
+pub const RAPIDITY_DWELL: usize = 5;

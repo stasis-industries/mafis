@@ -52,6 +52,9 @@ pub struct ConfigSummary {
     pub deficit_integral: StatSummary,
     pub cascade_depth: StatSummary,
     pub cascade_spread: StatSummary,
+    pub itae: StatSummary,
+    pub rapidity: StatSummary,
+    pub attack_rate: StatSummary,
     pub fleet_utilization: StatSummary,
     pub solver_step_us: StatSummary,
     pub wall_time_ms: StatSummary,
@@ -179,6 +182,9 @@ pub fn run_single_experiment(config: &ExperimentConfig) -> RunResult {
         let mut step_times = Vec::with_capacity(config.tick_count as usize);
         let mut cascade_depths: Vec<f64> = Vec::with_capacity(actual_agents);
         let mut cascade_spreads: Vec<f64> = Vec::with_capacity(actual_agents);
+        // Per-agent "ever materially affected" trace for Attack Rate
+        // (Wallinga & Lipsitch 2007). Populated by cascade BFS on every fault.
+        let mut ever_affected: Vec<bool> = vec![false; actual_agents];
 
         let faulted_start = Instant::now();
         for _ in 0..config.tick_count {
@@ -200,6 +206,12 @@ pub fn run_single_experiment(config: &ExperimentConfig) -> RunResult {
                     );
                     cascade_spreads.push(spread as f64);
                     cascade_depths.push(depth as f64);
+                    crate::analysis::cascade::cascade_bfs_mark(
+                        &adg,
+                        fault.agent_index,
+                        crate::constants::MAX_CASCADE_DEPTH,
+                        &mut ever_affected,
+                    );
                 }
             }
 
@@ -227,6 +239,11 @@ pub fn run_single_experiment(config: &ExperimentConfig) -> RunResult {
         } else {
             cascade_spreads.iter().sum::<f64>() / cascade_spreads.len() as f64
         };
+
+        // Attack Rate — fraction of initial fleet ever materially affected.
+        let affected_count = ever_affected.iter().filter(|&&x| x).count() as f64;
+        fm.attack_rate =
+            if actual_agents > 0 { affected_count / actual_agents as f64 } else { 0.0 };
 
         faulted_metrics = fm;
     }
@@ -368,6 +385,9 @@ fn run_faulted_only(config: &ExperimentConfig, cached: &CachedBaseline) -> RunRe
     let mut step_times = Vec::with_capacity(config.tick_count as usize);
     let mut cascade_depths: Vec<f64> = Vec::with_capacity(actual_agents);
     let mut cascade_spreads: Vec<f64> = Vec::with_capacity(actual_agents);
+    // Per-agent "ever materially affected" trace for Attack Rate
+    // (Wallinga & Lipsitch 2007). Populated by cascade BFS on every fault.
+    let mut ever_affected: Vec<bool> = vec![false; actual_agents];
 
     let faulted_start = Instant::now();
     for _ in 0..config.tick_count {
@@ -388,6 +408,12 @@ fn run_faulted_only(config: &ExperimentConfig, cached: &CachedBaseline) -> RunRe
                 );
                 cascade_spreads.push(spread as f64);
                 cascade_depths.push(depth as f64);
+                crate::analysis::cascade::cascade_bfs_mark(
+                    &adg,
+                    fault.agent_index,
+                    crate::constants::MAX_CASCADE_DEPTH,
+                    &mut ever_affected,
+                );
             }
         }
 
@@ -415,6 +441,10 @@ fn run_faulted_only(config: &ExperimentConfig, cached: &CachedBaseline) -> RunRe
     } else {
         cascade_spreads.iter().sum::<f64>() / cascade_spreads.len() as f64
     };
+
+    // Attack Rate — fraction of initial fleet ever materially affected.
+    let affected_count = ever_affected.iter().filter(|&&x| x).count() as f64;
+    fm.attack_rate = if actual_agents > 0 { affected_count / actual_agents as f64 } else { 0.0 };
 
     RunResult {
         config: config.clone(),
@@ -607,6 +637,10 @@ pub fn compute_summaries(runs: &[RunResult]) -> Vec<ConfigSummary> {
                 group.iter().map(|r| r.faulted_metrics.cascade_depth_avg).collect();
             let cascade_spreads: Vec<f64> =
                 group.iter().map(|r| r.faulted_metrics.cascade_spread_avg).collect();
+            let itaes: Vec<f64> = group.iter().map(|r| r.faulted_metrics.itae).collect();
+            let rapidities: Vec<f64> = group.iter().map(|r| r.faulted_metrics.rapidity).collect();
+            let attack_rates: Vec<f64> =
+                group.iter().map(|r| r.faulted_metrics.attack_rate).collect();
             let fleet_utils: Vec<f64> =
                 group.iter().map(|r| r.faulted_metrics.fleet_utilization).collect();
             let solver_us: Vec<f64> =
@@ -633,6 +667,9 @@ pub fn compute_summaries(runs: &[RunResult]) -> Vec<ConfigSummary> {
                 deficit_integral: compute_stat_summary(&deficits).unwrap_or_default(),
                 cascade_depth: compute_stat_summary(&cascade_depths).unwrap_or_default(),
                 cascade_spread: compute_stat_summary(&cascade_spreads).unwrap_or_default(),
+                itae: compute_stat_summary(&itaes).unwrap_or_default(),
+                rapidity: compute_stat_summary(&rapidities).unwrap_or_default(),
+                attack_rate: compute_stat_summary(&attack_rates).unwrap_or_default(),
                 fleet_utilization: compute_stat_summary(&fleet_utils).unwrap_or_default(),
                 solver_step_us: compute_stat_summary(&solver_us).unwrap_or_default(),
                 wall_time_ms: compute_stat_summary(&wall_times).unwrap_or_default(),
@@ -882,6 +919,52 @@ mod tests {
             result.faulted_metrics.total_tasks,
             result.baseline_metrics.total_tasks,
         );
+    }
+
+    // ── Attack Rate (B4 integration) ──────────────────────────────────
+
+    #[test]
+    fn single_experiment_burst_attack_rate_positive() {
+        // 30% burst kill → AR ≥ 0.3 from direct deaths. Any cascade pushes
+        // it higher. Bounded above by 1.0 by construction.
+        let config = ExperimentConfig {
+            solver_name: "pibt".into(),
+            topology_name: "warehouse_large".into(),
+            scenario: Some(FaultScenario {
+                enabled: true,
+                scenario_type: FaultScenarioType::BurstFailure,
+                burst_kill_percent: 30.0,
+                burst_at_tick: 20,
+                ..Default::default()
+            }),
+            scheduler_name: "random".into(),
+            num_agents: 10,
+            seed: 42,
+            tick_count: 100,
+            custom_map: None,
+        };
+        let result = run_single_experiment(&config);
+        let ar = result.faulted_metrics.attack_rate;
+        assert!(ar >= 0.3, "attack_rate {ar} should be >= 0.3 for 30% burst");
+        assert!(ar <= 1.0, "attack_rate {ar} should be <= 1.0");
+    }
+
+    #[test]
+    fn single_experiment_no_fault_attack_rate_zero() {
+        // No scenario → no fault events → ever_affected all false → AR = 0.
+        let config = ExperimentConfig {
+            solver_name: "pibt".into(),
+            topology_name: "warehouse_large".into(),
+            scenario: None,
+            scheduler_name: "random".into(),
+            num_agents: 10,
+            seed: 42,
+            tick_count: 100,
+            custom_map: None,
+        };
+        let result = run_single_experiment(&config);
+        assert_eq!(result.faulted_metrics.attack_rate, 0.0);
+        assert_eq!(result.baseline_metrics.attack_rate, 0.0);
     }
 
     #[test]

@@ -595,14 +595,16 @@ mod tests {
 
     #[test]
     fn fault_metrics_clear_resets_to_default() {
-        let mut fm = FaultMetrics::default();
-        fm.mttr = 42.0;
-        fm.total_affected = 10;
-        fm.total_recovered = 7;
-        fm.recovery_rate = 0.7;
-        fm.avg_cascade_spread = 3.5;
-        fm.wait_ratio = 0.3;
-        fm.initial_agent_count = 50;
+        let mut fm = FaultMetrics {
+            mttr: 42.0,
+            total_affected: 10,
+            total_recovered: 7,
+            recovery_rate: 0.7,
+            avg_cascade_spread: 3.5,
+            wait_ratio: 0.3,
+            initial_agent_count: 50,
+            ..Default::default()
+        };
 
         fm.clear();
 
@@ -617,8 +619,7 @@ mod tests {
 
     #[test]
     fn fault_metrics_clear_twice_is_safe() {
-        let mut fm = FaultMetrics::default();
-        fm.mttr = 5.0;
+        let mut fm = FaultMetrics { mttr: 5.0, ..Default::default() };
         fm.clear();
         fm.clear();
         assert_eq!(fm.mttr, 0.0);
