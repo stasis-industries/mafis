@@ -570,14 +570,14 @@ mod tests {
         let mut cache = DistanceMapCache::default();
         let mut rng = crate::core::seed::SeededRng::new(42);
 
-        let mut positions = vec![
+        let mut positions = [
             IVec2::new(0, 0),
             IVec2::new(7, 7),
             IVec2::new(0, 7),
             IVec2::new(7, 0),
             IVec2::new(3, 3),
         ];
-        let goals = vec![
+        let goals = [
             IVec2::new(7, 7),
             IVec2::new(0, 0),
             IVec2::new(7, 0),

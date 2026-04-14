@@ -15,91 +15,102 @@ mod desktop_tests {
 
     // ── Constants: native limits are higher than WASM defaults ──────
 
+    // Compile-time invariant checks (constants vs. literal bounds).
+    const _: () = assert!(
+        constants::MAX_AGENTS >= 2000,
+        "Native MAX_AGENTS should be >= 2000 for research workloads",
+    );
+    const _: () = assert!(
+        constants::PBS_MAX_NODE_LIMIT >= 5000,
+        "Native PBS_MAX_NODE_LIMIT should be >= 5000",
+    );
+    const _: () = assert!(
+        constants::LOADING_OBSTACLE_BATCH >= 1000,
+        "Native LOADING_OBSTACLE_BATCH should be >= 1000",
+    );
+    const _: () = assert!(
+        constants::LOADING_AGENT_BATCH >= 500,
+        "Native LOADING_AGENT_BATCH should be >= 500",
+    );
+    const _: () = assert!(
+        constants::BASELINE_TICKS_PER_FRAME >= 100,
+        "Native BASELINE_TICKS_PER_FRAME should be >= 100",
+    );
+    const _: () = assert!(constants::MAX_AGENTS <= 100_000, "MAX_AGENTS is unreasonably high",);
+    const _: () = assert!(
+        constants::PBS_MAX_NODE_LIMIT <= 1_000_000,
+        "PBS_MAX_NODE_LIMIT is unreasonably high",
+    );
+
+    // Grid dim consistency
+    const _: () = assert!(constants::MIN_GRID_DIM > 0);
+    const _: () = assert!(constants::MIN_GRID_DIM < constants::MAX_GRID_DIM);
+    const _: () = assert!(constants::DEFAULT_GRID_DIM >= constants::MIN_GRID_DIM);
+    const _: () = assert!(constants::DEFAULT_GRID_DIM <= constants::MAX_GRID_DIM);
+
+    // Agent count consistency
+    const _: () = assert!(constants::MIN_AGENTS > 0);
+    const _: () = assert!(constants::MIN_AGENTS <= constants::DEFAULT_AGENTS);
+    const _: () = assert!(constants::DEFAULT_AGENTS <= constants::MAX_AGENTS);
+
+    // Duration consistency
+    const _: () = assert!(constants::MIN_DURATION > 0);
+    const _: () = assert!(constants::MIN_DURATION <= constants::DEFAULT_DURATION);
+    const _: () = assert!(constants::DEFAULT_DURATION <= constants::MAX_DURATION);
+    const _: () = assert!(constants::DURATION_SHORT <= constants::DURATION_MEDIUM);
+    const _: () = assert!(constants::DURATION_MEDIUM <= constants::DURATION_LONG);
+
     #[test]
     fn native_max_agents_exceeds_wasm_default() {
-        // WASM would be 1000; native must be higher for research use.
-        assert!(
-            constants::MAX_AGENTS >= 2000,
-            "Native MAX_AGENTS ({}) should be >= 2000 for research workloads",
-            constants::MAX_AGENTS,
-        );
+        // Compile-time check above; this test documents the invariant.
+        let _ = constants::MAX_AGENTS;
     }
 
     #[test]
     fn native_pbs_node_limit_exceeds_wasm_default() {
-        // WASM is 1000; native should be much higher since there's no frame budget.
-        assert!(
-            constants::PBS_MAX_NODE_LIMIT >= 5000,
-            "Native PBS_MAX_NODE_LIMIT ({}) should be >= 5000",
-            constants::PBS_MAX_NODE_LIMIT,
-        );
+        let _ = constants::PBS_MAX_NODE_LIMIT;
     }
 
     #[test]
     fn native_loading_batches_exceed_wasm_defaults() {
-        assert!(
-            constants::LOADING_OBSTACLE_BATCH >= 1000,
-            "Native LOADING_OBSTACLE_BATCH ({}) should be >= 1000",
-            constants::LOADING_OBSTACLE_BATCH,
-        );
-        assert!(
-            constants::LOADING_AGENT_BATCH >= 500,
-            "Native LOADING_AGENT_BATCH ({}) should be >= 500",
-            constants::LOADING_AGENT_BATCH,
-        );
+        let _ = (constants::LOADING_OBSTACLE_BATCH, constants::LOADING_AGENT_BATCH);
     }
 
     #[test]
     fn native_baseline_ticks_per_frame_exceeds_wasm() {
-        assert!(
-            constants::BASELINE_TICKS_PER_FRAME >= 100,
-            "Native BASELINE_TICKS_PER_FRAME ({}) should be >= 100",
-            constants::BASELINE_TICKS_PER_FRAME,
-        );
+        let _ = constants::BASELINE_TICKS_PER_FRAME;
     }
-
-    // ── Constants: sanity bounds ────────────────────────────────────
 
     #[test]
     fn max_agents_has_sane_upper_bound() {
-        assert!(
-            constants::MAX_AGENTS <= 100_000,
-            "MAX_AGENTS ({}) is unreasonably high",
-            constants::MAX_AGENTS,
-        );
+        let _ = constants::MAX_AGENTS;
     }
 
     #[test]
     fn pbs_node_limit_has_sane_upper_bound() {
-        assert!(
-            constants::PBS_MAX_NODE_LIMIT <= 1_000_000,
-            "PBS_MAX_NODE_LIMIT ({}) is unreasonably high",
-            constants::PBS_MAX_NODE_LIMIT,
-        );
+        let _ = constants::PBS_MAX_NODE_LIMIT;
     }
 
     #[test]
     fn grid_dim_bounds_are_consistent() {
-        assert!(constants::MIN_GRID_DIM > 0);
-        assert!(constants::MIN_GRID_DIM < constants::MAX_GRID_DIM);
-        assert!(constants::DEFAULT_GRID_DIM >= constants::MIN_GRID_DIM);
-        assert!(constants::DEFAULT_GRID_DIM <= constants::MAX_GRID_DIM);
+        let _ = (constants::MIN_GRID_DIM, constants::MAX_GRID_DIM, constants::DEFAULT_GRID_DIM);
     }
 
     #[test]
     fn agent_bounds_are_consistent() {
-        assert!(constants::MIN_AGENTS > 0);
-        assert!(constants::MIN_AGENTS <= constants::DEFAULT_AGENTS);
-        assert!(constants::DEFAULT_AGENTS <= constants::MAX_AGENTS);
+        let _ = (constants::MIN_AGENTS, constants::DEFAULT_AGENTS, constants::MAX_AGENTS);
     }
 
     #[test]
     fn duration_bounds_are_consistent() {
-        assert!(constants::MIN_DURATION > 0);
-        assert!(constants::MIN_DURATION <= constants::DEFAULT_DURATION);
-        assert!(constants::DEFAULT_DURATION <= constants::MAX_DURATION);
-        assert!(constants::DURATION_SHORT <= constants::DURATION_MEDIUM);
-        assert!(constants::DURATION_MEDIUM <= constants::DURATION_LONG);
+        let _ = (
+            constants::MIN_DURATION,
+            constants::DEFAULT_DURATION,
+            constants::MAX_DURATION,
+            constants::DURATION_SHORT,
+            constants::DURATION_MEDIUM,
+            constants::DURATION_LONG,
+        );
     }
 
     // ── BridgeSet re-export ────────────────────────────────────────

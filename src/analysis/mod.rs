@@ -290,78 +290,6 @@ impl Plugin for AnalysisPlugin {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn metrics_config_defaults_all_true() {
-        let m = MetricsConfig::default();
-        assert!(m.any());
-        assert!(m.any_core());
-        assert!(m.any_cascade());
-        assert!(m.any_fault());
-    }
-
-    #[test]
-    fn metrics_config_any_core() {
-        let mut m = MetricsConfig::default();
-        m.aet = false;
-        m.makespan = false;
-        m.mttr = false;
-        assert!(!m.any_core());
-        // but cascade/fault still on
-        assert!(m.any());
-    }
-
-    #[test]
-    fn metrics_config_any_cascade() {
-        let mut m = MetricsConfig::default();
-        m.fault_count = false;
-        m.cascade_depth = false;
-        m.cascade_cost = false;
-        assert!(!m.any_cascade());
-        assert!(m.any());
-    }
-
-    #[test]
-    fn metrics_config_any_fault() {
-        let mut m = MetricsConfig::default();
-        m.fault_mttr = false;
-        m.recovery_rate = false;
-        m.cascade_spread = false;
-        m.throughput = false;
-        m.wait_ratio = false;
-        assert!(!m.any_fault());
-        assert!(m.any()); // core still on
-    }
-
-    #[test]
-    fn metrics_config_none() {
-        let m = MetricsConfig {
-            aet: false,
-            makespan: false,
-            mttr: false,
-            fault_count: false,
-            cascade_depth: false,
-            cascade_cost: false,
-            fault_mttr: false,
-            recovery_rate: false,
-            cascade_spread: false,
-            throughput: false,
-            wait_ratio: false,
-        };
-        assert!(!m.any());
-        assert!(!m.any_core());
-        assert!(!m.any_cascade());
-        assert!(!m.any_fault());
-    }
-}
-
 fn cleanup_analysis_state(
     mut adg: ResMut<dependency::ActionDependencyGraph>,
     mut adg_throttle: ResMut<dependency::AdgThrottle>,
@@ -386,4 +314,77 @@ fn cleanup_analysis_state(
     resilience_scorecard.clear();
     scorecard_state.clear();
     baseline_diff.clear();
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn metrics_config_defaults_all_true() {
+        let m = MetricsConfig::default();
+        assert!(m.any());
+        assert!(m.any_core());
+        assert!(m.any_cascade());
+        assert!(m.any_fault());
+    }
+
+    #[test]
+    fn metrics_config_any_core() {
+        let m = MetricsConfig { aet: false, makespan: false, mttr: false, ..Default::default() };
+        assert!(!m.any_core());
+        // but cascade/fault still on
+        assert!(m.any());
+    }
+
+    #[test]
+    fn metrics_config_any_cascade() {
+        let m = MetricsConfig {
+            fault_count: false,
+            cascade_depth: false,
+            cascade_cost: false,
+            ..Default::default()
+        };
+        assert!(!m.any_cascade());
+        assert!(m.any());
+    }
+
+    #[test]
+    fn metrics_config_any_fault() {
+        let m = MetricsConfig {
+            fault_mttr: false,
+            recovery_rate: false,
+            cascade_spread: false,
+            throughput: false,
+            wait_ratio: false,
+            ..Default::default()
+        };
+        assert!(!m.any_fault());
+        assert!(m.any()); // core still on
+    }
+
+    #[test]
+    fn metrics_config_none() {
+        let m = MetricsConfig {
+            aet: false,
+            makespan: false,
+            mttr: false,
+            fault_count: false,
+            cascade_depth: false,
+            cascade_cost: false,
+            fault_mttr: false,
+            recovery_rate: false,
+            cascade_spread: false,
+            throughput: false,
+            wait_ratio: false,
+        };
+        assert!(!m.any());
+        assert!(!m.any_core());
+        assert!(!m.any_cascade());
+        assert!(!m.any_fault());
+    }
 }

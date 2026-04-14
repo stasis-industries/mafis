@@ -211,12 +211,13 @@ mod tests {
 
     #[test]
     fn clear_resets_all_fields_to_defaults() {
-        let mut sc = ResilienceScorecard::default();
-        sc.fault_tolerance = 0.5;
-        sc.nrr = Some(0.8);
-        sc.survival_rate = 0.5;
-        sc.critical_time = 0.2;
-        sc.has_faults = true;
+        let mut sc = ResilienceScorecard {
+            fault_tolerance: 0.5,
+            nrr: Some(0.8),
+            survival_rate: 0.5,
+            critical_time: 0.2,
+            has_faults: true,
+        };
         sc.clear();
         assert_eq!(sc.fault_tolerance, 1.0);
         assert_eq!(sc.nrr, None);
@@ -260,7 +261,12 @@ mod tests {
 
     #[test]
     fn ft_braess_paradox_above_one() {
-        assert!(0.6f64 / 0.5f64 > 1.0);
+        // FT can exceed 1.0 (Braess paradox): faulted throughput > baseline.
+        // Simulate: baseline=0.5, faulted=0.6 → FT = 0.6/0.5 = 1.2.
+        let baseline = 0.5f32;
+        let faulted = 0.6f32;
+        let ft = faulted / baseline;
+        assert!(ft > 1.0, "FT={ft} should exceed 1.0 for Braess-paradox case");
     }
 
     // ── Normalized Recovery Rate (NRR = 1 - MTTR/MTBF) ──────────────

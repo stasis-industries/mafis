@@ -264,10 +264,12 @@ fn property_differential_measurement_validity() {
         let baseline = run("pibt", topology, agents, ticks, seed);
         baseline_total += baseline;
 
-        let mut scenario = FaultScenario::default();
-        scenario.enabled = true;
-        scenario.burst_kill_percent = 50.0;
-        scenario.burst_at_tick = 50;
+        let scenario = FaultScenario {
+            enabled: true,
+            burst_kill_percent: 50.0,
+            burst_at_tick: 50,
+            ..Default::default()
+        };
 
         let config = ExperimentConfig {
             solver_name: "pibt".into(),

@@ -287,6 +287,28 @@ impl DistanceMapCache {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Action helpers
+// ---------------------------------------------------------------------------
+
+/// Convert a position delta (from → to) into an `Action`.
+/// If `from == to`, returns `Action::Wait`.
+/// Panics in debug if the delta is not a cardinal move or wait.
+pub fn delta_to_action(from: IVec2, to: IVec2) -> Action {
+    let diff = to - from;
+    match (diff.x, diff.y) {
+        (0, 0) => Action::Wait,
+        (0, 1) => Action::Move(Direction::North),
+        (0, -1) => Action::Move(Direction::South),
+        (1, 0) => Action::Move(Direction::East),
+        (-1, 0) => Action::Move(Direction::West),
+        _ => {
+            debug_assert!(false, "delta_to_action: invalid delta {diff}");
+            Action::Wait
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -413,27 +435,5 @@ mod tests {
         assert_eq!(delta_to_action(origin, IVec2::new(2, 1)), Action::Move(Direction::South));
         assert_eq!(delta_to_action(origin, IVec2::new(3, 2)), Action::Move(Direction::East));
         assert_eq!(delta_to_action(origin, IVec2::new(1, 2)), Action::Move(Direction::West));
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Action helpers
-// ---------------------------------------------------------------------------
-
-/// Convert a position delta (from → to) into an `Action`.
-/// If `from == to`, returns `Action::Wait`.
-/// Panics in debug if the delta is not a cardinal move or wait.
-pub fn delta_to_action(from: IVec2, to: IVec2) -> Action {
-    let diff = to - from;
-    match (diff.x, diff.y) {
-        (0, 0) => Action::Wait,
-        (0, 1) => Action::Move(Direction::North),
-        (0, -1) => Action::Move(Direction::South),
-        (1, 0) => Action::Move(Direction::East),
-        (-1, 0) => Action::Move(Direction::West),
-        _ => {
-            debug_assert!(false, "delta_to_action: invalid delta {diff}");
-            Action::Wait
-        }
     }
 }

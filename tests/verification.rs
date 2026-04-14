@@ -1050,9 +1050,8 @@ fn delete_fault_determinism() {
     let snapshot_tick: u64;
     {
         // Build a burst fault schedule at fault_tick
-        let mut fault_schedule = FaultSchedule::default();
-        fault_schedule.initialized = true;
         let burst_count = (num_agents as f64 * 0.2).round() as usize; // 20%
+        let mut fault_schedule = FaultSchedule { initialized: true, ..Default::default() };
         fault_schedule.events.push(mafis::fault::scenario::ScheduledEvent {
             tick: fault_tick,
             action: mafis::fault::scenario::ScheduledAction::KillRandomAgents(burst_count),
@@ -1274,9 +1273,8 @@ fn delete_fault_double_restore_determinism() {
     )>;
     let snap_solver_pri: Vec<f32>;
     {
-        let mut fs = FaultSchedule::default();
-        fs.initialized = true;
         let kill_count = (num_agents as f64 * 0.2).round() as usize;
+        let mut fs = FaultSchedule { initialized: true, ..Default::default() };
         fs.events.push(mafis::fault::scenario::ScheduledEvent {
             tick: fault_tick,
             action: mafis::fault::scenario::ScheduledAction::KillRandomAgents(kill_count),
@@ -1432,9 +1430,8 @@ fn delete_fault_inplace_restore_determinism() {
     let resumed_per_tick: Vec<u64>;
     {
         // Create faulted runner
-        let mut fs = FaultSchedule::default();
-        fs.initialized = true;
         let kill_count = (num_agents as f64 * 0.2).round() as usize;
+        let mut fs = FaultSchedule { initialized: true, ..Default::default() };
         fs.events.push(mafis::fault::scenario::ScheduledEvent {
             tick: fault_tick,
             action: mafis::fault::scenario::ScheduledAction::KillRandomAgents(kill_count),
@@ -1692,8 +1689,7 @@ fn restore_runner_from_snapshot(
 /// normal performance variation between paradigms.
 ///
 /// On warehouse_large with 20 agents, empirical ordering (200 ticks, seed=42):
-///   Token Passing > RHCR-Priority-A* ≈ TPTS > PIBT > RHCR-PBS > RHCR-PIBT
-///   > RT-LaCAM
+/// Token Passing > RHCR-Priority-A\* ≈ TPTS > PIBT > RHCR-PBS > RHCR-PIBT > RT-LaCAM.
 /// This ordering is topology- and density-dependent and should not be asserted
 /// as a fixed invariant; the 5%-of-best floor is the meaningful regression guard.
 ///
@@ -2044,7 +2040,7 @@ fn intermittent_rewind_determinism() {
     let make_runner = |grid: mafis::core::grid::GridMap,
                        zones: mafis::core::topology::ZoneMap,
                        agents: Vec<mafis::core::runner::SimAgent>| {
-        let mut rng = SeededRng::new(99);
+        let rng = SeededRng::new(99);
         // Consume the same RNG as place_agents did
         let solver =
             mafis::solver::lifelong_solver_from_name("pibt", grid_area, agents.len()).unwrap();

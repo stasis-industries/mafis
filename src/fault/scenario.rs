@@ -477,8 +477,7 @@ mod tests {
 
     #[test]
     fn enabled_scenario_needs_baseline() {
-        let mut s = FaultScenario::default();
-        s.enabled = true;
+        let s = FaultScenario { enabled: true, ..Default::default() };
         assert!(s.needs_baseline());
     }
 

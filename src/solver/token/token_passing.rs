@@ -443,8 +443,8 @@ mod tests {
         let mut cache = DistanceMapCache::default();
         let mut rng = SeededRng::new(42);
 
-        let mut positions = vec![IVec2::new(0, 2), IVec2::new(4, 2)];
-        let goals = vec![IVec2::new(4, 2), IVec2::new(0, 2)];
+        let mut positions = [IVec2::new(0, 2), IVec2::new(4, 2)];
+        let goals = [IVec2::new(4, 2), IVec2::new(0, 2)];
 
         for tick in 0..30 {
             let agents: Vec<AgentState> = (0..2)

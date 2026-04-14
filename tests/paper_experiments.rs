@@ -202,7 +202,7 @@ fn paams_full() {
     for (name, matrix) in &experiments {
         eprintln!("─── {name} ({} runs) ───", matrix.total_runs());
         let result = run_matrix(matrix, None);
-        write_experiment_results(&format!("{name}"), &result);
+        write_experiment_results(name, &result);
         all_runs.extend(result.runs);
         eprintln!();
     }

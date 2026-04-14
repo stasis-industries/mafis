@@ -369,7 +369,7 @@ mod tests {
         e.traffic_grid_w = 3;
         e.traffic_grid_h = 3;
         e.traffic_counts_flat = vec![0; 9];
-        e.traffic_counts_flat[1 * 3 + 1] = 1; // (1,1)
+        e.traffic_counts_flat[3 + 1] = 1; // (1,1)
         e.total_tasks = 3;
         e.avg_throughput = 1.5;
 

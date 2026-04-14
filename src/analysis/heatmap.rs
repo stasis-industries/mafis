@@ -620,9 +620,8 @@ mod tests {
 
     #[test]
     fn clear_resets_data_but_preserves_mode_and_radius() {
-        let mut state = HeatmapState::default();
-        state.mode = HeatmapMode::Traffic;
-        state.density_radius = 3;
+        let mut state =
+            HeatmapState { mode: HeatmapMode::Traffic, density_radius: 3, ..Default::default() };
         state.ensure_size(8, 8);
         let idx_1_1 = state.idx(1, 1);
         let idx_2_2 = state.idx(2, 2);

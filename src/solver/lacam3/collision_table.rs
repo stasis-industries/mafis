@@ -1,6 +1,6 @@
-//! LaCAM3 CollisionTable — fast collision tracking for SUO/scatter.
+//! CollisionTable — fast collision tracking for SUO/scatter.
 //!
-//! REFERENCE: docs/papers_codes/lacam3/lacam3/src/collision_table.cpp (96 lines)
+//! REFERENCE: docs/papers_codes//lacam3/src/collision_table.cpp (96 lines)
 //!            docs/papers_codes/lacam3/lacam3/include/collision_table.hpp
 //!
 //! Tracks per-cell, per-timestep agent occupancy for the scatter heuristic.

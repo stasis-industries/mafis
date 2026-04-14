@@ -17,7 +17,7 @@ use mafis::core::queue::ActiveQueuePolicy;
 use mafis::core::runner::SimulationRunner;
 use mafis::core::seed::SeededRng;
 use mafis::core::task::ActiveScheduler;
-use mafis::core::topology::{ActiveTopology, ZoneMap, assign_random_zones};
+use mafis::core::topology::{ZoneMap, assign_random_zones};
 use mafis::experiment::config::ExperimentConfig;
 use mafis::experiment::runner::run_single_experiment;
 use mafis::fault::config::FaultConfig;

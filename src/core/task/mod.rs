@@ -490,8 +490,7 @@ mod tests {
 
     #[test]
     fn lifelong_config_reset() {
-        let mut config = LifelongConfig::default();
-        config.enabled = true;
+        let mut config = LifelongConfig { enabled: true, ..Default::default() };
         config.record_completion(1);
         config.record_completion(2);
         config.needs_replan = true;
@@ -691,11 +690,11 @@ mod tests {
 
         // 100 agents at various y positions
         for i in 0..100 {
-            let pos = IVec2::new(5, (i % 7) as i32 + 1); // distribute across y=1..7
+            let pos = IVec2::new(5, i % 7 + 1); // distribute across y=1..7
             let mut occupied = HashSet::new();
             // Add some already-occupied cells to force variety
             if i % 3 == 0 {
-                occupied.insert(IVec2::new(10, (i % 7) as i32 + 1));
+                occupied.insert(IVec2::new(10, i % 7 + 1));
             }
             if let Some(cell) = scheduler.assign_delivery(&zones, pos, &occupied, &mut rng) {
                 *counts.entry(cell).or_insert(0) += 1;
