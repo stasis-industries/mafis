@@ -2,6 +2,8 @@ use bevy::prelude::*;
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::constants;
+use crate::core::grid::GridMap;
+use crate::core::runner::SimAgent;
 use crate::core::state::SimulationConfig;
 use crate::fault::breakdown::FaultEvent;
 use crate::fault::config::{FaultSource, FaultType};
@@ -199,6 +201,140 @@ pub fn cascade_bfs_mark(
     }
 }
 
+// ---------------------------------------------------------------------------
+// Structural cascade — solver-independent topological vulnerability
+// ---------------------------------------------------------------------------
+
+/// Result of a structural cascade evaluation at a single fault event.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct StructuralCascade {
+    /// Count of currently-alive agents whose shortest path from current
+    /// position to current goal passes through the dead cell. Solver-independent.
+    pub agents_disrupted: u32,
+    /// Maximum BFS distance, over disrupted agents, from the dead cell to the
+    /// agent's current position. Bounds the spatial reach of the structural
+    /// vulnerability.
+    pub max_distance: u32,
+}
+
+/// Structural cascade — solver-independent topological vulnerability of a
+/// dead cell to fault impact.
+///
+/// Counts the number of currently-alive agents whose shortest path from their
+/// current position to their current goal passes through `dead_cell`. The grid
+/// is treated as static (no replanning, no solver involvement); only topology
+/// and instantaneous agent state at the fault event matter.
+///
+/// **Conceptual lineage.** Weighted betweenness centrality (Freeman 1977;
+/// Brandes 2001) with weights derived from actual lifelong agent state at
+/// the fault event, rather than from uniform-random start/goal pairs as in
+/// Ewing et al. (AAMAS 2022, betweenness for MAPF instance-hardness).
+/// Adapted from cascading-failure analysis in transport/power networks
+/// (Motter & Lai 2002; Jenelius 2009) to MAPF fault-cascade measurement.
+///
+/// **Why it matters.** The ADG-based cascade metric (`cascade_bfs_standalone`)
+/// is biased by per-solver planning style: solvers that plan farther ahead
+/// produce deeper ADG dependency chains, which inflates cascade depth even
+/// when the topology is identical. Structural cascade measures the intrinsic
+/// vulnerability of the cell, decoupled from planning horizon. The difference
+/// `solver_cascade - structural_cascade` quantifies the solver's localization
+/// (mitigation) skill.
+///
+/// **Algorithm.** One BFS from `dead_cell` over the static grid yields
+/// `d_X(c)` for every reachable cell. For each alive agent A with pos != goal,
+/// run a single-pair BFS to get `d(A.pos, A.goal)` in the original grid. The
+/// dead cell is on at least one shortest path of A iff
+/// `d_X(A.pos) + d_X(A.goal) == d(A.pos, A.goal)`.
+///
+/// Cost: O(V + N·V) per fault event, where V is grid cells and N is alive
+/// agents. Dead and idle (pos == goal) agents are skipped.
+pub fn structural_cascade_at(
+    grid: &GridMap,
+    dead_cell: IVec2,
+    agents: &[SimAgent],
+) -> StructuralCascade {
+    let d_x = bfs_distances_from(grid, dead_cell);
+
+    let mut disrupted = 0u32;
+    let mut max_distance = 0u32;
+
+    for agent in agents {
+        if !agent.alive || agent.pos == agent.goal {
+            continue;
+        }
+        let d_pos = match d_x.get(&agent.pos) {
+            Some(&d) => d,
+            None => continue,
+        };
+        let d_goal = match d_x.get(&agent.goal) {
+            Some(&d) => d,
+            None => continue,
+        };
+        let sum_via_x = match d_pos.checked_add(d_goal) {
+            Some(s) => s,
+            None => continue,
+        };
+        let d_direct = match bfs_shortest_distance(grid, agent.pos, agent.goal) {
+            Some(d) => d,
+            None => continue,
+        };
+        if sum_via_x == d_direct {
+            disrupted += 1;
+            max_distance = max_distance.max(d_pos);
+        }
+    }
+
+    StructuralCascade { agents_disrupted: disrupted, max_distance }
+}
+
+/// BFS over the static grid from `source`. Returns the distance map from
+/// source to every reachable walkable cell. The source is included with
+/// distance 0 if walkable, otherwise still seeded so that adjacent walkable
+/// cells get distance 1 (this matters when the dead cell itself is now an
+/// obstacle but we still want to measure routes adjacent to it).
+fn bfs_distances_from(grid: &GridMap, source: IVec2) -> HashMap<IVec2, u32> {
+    let mut dist: HashMap<IVec2, u32> = HashMap::new();
+    let mut queue: VecDeque<(IVec2, u32)> = VecDeque::new();
+    dist.insert(source, 0);
+    queue.push_back((source, 0));
+
+    while let Some((pos, d)) = queue.pop_front() {
+        for next in grid.walkable_neighbors(pos) {
+            if dist.contains_key(&next) {
+                continue;
+            }
+            dist.insert(next, d + 1);
+            queue.push_back((next, d + 1));
+        }
+    }
+    dist
+}
+
+/// Single-pair BFS shortest distance from `source` to `target` over the
+/// static grid. Returns `None` if `target` is unreachable.
+fn bfs_shortest_distance(grid: &GridMap, source: IVec2, target: IVec2) -> Option<u32> {
+    if source == target {
+        return Some(0);
+    }
+    let mut visited: HashSet<IVec2> = HashSet::new();
+    let mut queue: VecDeque<(IVec2, u32)> = VecDeque::new();
+    visited.insert(source);
+    queue.push_back((source, 0));
+
+    while let Some((pos, d)) = queue.pop_front() {
+        for next in grid.walkable_neighbors(pos) {
+            if next == target {
+                return Some(d + 1);
+            }
+            if !visited.insert(next) {
+                continue;
+            }
+            queue.push_back((next, d + 1));
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -389,5 +525,151 @@ mod tests {
         // idx=5 > slice len — must not panic
         cascade_bfs_mark(&graph, 5, 10, &mut affected);
         assert_eq!(affected, vec![false, false]);
+    }
+
+    // ── Structural cascade (solver-independent) ───────────────────────
+
+    fn agent_at(pos: IVec2, goal: IVec2) -> SimAgent {
+        let mut a = SimAgent::new(pos);
+        a.goal = goal;
+        a.alive = true;
+        a
+    }
+
+    #[test]
+    fn structural_cascade_open_corridor_one_agent() {
+        // 5×1 corridor: agent at (0,0) heading to (4,0). Dead cell at (2,0).
+        // The unique shortest path goes through (2,0), so the agent must be
+        // counted as disrupted.
+        let grid = GridMap::new(5, 1);
+        let agents = vec![agent_at(IVec2::new(0, 0), IVec2::new(4, 0))];
+        let r = structural_cascade_at(&grid, IVec2::new(2, 0), &agents);
+        assert_eq!(r.agents_disrupted, 1, "agent on unique corridor must be flagged");
+        assert_eq!(r.max_distance, 2, "dead cell is 2 steps from agent.pos");
+    }
+
+    #[test]
+    fn structural_cascade_open_grid_offcorridor_alternative_paths() {
+        // 5×5 fully open grid: agent at (0,0) → (4,0). Dead cell at (2,2)
+        // is NOT on any (0,0) → (4,0) shortest path (Manhattan = 4, going
+        // through (2,2) costs 4+4 = 8). Should NOT be flagged.
+        let grid = GridMap::new(5, 5);
+        let agents = vec![agent_at(IVec2::new(0, 0), IVec2::new(4, 0))];
+        let r = structural_cascade_at(&grid, IVec2::new(2, 2), &agents);
+        assert_eq!(r.agents_disrupted, 0, "off-corridor cell must not be flagged");
+    }
+
+    #[test]
+    fn structural_cascade_open_grid_oncorridor_alternative_paths() {
+        // 5×5 fully open grid: agent at (0,0) → (4,0). Cell (2,0) IS on a
+        // shortest path (Manhattan = 4 via (2,0)). Counts as disrupted even
+        // though alternative shortest paths exist (the metric is "X on at
+        // least one shortest path", the betweenness analog).
+        let grid = GridMap::new(5, 5);
+        let agents = vec![agent_at(IVec2::new(0, 0), IVec2::new(4, 0))];
+        let r = structural_cascade_at(&grid, IVec2::new(2, 0), &agents);
+        assert_eq!(r.agents_disrupted, 1, "on-corridor cell must be flagged");
+        assert_eq!(r.max_distance, 2);
+    }
+
+    #[test]
+    fn structural_cascade_skips_dead_agents() {
+        let grid = GridMap::new(5, 1);
+        let mut a = agent_at(IVec2::new(0, 0), IVec2::new(4, 0));
+        a.alive = false;
+        let r = structural_cascade_at(&grid, IVec2::new(2, 0), &[a]);
+        assert_eq!(r.agents_disrupted, 0, "dead agents must be excluded");
+    }
+
+    #[test]
+    fn structural_cascade_skips_idle_agents() {
+        // Agent at goal already (pos == goal): no path required, nothing to
+        // disrupt.
+        let grid = GridMap::new(5, 1);
+        let agents = vec![agent_at(IVec2::new(2, 0), IVec2::new(2, 0))];
+        let r = structural_cascade_at(&grid, IVec2::new(2, 0), &agents);
+        assert_eq!(r.agents_disrupted, 0, "idle agents must be excluded");
+    }
+
+    #[test]
+    fn structural_cascade_aggregates_multiple_agents() {
+        // 5×1 corridor: 3 agents all needing to traverse cell (2,0).
+        let grid = GridMap::new(5, 1);
+        let agents = vec![
+            agent_at(IVec2::new(0, 0), IVec2::new(4, 0)),
+            agent_at(IVec2::new(1, 0), IVec2::new(3, 0)),
+            agent_at(IVec2::new(0, 0), IVec2::new(3, 0)),
+        ];
+        let r = structural_cascade_at(&grid, IVec2::new(2, 0), &agents);
+        assert_eq!(r.agents_disrupted, 3);
+        // Max distance from dead cell (2,0) to any agent.pos is 2 (agent 0).
+        assert_eq!(r.max_distance, 2);
+    }
+
+    #[test]
+    fn structural_cascade_unreachable_returns_zero() {
+        // Two disconnected components separated by a wall column.
+        // Agent in the left component has goal in the same left component;
+        // dead cell in the right component is unreachable from the agent's
+        // position, so it cannot be on any shortest path.
+        let mut grid = GridMap::new(5, 1);
+        // Wall at x=2, splitting (0,1) from (3,4).
+        grid.set_obstacle(IVec2::new(2, 0));
+        let agents = vec![agent_at(IVec2::new(0, 0), IVec2::new(1, 0))];
+        let r = structural_cascade_at(&grid, IVec2::new(4, 0), &agents);
+        assert_eq!(r.agents_disrupted, 0, "unreachable dead cell must not be flagged");
+    }
+
+    #[test]
+    fn structural_cascade_solver_independent() {
+        // Determinism check: structural cascade depends ONLY on (grid,
+        // dead_cell, agent.pos, agent.goal). Two SimAgents with different
+        // planned_path/heat/operational_age but same pos/goal must yield
+        // identical results.
+        use crate::core::action::{Action, Direction};
+        use std::collections::VecDeque;
+        let grid = GridMap::new(5, 1);
+        let mut a1 = agent_at(IVec2::new(0, 0), IVec2::new(4, 0));
+        let mut a2 = agent_at(IVec2::new(0, 0), IVec2::new(4, 0));
+        a1.planned_path = VecDeque::from(vec![Action::Move(Direction::East); 4]);
+        a2.planned_path = VecDeque::from(vec![Action::Wait]);
+        a1.heat = 5.0;
+        a2.heat = 0.0;
+        a1.operational_age = 100;
+        a2.operational_age = 0;
+        let r1 = structural_cascade_at(&grid, IVec2::new(2, 0), &[a1]);
+        let r2 = structural_cascade_at(&grid, IVec2::new(2, 0), &[a2]);
+        assert_eq!(r1.agents_disrupted, r2.agents_disrupted);
+        assert_eq!(r1.max_distance, r2.max_distance);
+    }
+
+    #[test]
+    fn bfs_shortest_distance_self_is_zero() {
+        let grid = GridMap::new(5, 5);
+        assert_eq!(bfs_shortest_distance(&grid, IVec2::new(2, 2), IVec2::new(2, 2)), Some(0));
+    }
+
+    #[test]
+    fn bfs_shortest_distance_open_grid_manhattan() {
+        let grid = GridMap::new(5, 5);
+        // Open 5x5: shortest from (0,0) to (3,2) is Manhattan = 5
+        assert_eq!(bfs_shortest_distance(&grid, IVec2::new(0, 0), IVec2::new(3, 2)), Some(5));
+    }
+
+    #[test]
+    fn bfs_shortest_distance_unreachable_returns_none() {
+        let mut grid = GridMap::new(5, 1);
+        // Block off (2,0); now (0,0) cannot reach (4,0).
+        grid.set_obstacle(IVec2::new(2, 0));
+        assert_eq!(bfs_shortest_distance(&grid, IVec2::new(0, 0), IVec2::new(4, 0)), None);
+    }
+
+    #[test]
+    fn bfs_distances_from_seeds_source_at_zero() {
+        let grid = GridMap::new(3, 1);
+        let d = bfs_distances_from(&grid, IVec2::new(0, 0));
+        assert_eq!(d.get(&IVec2::new(0, 0)), Some(&0));
+        assert_eq!(d.get(&IVec2::new(1, 0)), Some(&1));
+        assert_eq!(d.get(&IVec2::new(2, 0)), Some(&2));
     }
 }

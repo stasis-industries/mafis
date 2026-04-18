@@ -14,7 +14,9 @@ pub fn write_runs_csv<W: Write>(writer: &mut W, runs: &[RunResult]) -> std::io::
          fault_tolerance,critical_time,\
          deficit_recovery,throughput_recovery,mtbf,recovery_tick,\
          survival_rate,impacted_area,deficit_integral,\
-         cascade_depth_avg,cascade_spread_avg,itae,rapidity,attack_rate,fleet_utilization,\
+         cascade_depth_avg,cascade_spread_avg,\
+         structural_cascade_avg,structural_cascade_max,mitigation_delta_avg,\
+         itae,rapidity,attack_rate,fleet_utilization,\
          solver_step_avg_us,solver_step_max_us,wall_time_ms"
     )?;
 
@@ -46,8 +48,10 @@ fn write_run_row<W: Write>(
          {},{},\
          {},{},{},{},\
          {},{},{},\
-         {},{},{},{},{},\
-         {},{},{},{}",
+         {},{},\
+         {},{},{},\
+         {},{},{},{},\
+         {},{},{}",
         config.solver_name,
         config.topology_name,
         config.scenario_label(),
@@ -70,6 +74,9 @@ fn write_run_row<W: Write>(
         m.deficit_integral,
         csv_f64(m.cascade_depth_avg, 2),
         csv_f64(m.cascade_spread_avg, 2),
+        csv_f64(m.structural_cascade_avg, 2),
+        csv_f64(m.structural_cascade_max, 2),
+        csv_f64(m.mitigation_delta_avg, 2),
         csv_f64(m.itae, 4),
         csv_f64(m.rapidity, 2),
         csv_f64(m.attack_rate, 4),
@@ -100,6 +107,8 @@ pub fn write_summary_csv<W: Write>(
          survival_rate_mean,\
          impacted_area_mean,deficit_integral_mean,\
          cascade_depth_mean,cascade_depth_std,cascade_spread_mean,cascade_spread_std,\
+         structural_cascade_mean,structural_cascade_std,\
+         structural_cascade_max_mean,mitigation_delta_mean,mitigation_delta_std,\
          itae_mean,itae_std,rapidity_mean,rapidity_std,attack_rate_mean,attack_rate_std,\
          fleet_utilization_mean,fleet_utilization_std,\
          solver_step_us_mean,wall_time_ms_mean"
@@ -118,6 +127,8 @@ pub fn write_summary_csv<W: Write>(
              {:.4},\
              {:.4},{:.1},\
              {:.2},{:.2},{:.2},{:.2},\
+             {:.2},{:.2},\
+             {:.2},{:.2},{:.2},\
              {:.4},{:.4},{:.2},{:.2},{:.4},{:.4},\
              {:.4},{:.4},\
              {:.1},{:.0}",
@@ -152,6 +163,11 @@ pub fn write_summary_csv<W: Write>(
             s.cascade_depth.std,
             s.cascade_spread.mean,
             s.cascade_spread.std,
+            s.structural_cascade.mean,
+            s.structural_cascade.std,
+            s.structural_cascade_max.mean,
+            s.mitigation_delta.mean,
+            s.mitigation_delta.std,
             s.itae.mean,
             s.itae.std,
             s.rapidity.mean,
@@ -322,6 +338,7 @@ fn write_metrics_json<W: Write>(
          \"survival_rate\":{},\"impacted_area\":{},\
          \"deficit_integral\":{},\
          \"cascade_depth_avg\":{},\"cascade_spread_avg\":{},\
+         \"structural_cascade_avg\":{},\"structural_cascade_max\":{},\"mitigation_delta_avg\":{},\
          \"itae\":{},\"rapidity\":{},\"attack_rate\":{},\
          \"fleet_utilization\":{},\
          \"solver_step_avg_us\":{},\"solver_step_max_us\":{},\
@@ -341,6 +358,9 @@ fn write_metrics_json<W: Write>(
         m.deficit_integral,
         json_f64(m.cascade_depth_avg, 2),
         json_f64(m.cascade_spread_avg, 2),
+        json_f64(m.structural_cascade_avg, 2),
+        json_f64(m.structural_cascade_max, 2),
+        json_f64(m.mitigation_delta_avg, 2),
         json_f64(m.itae, 4),
         json_f64(m.rapidity, 2),
         json_f64(m.attack_rate, 4),
@@ -387,6 +407,12 @@ fn write_summary_json<W: Write>(writer: &mut W, s: &ConfigSummary) -> std::io::R
     write_stat_json(writer, "cascade_depth", &s.cascade_depth)?;
     write!(writer, ",")?;
     write_stat_json(writer, "cascade_spread", &s.cascade_spread)?;
+    write!(writer, ",")?;
+    write_stat_json(writer, "structural_cascade", &s.structural_cascade)?;
+    write!(writer, ",")?;
+    write_stat_json(writer, "structural_cascade_max", &s.structural_cascade_max)?;
+    write!(writer, ",")?;
+    write_stat_json(writer, "mitigation_delta", &s.mitigation_delta)?;
     write!(writer, ",")?;
     write_stat_json(writer, "itae", &s.itae)?;
     write!(writer, ",")?;
@@ -465,6 +491,9 @@ pub fn parse_summaries_from_json(json: &str) -> Result<Vec<ConfigSummary>, Strin
             deficit_integral: parse_stat(s, "deficit_integral"),
             cascade_depth: parse_stat(s, "cascade_depth"),
             cascade_spread: parse_stat(s, "cascade_spread"),
+            structural_cascade: parse_stat(s, "structural_cascade"),
+            structural_cascade_max: parse_stat(s, "structural_cascade_max"),
+            mitigation_delta: parse_stat(s, "mitigation_delta"),
             itae: parse_stat(s, "itae"),
             rapidity: parse_stat(s, "rapidity"),
             attack_rate: parse_stat(s, "attack_rate"),
@@ -511,6 +540,9 @@ pub enum MetricColumn {
     DeficitIntegral,
     CascadeDepth,
     CascadeSpread,
+    StructuralCascade,
+    StructuralCascadeMax,
+    MitigationDelta,
     Itae,
     Rapidity,
     AttackRate,
@@ -534,6 +566,9 @@ impl MetricColumn {
             Self::DeficitIntegral => "Deficit",
             Self::CascadeDepth => "Casc. Depth",
             Self::CascadeSpread => "Casc. Spread",
+            Self::StructuralCascade => "Struct. Casc.",
+            Self::StructuralCascadeMax => "Struct. Casc. Max",
+            Self::MitigationDelta => "Mitig. Δ",
             Self::Itae => "ITAE",
             Self::Rapidity => "Rapidity",
             Self::AttackRate => "Attack Rate",
@@ -557,6 +592,9 @@ impl MetricColumn {
             Self::DeficitIntegral => "Deficit",
             Self::CascadeDepth => "CascD",
             Self::CascadeSpread => "CascS",
+            Self::StructuralCascade => "StructC",
+            Self::StructuralCascadeMax => "StructCMax",
+            Self::MitigationDelta => "MitΔ",
             Self::Itae => "ITAE",
             Self::Rapidity => "Rap",
             Self::AttackRate => "AR",
@@ -580,6 +618,9 @@ impl MetricColumn {
             Self::DeficitIntegral => &s.deficit_integral,
             Self::CascadeDepth => &s.cascade_depth,
             Self::CascadeSpread => &s.cascade_spread,
+            Self::StructuralCascade => &s.structural_cascade,
+            Self::StructuralCascadeMax => &s.structural_cascade_max,
+            Self::MitigationDelta => &s.mitigation_delta,
             Self::Itae => &s.itae,
             Self::Rapidity => &s.rapidity,
             Self::AttackRate => &s.attack_rate,
@@ -603,6 +644,9 @@ impl MetricColumn {
             | Self::ImpactedArea
             | Self::CascadeDepth
             | Self::CascadeSpread
+            | Self::StructuralCascade
+            | Self::StructuralCascadeMax
+            | Self::MitigationDelta
             | Self::FleetUtilization => 2,
             Self::Itae | Self::AttackRate => 4,
         }
@@ -621,6 +665,9 @@ impl MetricColumn {
         Self::DeficitIntegral,
         Self::CascadeDepth,
         Self::CascadeSpread,
+        Self::StructuralCascade,
+        Self::StructuralCascadeMax,
+        Self::MitigationDelta,
         Self::Itae,
         Self::Rapidity,
         Self::AttackRate,
@@ -838,7 +885,7 @@ mod tests {
     fn dummy_run() -> RunResult {
         crate::experiment::runner::run_single_experiment(&ExperimentConfig {
             solver_name: "pibt".into(),
-            topology_name: "warehouse_large".into(),
+            topology_name: "warehouse_single_dock".into(),
             scenario: None,
             scheduler_name: "random".into(),
             num_agents: 3,
@@ -867,7 +914,7 @@ mod tests {
         let result = MatrixResult {
             matrix: crate::experiment::config::ExperimentMatrix {
                 solvers: vec!["pibt".into()],
-                topologies: vec!["warehouse_large".into()],
+                topologies: vec!["warehouse_single_dock".into()],
                 scenarios: vec![None],
                 schedulers: vec!["random".into()],
                 agent_counts: vec![3],
@@ -892,7 +939,7 @@ mod tests {
     fn json_roundtrip_summaries() {
         let matrix = crate::experiment::config::ExperimentMatrix {
             solvers: vec!["pibt".into()],
-            topologies: vec!["warehouse_large".into()],
+            topologies: vec!["warehouse_single_dock".into()],
             scenarios: vec![None],
             schedulers: vec!["random".into()],
             agent_counts: vec![3],
@@ -916,7 +963,7 @@ mod tests {
     fn latex_table_output() {
         let matrix = crate::experiment::config::ExperimentMatrix {
             solvers: vec!["pibt".into()],
-            topologies: vec!["warehouse_large".into()],
+            topologies: vec!["warehouse_single_dock".into()],
             scenarios: vec![None],
             schedulers: vec!["random".into()],
             agent_counts: vec![3],
@@ -942,7 +989,7 @@ mod tests {
     fn typst_table_output() {
         let matrix = crate::experiment::config::ExperimentMatrix {
             solvers: vec!["pibt".into()],
-            topologies: vec!["warehouse_large".into()],
+            topologies: vec!["warehouse_single_dock".into()],
             scenarios: vec![None],
             schedulers: vec!["random".into()],
             agent_counts: vec![3],
@@ -962,7 +1009,7 @@ mod tests {
     fn svg_chart_output() {
         let matrix = crate::experiment::config::ExperimentMatrix {
             solvers: vec!["pibt".into()],
-            topologies: vec!["warehouse_large".into()],
+            topologies: vec!["warehouse_single_dock".into()],
             scenarios: vec![None],
             schedulers: vec!["random".into()],
             agent_counts: vec![3],

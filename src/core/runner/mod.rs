@@ -47,7 +47,7 @@ pub const FAULT_RNG_SALT: u64 = 0x9e37_79b9_7f4a_7c15;
 
 pub struct SimulationRunner {
     // ── Map (owned — faults can mutate grid) ──────────────────────────
-    grid: GridMap,
+    pub grid: GridMap,
     zones: ZoneMap,
 
     // ── Agents ────────────────────────────────────────────────────────

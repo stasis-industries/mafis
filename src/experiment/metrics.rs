@@ -41,11 +41,27 @@ pub struct RunMetrics {
     pub mtbf: Option<f64>,
     pub recovery_tick: Option<u64>,
 
-    // ── Cascade (ADG-based) ─────────────────────────────────────────
+    // ── Cascade (ADG-based, solver-coupled) ────────────────────────
     /// Average cascade spread per fault event (agents affected via ADG BFS).
+    /// Solver-coupled: depends on per-solver planning lookahead.
     pub cascade_spread_avg: f64,
     /// Average cascade depth per fault event (max BFS depth).
+    /// Solver-coupled: depends on per-solver planning lookahead.
     pub cascade_depth_avg: f64,
+
+    // ── Structural cascade (solver-independent) ────────────────────
+    /// Average structural cascade per fault event: count of alive agents
+    /// whose static-grid shortest path passes through the dead cell.
+    /// Decoupled from solver planning (Freeman 1977; Brandes 2001;
+    /// Ewing et al. 2022 for the MAPF betweenness lineage).
+    pub structural_cascade_avg: f64,
+    /// Maximum structural cascade observed across all fault events of the run.
+    pub structural_cascade_max: f64,
+    /// Mitigation delta = `cascade_spread_avg - structural_cascade_avg`.
+    /// Positive: solver propagates fault impact beyond the topological vulnerability.
+    /// Negative: solver localizes the fault below the topological vulnerability
+    /// (replanning successfully reroutes around the dead cell).
+    pub mitigation_delta_avg: f64,
 
     // ── Tier 1 Resilience Metrics ──────────────────────────────────
     /// Integral of Time-weighted Absolute Error of throughput ratio post-fault.
@@ -124,6 +140,9 @@ pub fn compute_baseline_self_metrics(
         recovery_tick: None,
         cascade_spread_avg: 0.0,
         cascade_depth_avg: 0.0,
+        structural_cascade_avg: 0.0,
+        structural_cascade_max: 0.0,
+        mitigation_delta_avg: 0.0,
         itae: 0.0,
         rapidity: 0.0,
         attack_rate: 0.0,
@@ -288,9 +307,12 @@ pub fn compute_run_metrics(
         &faulted_analysis.throughput_series,
         first_fault_idx,
     );
+    let smooth_w = crate::constants::RAPIDITY_SMOOTH_WINDOW;
+    let baseline_smooth = rolling_average(&baseline.throughput_series, smooth_w);
+    let faulted_smooth = rolling_average(&faulted_analysis.throughput_series, smooth_w);
     let rapidity = compute_rapidity(
-        &baseline.throughput_series,
-        &faulted_analysis.throughput_series,
+        &baseline_smooth,
+        &faulted_smooth,
         first_fault_idx,
         crate::constants::RAPIDITY_THRESHOLD,
         crate::constants::RAPIDITY_DWELL,
@@ -317,6 +339,9 @@ pub fn compute_run_metrics(
         recovery_tick: diff.recovery_tick,
         cascade_spread_avg: 0.0,
         cascade_depth_avg: 0.0,
+        structural_cascade_avg: 0.0,
+        structural_cascade_max: 0.0,
+        mitigation_delta_avg: 0.0,
         itae,
         rapidity,
         attack_rate: 0.0,
@@ -423,6 +448,14 @@ fn compute_itae(baseline_tp: &[f64], faulted_tp: &[f64], start: Option<usize>) -
 /// meets or exceeds `threshold` for `≥ dwell` consecutive ticks. Returns the
 /// offset (relative to `start`) of the first tick of the confirming dwell window.
 /// NaN if never recovers within the horizon.
+///
+/// **Degradation-observed gate** (added 2026-04-17 after Phase 0 reliability audit):
+/// returns NaN if the ratio is already at or above `threshold` at `start`. This
+/// prevents the metric from spuriously reporting Rapidity = 0 when (a) the fault
+/// had no measurable fleet-level impact, or (b) the rolling-mean smoothing window
+/// still contains pre-fault data at `start`. A zero-or-near-zero Rapidity from a
+/// system that never visibly degraded is not a recovery measurement, so we return
+/// NaN. Rapidity is undefined in that case.
 fn compute_rapidity(
     baseline_tp: &[f64],
     faulted_tp: &[f64],
@@ -438,6 +471,15 @@ fn compute_rapidity(
     if start >= len {
         return f64::NAN;
     }
+
+    // Degradation-observed gate: if the ratio is already ≥ threshold at `start`,
+    // the system never visibly degraded and Rapidity is undefined.
+    let b_start = baseline_tp[start];
+    let r_start = if b_start == 0.0 { 0.0 } else { faulted_tp[start] / b_start };
+    if r_start >= threshold {
+        return f64::NAN;
+    }
+
     let mut consec = 0_usize;
     for i in start..len {
         let b = baseline_tp[i];
@@ -453,6 +495,28 @@ fn compute_rapidity(
         }
     }
     f64::NAN
+}
+
+/// Compute rolling average of a time series with window W.
+/// Output[i] = mean(series[max(0, i+1-W)..=i]).
+/// Output length = input length.
+fn rolling_average(series: &[f64], window: usize) -> Vec<f64> {
+    if series.is_empty() || window == 0 {
+        return series.to_vec();
+    }
+    let w = window.min(series.len());
+    let mut out = Vec::with_capacity(series.len());
+    let mut sum = 0.0_f64;
+    for (i, &v) in series.iter().enumerate() {
+        sum += v;
+        if i >= w {
+            sum -= series[i - w];
+            out.push(sum / w as f64);
+        } else {
+            out.push(sum / (i + 1) as f64);
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -627,11 +691,33 @@ mod tests {
     // ── compute_rapidity (Bruneau 2003) ──────────────────────────────
 
     #[test]
-    fn rapidity_immediate_recovery() {
+    fn rapidity_nan_when_never_degraded() {
+        // Phase 0 fix (2026-04-17): if faulted throughput equals baseline at
+        // t_fault, the system never visibly degraded. Rapidity is undefined
+        // (NaN), not zero — zero would falsely claim "instant recovery".
         let bl = vec![1.0; 20];
         let ft = vec![1.0; 20];
         let r = compute_rapidity(&bl, &ft, Some(3), 0.9, 5);
-        assert!((r - 0.0).abs() < 1e-9, "got {r}");
+        assert!(
+            r.is_nan(),
+            "Rapidity should be NaN when system never degraded (no degradation-observed gate triggered), got {r}"
+        );
+    }
+
+    #[test]
+    fn rapidity_recovers_after_dip() {
+        // Sanity check that the gate does not block genuine dip-then-recover.
+        let bl = vec![1.0; 30];
+        let mut ft = vec![1.0; 30];
+        // Fault causes dip from tick 5 through tick 14; recover tick 15+.
+        for i in 5..15 {
+            ft[i] = 0.5;
+        }
+        // start=5 where degradation begins. r_start = 0.5 < 0.9, gate does not trip.
+        // Dwell of 5 consecutive ticks at threshold 0.9 is met at tick 19.
+        // (i=19, consec=5, return 19+1-5-5 = 10)
+        let r = compute_rapidity(&bl, &ft, Some(5), 0.9, 5);
+        assert!((r - 10.0).abs() < 1e-9, "got {r}");
     }
 
     #[test]
@@ -646,12 +732,48 @@ mod tests {
 
     #[test]
     fn rapidity_requires_dwell() {
-        // Brief cross (3 ticks) above threshold then dip → not recovered w/ dwell=5
         let bl = vec![1.0; 20];
         let mut ft = vec![0.5; 20];
         ft[5] = 1.0;
         ft[6] = 1.0;
-        ft[7] = 1.0; // only 3 ticks, dwell=5 → not recovered
+        ft[7] = 1.0;
         assert!(compute_rapidity(&bl, &ft, Some(3), 0.9, 5).is_nan());
+    }
+
+    #[test]
+    fn rolling_average_basic() {
+        let s = vec![0.0, 0.0, 10.0, 0.0, 0.0];
+        let r = rolling_average(&s, 3);
+        assert!((r[0] - 0.0).abs() < 1e-9);
+        assert!((r[1] - 0.0).abs() < 1e-9);
+        assert!((r[2] - 10.0 / 3.0).abs() < 1e-9);
+        assert!((r[3] - 10.0 / 3.0).abs() < 1e-9);
+        assert!((r[4] - 10.0 / 3.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn rolling_average_window_1() {
+        let s = vec![1.0, 2.0, 3.0];
+        let r = rolling_average(&s, 1);
+        assert!((r[0] - 1.0).abs() < 1e-9);
+        assert!((r[1] - 2.0).abs() < 1e-9);
+        assert!((r[2] - 3.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn rapidity_smoothed_rejects_spike() {
+        let bl = vec![10.0; 40];
+        let mut ft = vec![3.0; 40];
+        ft[10] = 10.0;
+        ft[11] = 10.0;
+        ft[12] = 10.0;
+        ft[13] = 10.0;
+        ft[14] = 10.0;
+        let bl_s = rolling_average(&bl, 20);
+        let ft_s = rolling_average(&ft, 20);
+        assert!(
+            compute_rapidity(&bl_s, &ft_s, Some(5), 0.9, 5).is_nan(),
+            "5-tick spike in 3.0 baseline should not trigger recovery with W=20 smoothing"
+        );
     }
 }

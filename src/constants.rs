@@ -66,8 +66,20 @@ pub const GRID_LINE_THRESHOLD: i32 = 64;
 
 // ── Analysis ─────────────────────────────────────────────────────────
 
-/// Maximum BFS cascade depth. Deeper cascades are truncated.
-pub const MAX_CASCADE_DEPTH: u32 = 10;
+/// Maximum BFS cascade depth (ADG-based cascade only).
+///
+/// Deeper cascades are truncated at this depth, which trades fidelity for
+/// bounded compute. Raised from 10 to 200 (2026-04-18) to support the
+/// PAAMS aisle-width sweep, where a fault in a width-1 corridor can lock
+/// up the entire convoy upstream — capping at 10 silently truncates that
+/// signal and biases per-solver cascade comparison.
+///
+/// 200 is a safe upper bound: it exceeds any realistic alive-fleet count
+/// for the topologies we ship (max ~200 alive agents on dual-dock at the
+/// densest tier) so the BFS naturally terminates at the agent count well
+/// before hitting the cap. Structural cascade does NOT use this cap (its
+/// BFS is on the static grid, not on the dependency graph).
+pub const MAX_CASCADE_DEPTH: u32 = 200;
 
 /// Maximum entries kept in the fault survival time-series.
 pub const MAX_SURVIVAL_ENTRIES: usize = 1000;
@@ -224,7 +236,7 @@ pub const TOKEN_ASTAR_MAX_TIME: u64 = 200;
 /// 6.4M expansions per tick — catastrophic in WASM.
 /// 5000 is enough for paths up to ~80 steps on uncongested grids.
 /// Empirically validated: at 5000, Token Passing finds valid paths for 95%+ of
-/// agents on warehouse_large with 100 agents.
+/// agents on warehouse_single_dock with 100 agents.
 pub const ASTAR_MAX_EXPANSIONS: u64 = 5_000;
 
 /// Default duration for latency injection (ticks).
@@ -257,14 +269,19 @@ pub const SCORECARD_RECOMPUTE_INTERVAL: u64 = 50;
 /// Moving average window for throughput chart smoothing (ticks).
 pub const THROUGHPUT_MA_WINDOW: usize = 10;
 
-// ── Rapidity (Bruneau 2003) ──────────────────────────────────────────
+// ── Rapidity (Bruneau 2003, Cimellaro 2010) ─────────────────────────
 
-/// Threshold for Rapidity: R(t) = faulted_tp[t] / baseline_tp[t] must meet
-/// or exceed this fraction to count as recovered.
-/// Bruneau et al. 2003, *A Framework to Quantitatively Assess and Enhance
-/// the Seismic Resilience of Communities*, EERI Spectra 19(4).
+/// Threshold for Rapidity: R(t) = smoothed_faulted / smoothed_baseline must
+/// meet or exceed this fraction to count as recovered.
+/// Bruneau et al. 2003, EERI Spectra 19(4).
 pub const RAPIDITY_THRESHOLD: f64 = 0.9;
 
 /// Minimum consecutive ticks above `RAPIDITY_THRESHOLD` for recovery
 /// confirmation. Guards against oscillatory crossings.
 pub const RAPIDITY_DWELL: usize = 5;
+
+/// Rolling-average window for Rapidity throughput smoothing.
+/// Derived from SNR analysis: W=20 keeps per-tick throughput variance
+/// below 5% at the smallest tested fleet size (N=20).
+/// Following Cimellaro et al. 2010 (smoothed functionality curves).
+pub const RAPIDITY_SMOOTH_WINDOW: usize = 20;

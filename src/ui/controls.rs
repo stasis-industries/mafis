@@ -153,7 +153,7 @@ impl Default for UiState {
             grid_width: 25,
             grid_height: 15,
             solver_name: "pibt".to_string(),
-            topology_name: "warehouse_large".to_string(),
+            topology_name: "warehouse_single_dock".to_string(),
             imported_scenario: None,
             rhcr_horizon: None,
             rhcr_replan_interval: None,
@@ -298,7 +298,7 @@ mod observatory_controls {
 
                 // Always provide grid_override so the baseline uses the exact same
                 // grid as the LiveSim. Without this, registry topologies (e.g.
-                // "warehouse_large") call ActiveTopology::from_name() which panics
+                // "warehouse_single_dock") call ActiveTopology::from_name() which panics
                 // on WASM and can produce subtly different grids on native.
                 let grid_override = Some(generate_grid_and_zones(
                     &res.ui_state.topology_name,
@@ -642,7 +642,7 @@ mod observatory_controls {
                     if needs_solve {
                         let paths: Vec<Vec<crate::core::action::Action>> =
                             PibtSolver::default().solve(&grid, &agent_data).unwrap_or_default();
-                        for (mut agent, path) in agents_query.iter_mut().zip(paths.into_iter()) {
+                        for (mut agent, path) in agents_query.iter_mut().zip(paths) {
                             agent.planned_path = path.into();
                             agent.path_length = agent.planned_path.len();
                         }

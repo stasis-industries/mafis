@@ -52,6 +52,13 @@ pub struct ConfigSummary {
     pub deficit_integral: StatSummary,
     pub cascade_depth: StatSummary,
     pub cascade_spread: StatSummary,
+    /// Solver-independent topological vulnerability per fault event.
+    pub structural_cascade: StatSummary,
+    /// Maximum structural cascade observed in the run.
+    pub structural_cascade_max: StatSummary,
+    /// Mitigation delta = cascade_spread - structural_cascade. Negative =
+    /// solver localizes; positive = solver propagates beyond topology.
+    pub mitigation_delta: StatSummary,
     pub itae: StatSummary,
     pub rapidity: StatSummary,
     pub attack_rate: StatSummary,
@@ -148,6 +155,10 @@ pub fn run_single_experiment(config: &ExperimentConfig) -> RunResult {
             config.tick_count,
             config.num_agents,
         );
+
+        // Optional per-tick throughput export (set MAFIS_TICK_EXPORT_DIR to enable)
+        #[cfg(not(target_arch = "wasm32"))]
+        export_tick_series_if_enabled(config, "baseline", &baseline_record.throughput_series);
     }
 
     // ── Run faulted (same topology + agents, faults enabled) ────────
@@ -182,6 +193,10 @@ pub fn run_single_experiment(config: &ExperimentConfig) -> RunResult {
         let mut step_times = Vec::with_capacity(config.tick_count as usize);
         let mut cascade_depths: Vec<f64> = Vec::with_capacity(actual_agents);
         let mut cascade_spreads: Vec<f64> = Vec::with_capacity(actual_agents);
+        // Solver-independent topological vulnerability per fault event.
+        // See `analysis::cascade::structural_cascade_at`.
+        let mut structural_cascades: Vec<f64> = Vec::with_capacity(actual_agents);
+        let mut structural_cascade_max: u32 = 0;
         // Per-agent "ever materially affected" trace for Attack Rate
         // (Wallinga & Lipsitch 2007). Populated by cascade BFS on every fault.
         let mut ever_affected: Vec<bool> = vec![false; actual_agents];
@@ -212,6 +227,15 @@ pub fn run_single_experiment(config: &ExperimentConfig) -> RunResult {
                         crate::constants::MAX_CASCADE_DEPTH,
                         &mut ever_affected,
                     );
+
+                    // Solver-independent topological vulnerability of dead cell.
+                    let sc = crate::analysis::cascade::structural_cascade_at(
+                        &runner.grid,
+                        fault.position,
+                        &runner.agents,
+                    );
+                    structural_cascades.push(sc.agents_disrupted as f64);
+                    structural_cascade_max = structural_cascade_max.max(sc.agents_disrupted);
                 }
             }
 
@@ -239,16 +263,69 @@ pub fn run_single_experiment(config: &ExperimentConfig) -> RunResult {
         } else {
             cascade_spreads.iter().sum::<f64>() / cascade_spreads.len() as f64
         };
+        fm.structural_cascade_avg = if structural_cascades.is_empty() {
+            0.0
+        } else {
+            structural_cascades.iter().sum::<f64>() / structural_cascades.len() as f64
+        };
+        fm.structural_cascade_max = structural_cascade_max as f64;
+        fm.mitigation_delta_avg = fm.cascade_spread_avg - fm.structural_cascade_avg;
 
         // Attack Rate — fraction of initial fleet ever materially affected.
         let affected_count = ever_affected.iter().filter(|&&x| x).count() as f64;
         fm.attack_rate =
             if actual_agents > 0 { affected_count / actual_agents as f64 } else { 0.0 };
 
+        // Optional per-tick throughput export (set MAFIS_TICK_EXPORT_DIR to enable)
+        #[cfg(not(target_arch = "wasm32"))]
+        export_tick_series_if_enabled(config, "faulted", &analysis.throughput_series);
+
         faulted_metrics = fm;
     }
 
     RunResult { config: config.clone(), baseline_metrics, faulted_metrics }
+}
+
+// ---------------------------------------------------------------------------
+// Per-tick throughput export (Phase 1.B recovery-shape clustering input)
+// ---------------------------------------------------------------------------
+
+/// When the environment variable `MAFIS_TICK_EXPORT_DIR` is set to a directory
+/// path, write per-tick throughput series for each run to a CSV under that
+/// directory. One file per (run, kind) where `kind` is "baseline" or "faulted".
+///
+/// File format: single column "throughput" with one value per tick.
+/// Filename: `tick_<solver>_<topology>_<scenario>_<scheduler>_n<N>_seed<S>_<kind>.csv`.
+///
+/// If the env var is unset, this is a zero-cost no-op.
+#[cfg(not(target_arch = "wasm32"))]
+fn export_tick_series_if_enabled(config: &ExperimentConfig, kind: &str, series: &[f64]) {
+    let dir = match std::env::var("MAFIS_TICK_EXPORT_DIR") {
+        Ok(d) if !d.is_empty() => d,
+        _ => return,
+    };
+    let path = std::path::PathBuf::from(&dir);
+    if std::fs::create_dir_all(&path).is_err() {
+        return;
+    }
+    let scenario = config.scenario_label();
+    let filename = format!(
+        "tick_{}_{}_{}_{}_n{}_seed{}_{}.csv",
+        config.solver_name,
+        config.topology_name,
+        scenario,
+        config.scheduler_name,
+        config.num_agents,
+        config.seed,
+        kind,
+    );
+    let full = path.join(filename);
+    let mut s = String::with_capacity(series.len() * 8);
+    s.push_str("throughput\n");
+    for v in series {
+        s.push_str(&format!("{v}\n"));
+    }
+    let _ = std::fs::write(full, s);
 }
 
 // ---------------------------------------------------------------------------
@@ -385,6 +462,9 @@ fn run_faulted_only(config: &ExperimentConfig, cached: &CachedBaseline) -> RunRe
     let mut step_times = Vec::with_capacity(config.tick_count as usize);
     let mut cascade_depths: Vec<f64> = Vec::with_capacity(actual_agents);
     let mut cascade_spreads: Vec<f64> = Vec::with_capacity(actual_agents);
+    // Solver-independent topological vulnerability per fault event.
+    let mut structural_cascades: Vec<f64> = Vec::with_capacity(actual_agents);
+    let mut structural_cascade_max: u32 = 0;
     // Per-agent "ever materially affected" trace for Attack Rate
     // (Wallinga & Lipsitch 2007). Populated by cascade BFS on every fault.
     let mut ever_affected: Vec<bool> = vec![false; actual_agents];
@@ -414,6 +494,14 @@ fn run_faulted_only(config: &ExperimentConfig, cached: &CachedBaseline) -> RunRe
                     crate::constants::MAX_CASCADE_DEPTH,
                     &mut ever_affected,
                 );
+
+                let sc = crate::analysis::cascade::structural_cascade_at(
+                    &runner.grid,
+                    fault.position,
+                    &runner.agents,
+                );
+                structural_cascades.push(sc.agents_disrupted as f64);
+                structural_cascade_max = structural_cascade_max.max(sc.agents_disrupted);
             }
         }
 
@@ -441,6 +529,13 @@ fn run_faulted_only(config: &ExperimentConfig, cached: &CachedBaseline) -> RunRe
     } else {
         cascade_spreads.iter().sum::<f64>() / cascade_spreads.len() as f64
     };
+    fm.structural_cascade_avg = if structural_cascades.is_empty() {
+        0.0
+    } else {
+        structural_cascades.iter().sum::<f64>() / structural_cascades.len() as f64
+    };
+    fm.structural_cascade_max = structural_cascade_max as f64;
+    fm.mitigation_delta_avg = fm.cascade_spread_avg - fm.structural_cascade_avg;
 
     // Attack Rate — fraction of initial fleet ever materially affected.
     let affected_count = ever_affected.iter().filter(|&&x| x).count() as f64;
@@ -637,6 +732,12 @@ pub fn compute_summaries(runs: &[RunResult]) -> Vec<ConfigSummary> {
                 group.iter().map(|r| r.faulted_metrics.cascade_depth_avg).collect();
             let cascade_spreads: Vec<f64> =
                 group.iter().map(|r| r.faulted_metrics.cascade_spread_avg).collect();
+            let structural_cascades: Vec<f64> =
+                group.iter().map(|r| r.faulted_metrics.structural_cascade_avg).collect();
+            let structural_cascade_maxes: Vec<f64> =
+                group.iter().map(|r| r.faulted_metrics.structural_cascade_max).collect();
+            let mitigation_deltas: Vec<f64> =
+                group.iter().map(|r| r.faulted_metrics.mitigation_delta_avg).collect();
             let itaes: Vec<f64> = group.iter().map(|r| r.faulted_metrics.itae).collect();
             let rapidities: Vec<f64> = group.iter().map(|r| r.faulted_metrics.rapidity).collect();
             let attack_rates: Vec<f64> =
@@ -667,6 +768,10 @@ pub fn compute_summaries(runs: &[RunResult]) -> Vec<ConfigSummary> {
                 deficit_integral: compute_stat_summary(&deficits).unwrap_or_default(),
                 cascade_depth: compute_stat_summary(&cascade_depths).unwrap_or_default(),
                 cascade_spread: compute_stat_summary(&cascade_spreads).unwrap_or_default(),
+                structural_cascade: compute_stat_summary(&structural_cascades).unwrap_or_default(),
+                structural_cascade_max: compute_stat_summary(&structural_cascade_maxes)
+                    .unwrap_or_default(),
+                mitigation_delta: compute_stat_summary(&mitigation_deltas).unwrap_or_default(),
                 itae: compute_stat_summary(&itaes).unwrap_or_default(),
                 rapidity: compute_stat_summary(&rapidities).unwrap_or_default(),
                 attack_rate: compute_stat_summary(&attack_rates).unwrap_or_default(),
@@ -858,7 +963,7 @@ mod tests {
     fn single_experiment_no_faults() {
         let config = ExperimentConfig {
             solver_name: "pibt".into(),
-            topology_name: "warehouse_large".into(),
+            topology_name: "warehouse_single_dock".into(),
             scenario: None,
             scheduler_name: "random".into(),
             num_agents: 10,
@@ -877,7 +982,7 @@ mod tests {
     fn single_experiment_deterministic() {
         let config = ExperimentConfig {
             solver_name: "pibt".into(),
-            topology_name: "warehouse_large".into(),
+            topology_name: "warehouse_single_dock".into(),
             scenario: None,
             scheduler_name: "random".into(),
             num_agents: 10,
@@ -895,7 +1000,7 @@ mod tests {
     fn single_experiment_with_burst_fault() {
         let config = ExperimentConfig {
             solver_name: "pibt".into(),
-            topology_name: "warehouse_large".into(),
+            topology_name: "warehouse_single_dock".into(),
             scenario: Some(FaultScenario {
                 enabled: true,
                 scenario_type: FaultScenarioType::BurstFailure,
@@ -929,7 +1034,7 @@ mod tests {
         // it higher. Bounded above by 1.0 by construction.
         let config = ExperimentConfig {
             solver_name: "pibt".into(),
-            topology_name: "warehouse_large".into(),
+            topology_name: "warehouse_single_dock".into(),
             scenario: Some(FaultScenario {
                 enabled: true,
                 scenario_type: FaultScenarioType::BurstFailure,
@@ -954,7 +1059,7 @@ mod tests {
         // No scenario → no fault events → ever_affected all false → AR = 0.
         let config = ExperimentConfig {
             solver_name: "pibt".into(),
-            topology_name: "warehouse_large".into(),
+            topology_name: "warehouse_single_dock".into(),
             scenario: None,
             scheduler_name: "random".into(),
             num_agents: 10,
@@ -976,7 +1081,7 @@ mod tests {
         use crate::fault::scenario::FaultScenarioType;
         let config = ExperimentConfig {
             solver_name: "pibt".into(),
-            topology_name: "warehouse_large".into(),
+            topology_name: "warehouse_single_dock".into(),
             scenario: Some(FaultScenario {
                 enabled: true,
                 scenario_type: FaultScenarioType::IntermittentFault,
@@ -1014,7 +1119,7 @@ mod tests {
         let tick_count = 200u64;
         let solver_name = "pibt";
         let scheduler_name = "random";
-        let topology_name = "warehouse_large";
+        let topology_name = "warehouse_single_dock";
 
         // Path A: experiment runner (uses run_single_experiment)
         let config = ExperimentConfig {
@@ -1078,7 +1183,7 @@ mod tests {
         let tick_count = 200u64;
         let solver_name = "pibt";
         let scheduler_name = "random";
-        let topology_name = "warehouse_large";
+        let topology_name = "warehouse_single_dock";
 
         // Path A: experiment runner baseline
         let config = ExperimentConfig {
@@ -1244,7 +1349,7 @@ mod tests {
     fn mini_matrix() {
         let matrix = ExperimentMatrix {
             solvers: vec!["pibt".into()],
-            topologies: vec!["warehouse_large".into()],
+            topologies: vec!["warehouse_single_dock".into()],
             scenarios: vec![None],
             schedulers: vec!["random".into()],
             agent_counts: vec![5],
@@ -1278,7 +1383,7 @@ mod tests {
         // Cached path: run_matrix with 2 scenarios sharing same baseline
         let matrix = ExperimentMatrix {
             solvers: vec!["pibt".into()],
-            topologies: vec!["warehouse_large".into()],
+            topologies: vec!["warehouse_single_dock".into()],
             scenarios: vec![None, Some(burst.clone())],
             schedulers: vec!["random".into()],
             agent_counts: vec![10],
@@ -1291,7 +1396,7 @@ mod tests {
         // Uncached path: individual run_single_experiment calls
         let config_none = ExperimentConfig {
             solver_name: "pibt".into(),
-            topology_name: "warehouse_large".into(),
+            topology_name: "warehouse_single_dock".into(),
             scenario: None,
             scheduler_name: "random".into(),
             num_agents: 10,
@@ -1342,7 +1447,7 @@ mod tests {
     fn baseline_self_metrics_match() {
         let config = ExperimentConfig {
             solver_name: "pibt".into(),
-            topology_name: "warehouse_large".into(),
+            topology_name: "warehouse_single_dock".into(),
             scenario: None,
             scheduler_name: "random".into(),
             num_agents: 10,

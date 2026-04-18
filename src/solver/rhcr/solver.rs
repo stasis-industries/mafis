@@ -207,7 +207,7 @@ impl RhcrSolver {
     /// is far from `agent.pos` get a chain — sequential A* in `plan_agent`
     /// uses the chain to make horizon-bounded best-effort progress. The
     /// previous early-skip was the root cause of PBS's chronic NoSolution
-    /// failures on warehouse_large (PAAMS 2026 fix).
+    /// failures on warehouse_single_dock (PAAMS 2026 fix).
     ///
     /// **Scheduler instance**: this routine constructs a local
     /// `RandomScheduler` instead of accepting a `&dyn TaskScheduler` from the
@@ -239,7 +239,7 @@ impl RhcrSolver {
                 horizon as u64,
                 &mut rng.rng,
             );
-            wa.goal_sequence.extend(chain.into_iter());
+            wa.goal_sequence.extend(chain);
         }
     }
 
@@ -968,7 +968,8 @@ mod tests {
         use rand_chacha::ChaCha8Rng;
 
         let registry = TopologyRegistry::load_from_dir(std::path::Path::new("topologies"));
-        let entry = registry.find("warehouse_large").expect("warehouse_large.json missing");
+        let entry =
+            registry.find("warehouse_single_dock").expect("warehouse_single_dock.json missing");
         let (grid, zones) = TopologyRegistry::parse_entry(entry).unwrap();
 
         let walkable: Vec<IVec2> = zones
@@ -1100,7 +1101,7 @@ mod tests {
     /// drops PBS to all-Wait or all-fallback behavior would trip it.
     ///
     /// Measured baseline 2026-04-08 (post PAAMS 2026 RHCR-PBS fidelity port):
-    /// tp = 0.435 tasks/tick on warehouse_large, 40 agents, random scheduler,
+    /// tp = 0.435 tasks/tick on warehouse_single_dock, 40 agents, random scheduler,
     /// 200 ticks. This is a 10× jump from the pre-port `0.040` baseline; the
     /// fix was the eager-mode + peek-chain + best-effort sequential-A* port
     /// (Streams B + C of the sprint). The floor is set to `0.20` — well above
@@ -1116,11 +1117,14 @@ mod tests {
 
         // Validate the topology loads (defends against silent topology breakage)
         let registry = TopologyRegistry::load_from_dir(std::path::Path::new("topologies"));
-        assert!(registry.find("warehouse_large").is_some(), "warehouse_large.json missing");
+        assert!(
+            registry.find("warehouse_single_dock").is_some(),
+            "warehouse_single_dock.json missing"
+        );
 
         let config = ExperimentConfig {
             solver_name: "rhcr_pbs".into(),
-            topology_name: "warehouse_large".into(),
+            topology_name: "warehouse_single_dock".into(),
             scenario: None,
             scheduler_name: "random".into(),
             num_agents: 40,
