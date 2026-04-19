@@ -813,6 +813,63 @@ mod tests {
         eprintln!("\nSaved: results/solver_benchmark_runs.csv ({} rows)", result.runs.len() * 2);
     }
 
+    /// Launch the full aisle-width sweep: all 5 matrices, runs CSVs + summary CSVs
+    /// written to `results/aisle_width/`. Set `MAFIS_TICK_EXPORT_DIR` to capture
+    /// per-tick throughput series (see runner::export_tick_series_if_enabled).
+    ///
+    /// Total: 4500 runs (see paams_aisle_width_counts test).
+    ///
+    /// Usage:
+    ///   MAFIS_TICK_EXPORT_DIR="$(pwd)/results/aisle_width/ticks" \
+    ///     cargo test --release --lib run_aisle_width_sweep -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn run_aisle_width_sweep() {
+        use crate::experiment::export::{write_runs_csv, write_summary_csv};
+        use crate::experiment::runner::{ExperimentProgress, run_matrix};
+        use std::fs;
+        use std::sync::{Arc, Mutex};
+        use std::time::Instant;
+
+        let out_dir = "results/aisle_width";
+        fs::create_dir_all(out_dir).unwrap();
+
+        let matrices = paams_aisle_width();
+        let grand_total: usize = matrices.iter().map(|(_, m)| m.total_runs()).sum();
+        let sweep_start = Instant::now();
+
+        eprintln!(
+            "\n=== Aisle-width sweep: {grand_total} total runs across {} matrices ===",
+            matrices.len()
+        );
+        for (name, matrix) in matrices {
+            let total = matrix.total_runs();
+            eprintln!("\n--- {name}: {total} runs ---");
+            let progress =
+                Arc::new(Mutex::new(ExperimentProgress { current: 0, total, label: name.into() }));
+
+            let m_start = Instant::now();
+            let result = run_matrix(&matrix, Some(&progress));
+            let m_wall_s = m_start.elapsed().as_secs();
+            eprintln!("  done in {m_wall_s}s ({} runs/s)", total as f64 / m_wall_s.max(1) as f64);
+
+            let runs_path = format!("{out_dir}/{name}_runs.csv");
+            let summary_path = format!("{out_dir}/{name}_summary.csv");
+            write_runs_csv(&mut fs::File::create(&runs_path).unwrap(), &result.runs).unwrap();
+            write_summary_csv(&mut fs::File::create(&summary_path).unwrap(), &result.summaries)
+                .unwrap();
+            eprintln!("  wrote {runs_path}, {summary_path}");
+        }
+
+        let total_s = sweep_start.elapsed().as_secs();
+        eprintln!(
+            "\n=== Aisle-width sweep complete: {grand_total} runs in {}h{:02}m{:02}s ===",
+            total_s / 3600,
+            (total_s % 3600) / 60,
+            total_s % 60,
+        );
+    }
+
     #[test]
     fn smoke_test_runs_fast() {
         let result = crate::experiment::runner::run_matrix(&smoke_test(), None);
