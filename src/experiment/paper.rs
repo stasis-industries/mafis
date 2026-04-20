@@ -870,6 +870,135 @@ mod tests {
         );
     }
 
+    /// Post-kick-back-fix re-run of the full aisle-width sweep.
+    ///
+    /// Drops SD-w1 n=20 (lowest density — contamination <1%, not worth the
+    /// ~540 runs). Writes to `results/aisle_width/post_kickback_fix/` so
+    /// pre/post CSVs coexist for diff analysis. Total: ~3960 runs.
+    ///
+    /// Usage:
+    ///   cargo test --release --lib run_aisle_width_priority_rerun -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn run_aisle_width_priority_rerun() {
+        use crate::experiment::config::ExperimentMatrix;
+        use crate::experiment::export::{write_runs_csv, write_summary_csv};
+        use crate::experiment::runner::{ExperimentProgress, run_matrix};
+        use std::fs;
+        use std::sync::{Arc, Mutex};
+        use std::time::Instant;
+
+        let out_dir = "results/aisle_width/post_kickback_fix";
+        fs::create_dir_all(out_dir).unwrap();
+
+        let solvers_all = paams_solvers();
+        let solvers_scalable: Vec<String> = vec!["pibt".into(), "rhcr_pbs".into()];
+        let scenarios = paper_scenarios();
+
+        // Same cells as `paams_aisle_width` MINUS SD-w1 n=20 (lowest
+        // density, <1% drift expected from the kick-back fix). Priority
+        // cells are all the medium and high-density tiers across all
+        // three topologies plus the out-envelope tiers for paradigm-limit
+        // continuity.
+        let matrices: Vec<(&'static str, ExperimentMatrix)> = vec![
+            (
+                "aisle_width_w1_mh",
+                ExperimentMatrix {
+                    solvers: solvers_all.clone(),
+                    topologies: vec!["warehouse_single_dock".into()],
+                    scenarios: scenarios.clone(),
+                    schedulers: vec!["closest".into()],
+                    agent_counts: vec![40, 60],
+                    seeds: SEEDS.to_vec(),
+                    tick_count: TICK_COUNT,
+                },
+            ),
+            (
+                "aisle_width_w2_in_env",
+                ExperimentMatrix {
+                    solvers: solvers_all.clone(),
+                    topologies: vec!["warehouse_single_dock_w2".into()],
+                    scenarios: scenarios.clone(),
+                    schedulers: vec!["closest".into()],
+                    agent_counts: vec![36, 72],
+                    seeds: SEEDS.to_vec(),
+                    tick_count: TICK_COUNT,
+                },
+            ),
+            (
+                "aisle_width_w2_out_env",
+                ExperimentMatrix {
+                    solvers: solvers_scalable.clone(),
+                    topologies: vec!["warehouse_single_dock_w2".into()],
+                    scenarios: scenarios.clone(),
+                    schedulers: vec!["closest".into()],
+                    agent_counts: vec![108],
+                    seeds: SEEDS.to_vec(),
+                    tick_count: TICK_COUNT,
+                },
+            ),
+            (
+                "aisle_width_w3_in_env",
+                ExperimentMatrix {
+                    solvers: solvers_all,
+                    topologies: vec!["warehouse_single_dock_w3".into()],
+                    scenarios: scenarios.clone(),
+                    schedulers: vec!["closest".into()],
+                    agent_counts: vec![50, 100],
+                    seeds: SEEDS.to_vec(),
+                    tick_count: TICK_COUNT,
+                },
+            ),
+            (
+                "aisle_width_w3_out_env",
+                ExperimentMatrix {
+                    solvers: solvers_scalable,
+                    topologies: vec!["warehouse_single_dock_w3".into()],
+                    scenarios,
+                    schedulers: vec!["closest".into()],
+                    agent_counts: vec![151],
+                    seeds: SEEDS.to_vec(),
+                    tick_count: TICK_COUNT,
+                },
+            ),
+        ];
+
+        let grand_total: usize = matrices.iter().map(|(_, m)| m.total_runs()).sum();
+        let sweep_start = Instant::now();
+        eprintln!(
+            "\n=== Post-kick-back-fix aisle-width re-run: {grand_total} runs across {} matrices ===",
+            matrices.len()
+        );
+
+        for (name, matrix) in matrices {
+            let total = matrix.total_runs();
+            eprintln!("\n--- {name}: {total} runs ---");
+            let progress =
+                Arc::new(Mutex::new(ExperimentProgress { current: 0, total, label: name.into() }));
+            let m_start = Instant::now();
+            let result = run_matrix(&matrix, Some(&progress));
+            let m_wall_s = m_start.elapsed().as_secs();
+            eprintln!(
+                "  done in {m_wall_s}s ({:.2} runs/s)",
+                total as f64 / m_wall_s.max(1) as f64
+            );
+            let runs_path = format!("{out_dir}/{name}_runs.csv");
+            let summary_path = format!("{out_dir}/{name}_summary.csv");
+            write_runs_csv(&mut fs::File::create(&runs_path).unwrap(), &result.runs).unwrap();
+            write_summary_csv(&mut fs::File::create(&summary_path).unwrap(), &result.summaries)
+                .unwrap();
+            eprintln!("  wrote {runs_path}, {summary_path}");
+        }
+
+        let total_s = sweep_start.elapsed().as_secs();
+        eprintln!(
+            "\n=== Post-kick-back-fix re-run complete: {grand_total} runs in {}h{:02}m{:02}s ===",
+            total_s / 3600,
+            (total_s % 3600) / 60,
+            total_s % 60,
+        );
+    }
+
     /// TP-only re-run of the in-envelope aisle-width cells. Used after the
     /// 2026-04-20 TP goal-change-sync + rewind-determinism bug fixes to
     /// produce clean TP mitigation-delta / cascade numbers without reruning
