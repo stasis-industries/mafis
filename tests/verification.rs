@@ -2021,6 +2021,94 @@ fn intermittent_first_fire_median() {
     eprintln!("  intermittent first-fire median={median} (theoretical ln(2)·{mtbf}={ln2_mtbf}) OK");
 }
 
+/// Regression test for the 2026-04-20 queue kick-back stranding bug.
+///
+/// User-visible symptom: agents displayed in the amber "picking" colour on
+/// the delivery-column corridor (cells in the `queue_x_range` below — the
+/// corridor between pickup cells at x=50 and delivery cells at x=55).
+///
+/// Pre-fix mechanism:
+///     (1) agent travels to queue cell, queue full on arrival.
+///     (2) kick-back at `queue/mod.rs:process_arrivals` sets
+///         `task_leg = Loading(pickup)`, `goal = pickup` while pos is still
+///         at the queue cell.
+///     (3) `recycle_goals_core` skips because pos != goal; `process_new_joins`
+///         requires pos == goal. Agent must walk 4-10 cells back to pickup
+///         before being re-queued — during which time the renderer paints
+///         it amber (Loading colour) in the x=51..54 corridor.
+///
+/// Post-fix: kick-back sets `goal = agent.pos`, so the agent is eligible
+/// for re-queuing on the very next tick without any backtrack. The max
+/// consecutive ticks ANY agent spends in `Loading(_)` while physically in
+/// the delivery-queue corridor should now be ≤2 (1 kick-back tick + at
+/// most 1 re-queue-latency tick).
+#[test]
+fn no_stuck_loading_on_delivery_corridor() {
+    use mafis::core::runner::SimulationRunner;
+    use mafis::core::task::TaskLeg;
+
+    let topo = ActiveTopology::from_name("warehouse_single_dock");
+    let output = topo.topology().generate(42);
+    let grid_area = (output.grid.width * output.grid.height) as usize;
+
+    let scheduler = ActiveScheduler::from_name("closest");
+    let queue_policy = ActiveQueuePolicy::from_name("closest");
+
+    // Moderate fleet — pressure on queues but not saturated. Single-dock
+    // has 11 delivery stations × ~4-slot queues = ~44 queue slots. 30
+    // agents produces frequent kick-back without queues remaining
+    // permanently full, so natural queue-wait time stays short and the
+    // residual corridor-Loading streak directly reflects the kick-back
+    // stranding.
+    let agent_count: usize = 30;
+    let mut rng_seed = SeededRng::new(42);
+    let agents = place_agents(agent_count, &output.grid, &output.zones, &mut rng_seed);
+    let rng_after_placement = rng_seed.clone();
+
+    let solver = mafis::solver::lifelong_solver_from_name("pibt", grid_area, agent_count)
+        .expect("pibt solver creation");
+    let mut runner = SimulationRunner::new(
+        output.grid,
+        output.zones,
+        agents,
+        solver,
+        rng_after_placement,
+        FaultConfig { enabled: false, ..Default::default() },
+        FaultSchedule::default(),
+    );
+
+    // Delivery corridor is x ∈ [51, 54]: between pickup cells at x=50 and
+    // delivery cells at x=55. An agent physically here in task_leg Loading
+    // is exactly the user-visible bug.
+    let in_corridor = |pos: IVec2| pos.x >= 51 && pos.x <= 54;
+
+    let mut streak_in_corridor: Vec<u64> = vec![0; agent_count];
+    let mut max_corridor_streak: Vec<u64> = vec![0; agent_count];
+    for _ in 1..=400u64 {
+        let _ = runner.tick(scheduler.scheduler(), queue_policy.policy());
+        for (i, a) in runner.agents.iter().enumerate() {
+            if matches!(a.task_leg, TaskLeg::Loading(_)) && in_corridor(a.pos) {
+                streak_in_corridor[i] += 1;
+                max_corridor_streak[i] = max_corridor_streak[i].max(streak_in_corridor[i]);
+            } else {
+                streak_in_corridor[i] = 0;
+            }
+        }
+    }
+    let worst = max_corridor_streak.iter().copied().max().unwrap_or(0);
+    // Ceiling 5: absorbs 1 kick-back tick + natural 1-4 tick queue-wait
+    // (while slots shuffle) at moderate overload. Pre-fix the forced
+    // backtrack-to-pickup added 4-10 corridor Loading ticks on top,
+    // routinely pushing the streak past 10. A regression that reintroduces
+    // the backtrack blows past 5 easily.
+    assert!(
+        worst <= 5,
+        "Max consecutive ticks with an agent in Loading state ON the \
+         delivery corridor (x=51..54) is {worst}; expected ≤5 post-fix. \
+         A higher value means the kick-back stranding is re-emerging.",
+    );
+}
+
 /// Rewind determinism: run to T, reset to T/2 (restoring next_fault_tick),
 /// replay forward to T — fault event sequence must have identical count.
 #[test]

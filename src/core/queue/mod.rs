@@ -485,10 +485,19 @@ impl QueueManager {
                     changed.push(agent_idx);
                 }
             } else if matches!(agent.task_leg, TaskLeg::TravelToQueue { .. }) {
-                // Queue full when agent arrived — revert to Loading so
-                // process_new_joins can reassign to a different queue next tick.
+                // Queue full when agent arrived — revert to Loading. Setting
+                // goal = agent.pos (NOT the pickup cell `from`) keeps the agent
+                // eligible for process_new_joins on the NEXT tick: the join
+                // filter at `queue/mod.rs:pos == goal` admits this agent
+                // immediately instead of requiring a 4-10 tick backtrack to
+                // the pickup cell first. Safe because recycle_goals_core's
+                // Loading(_) arm (task/recycle.rs:145-148) is a no-op, so
+                // pos == goal does NOT trigger a spurious state transition.
+                // Without this, kicked-back agents appear visually "stuck" in
+                // the picking colour on the delivery corridor until they
+                // backtrack to the pickup cell.
                 agent.task_leg = TaskLeg::Loading(from);
-                agent.goal = from;
+                agent.goal = agent.pos;
                 agent.planned_path.clear();
                 changed.push(agent_idx);
             }
@@ -548,7 +557,14 @@ impl QueueManager {
         just_loaded: &[usize],
         rng: &mut ChaCha8Rng,
     ) {
-        // Collect eligible Loading agents
+        // Collect eligible Loading agents. The `pos == goal` filter admits
+        // two populations:
+        //   (1) agents that just arrived at their pickup cell (normal entry);
+        //   (2) agents kicked back from a full/blocked queue — their goal was
+        //       rewritten to `agent.pos` at kick-back time (see
+        //       process_arrivals / reroute_blocked_agents), so they are
+        //       eligible for requeuing immediately without having to travel
+        //       back to the pickup cell.
         let mut eligible: Vec<usize> = (0..agents.len())
             .filter(|&i| {
                 let a = &agents[i];
@@ -682,10 +698,13 @@ impl QueueManager {
                     };
                     let agent = &mut agents[agent_idx];
                     agent.task_leg = TaskLeg::Loading(from);
-                    // Goal = pickup cell (from), NOT agent.pos.
-                    // Setting goal = pos at a random corridor cell would trigger
-                    // premature state transitions in recycle_goals_core (pos == goal).
-                    agent.goal = from;
+                    // Goal = agent.pos (waiting in place), NOT the pickup cell.
+                    // See arrivals-revert comment in process_arrivals — the
+                    // Loading(_) arm of recycle_goals_core is a no-op, so
+                    // pos == goal is safe here and lets process_new_joins
+                    // re-attempt queue assignment next tick without forcing
+                    // the agent to travel back to the pickup cell.
+                    agent.goal = agent.pos;
                     agent.planned_path.clear();
                     changed.push(agent_idx);
                 }
@@ -1079,8 +1098,65 @@ mod tests {
             "Expected Loading, got {:?}",
             agents[0].task_leg
         );
-        assert_eq!(agents[0].goal, pickup);
+        // Post-2026-04-20 kick-back fix: goal is rewritten to agent.pos so
+        // process_new_joins picks the agent up NEXT tick without forcing a
+        // 4-10 tick backtrack to the pickup cell. The Loading(pickup)
+        // payload still records `from = pickup` for downstream consumers.
+        assert_eq!(agents[0].goal, queue_cell, "goal must equal agent.pos at kick-back");
+        if let TaskLeg::Loading(p) = agents[0].task_leg {
+            assert_eq!(p, pickup, "Loading payload still carries pickup cell");
+        }
         assert!(changed.contains(&0));
+    }
+
+    /// Regression test for the 2026-04-20 stranding fix (Phase-1 audit).
+    /// A kicked-back agent (queue was full on arrival) must be picked up by
+    /// `process_new_joins` on the very next tick once a slot opens, WITHOUT
+    /// requiring the agent to first travel back to the pickup cell. This
+    /// matches the visual expectation: no more than 1-2 ticks in the
+    /// picking-amber state on the delivery corridor.
+    #[test]
+    fn kick_back_arrivals_is_requeuable_next_tick() {
+        use super::super::runner::SimAgent;
+        use rand::SeedableRng;
+
+        let grid = test_grid();
+        let lines = vec![QueueLine::compute(IVec2::new(8, 2), Direction::West, &grid).unwrap()];
+        let cap = lines[0].capacity();
+        let mut mgr = QueueManager::new(&lines);
+        for i in 0..cap {
+            mgr.queues[0].slots[i] = Some(100 + i);
+        }
+
+        let pickup = IVec2::new(3, 2);
+        let queue_cell = lines[0].back_cell();
+        let mut agents = vec![SimAgent::new(queue_cell)];
+        agents[0].task_leg =
+            TaskLeg::TravelToQueue { from: pickup, to: lines[0].delivery_cell, line_index: 0 };
+        agents[0].pos = queue_cell;
+
+        // Tick 1 — kick-back fires.
+        let mut changed = Vec::new();
+        mgr.process_arrivals(&mut agents, &lines, &mut changed);
+        assert!(matches!(agents[0].task_leg, TaskLeg::Loading(_)));
+        assert_eq!(agents[0].goal, queue_cell, "goal must be agent.pos after kick-back");
+
+        // Free the slot that would accept this agent and invoke the next
+        // tick's join logic. The agent must transition back into
+        // TravelToQueue without any intervening backtrack.
+        mgr.queues[0].slots[cap - 1] = None;
+        let policy = ClosestQueuePolicy;
+        let mut changed2 = Vec::new();
+        let just_loaded: Vec<usize> = Vec::new();
+        let mut rng = ChaCha8Rng::seed_from_u64(7);
+        mgr.process_new_joins(&mut agents, &lines, &policy, &mut changed2, &just_loaded, &mut rng);
+
+        assert!(
+            matches!(agents[0].task_leg, TaskLeg::TravelToQueue { .. }),
+            "agent must be re-queued immediately after a slot opens, got {:?}",
+            agents[0].task_leg
+        );
+        assert!(changed2.contains(&0));
     }
 
     #[test]
