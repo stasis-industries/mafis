@@ -56,7 +56,7 @@ impl FromStr for FaultScenarioType {
             "wear_based" => Self::WearBased,
             "zone_outage" => Self::ZoneOutage,
             "intermittent_fault" => Self::IntermittentFault,
-            _ => Self::BurstFailure,
+            _ => return Err(()),
         })
     }
 }

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Scale Sensitivity Analysis for MAFIS Paper.
+Scale Sensitivity Analysis for MAFIS.
 
 RQ3: How does fleet size affect fault tolerance?
 

@@ -72,7 +72,7 @@ pub fn build_adg(
     sim_config: Res<SimulationConfig>,
     mut throttle: ResMut<AdgThrottle>,
 ) {
-    let agent_count = agents.iter().len();
+    let agent_count = agents.iter().count();
     let stride = adg_stride(agent_count);
 
     // Throttle: skip this tick if not enough ticks elapsed since last computation
@@ -141,8 +141,10 @@ pub fn compute_betweenness_criticality(
     adg: Res<ActionDependencyGraph>,
     sim_config: Res<SimulationConfig>,
     mut betweenness: ResMut<BetweennessCriticality>,
+    mut entities: Local<Vec<Entity>>,
+    mut entity_to_idx: Local<HashMap<Entity, usize>>,
 ) {
-    let agent_count = agents.iter().len();
+    let agent_count = agents.iter().count();
 
     // Guard: interval and agent limit
     if constants::BETWEENNESS_INTERVAL == 0 {
@@ -158,14 +160,15 @@ pub fn compute_betweenness_criticality(
     betweenness.scores.clear();
     betweenness.last_tick = sim_config.tick;
 
-    // Collect all entities in the ADG
-    let entities: Vec<Entity> = agents.iter().collect();
+    // Collect all entities in the ADG (reuse Local buffer to avoid per-tick alloc)
+    entities.clear();
+    entities.extend(agents.iter());
     if entities.is_empty() {
         return;
     }
 
-    let entity_to_idx: HashMap<Entity, usize> =
-        entities.iter().enumerate().map(|(i, &e)| (e, i)).collect();
+    entity_to_idx.clear();
+    entity_to_idx.extend(entities.iter().enumerate().map(|(i, &e)| (e, i)));
     let n = entities.len();
 
     let mut cb = vec![0.0f32; n]; // betweenness accumulator
@@ -258,7 +261,7 @@ impl IndexedDependencyGraph {
 /// Mirrors the logic of the ECS `build_adg` system but uses agent indices
 /// instead of Bevy entities.
 pub fn build_adg_from_agents(agents: &[SimAgent], lookahead: usize) -> IndexedDependencyGraph {
-    let mut dependents: HashMap<usize, Vec<usize>> = HashMap::new();
+    let mut dependents: HashMap<usize, Vec<usize>> = HashMap::with_capacity(agents.len());
     let mut occupation: HashMap<IVec2, usize> = HashMap::with_capacity(agents.len());
 
     // Build occupation map: pos → agent index (alive only)
@@ -269,7 +272,7 @@ pub fn build_adg_from_agents(agents: &[SimAgent], lookahead: usize) -> IndexedDe
     }
 
     // For each alive agent B, walk planned_path and find dependencies
-    let mut seen = HashSet::new();
+    let mut seen = HashSet::with_capacity(agents.len());
     for (idx_b, agent_b) in agents.iter().enumerate() {
         if !agent_b.alive {
             continue;

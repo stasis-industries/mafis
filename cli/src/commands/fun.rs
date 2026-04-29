@@ -257,7 +257,7 @@ const FORTUNES: &[&str] = &[
     "The scheduler (random vs closest) affects resilience MORE than the solver algorithm. Surprising.",
     "Determinism: same seed + same config = identical simulation. Every. Single. Time.",
     "500 ticks at steady state \u{2248} 100 completed tasks \u{2014} enough for statistical significance.",
-    "5 seeds per configuration gives usable 95% confidence intervals for your paper.",
+    "5 seeds per configuration gives usable 95% confidence intervals.",
     "PIBT replans every tick. It's purely reactive \u{2014} no memory, no regret, just the next best move.",
     "RHCR replans every W ticks. Between replans, agents follow their pre-computed paths.",
     "The warehouse has three zone types: pickup (shelves), delivery (staging), and corridor (movement).",
@@ -342,7 +342,7 @@ pub fn tree(root: &Path) -> anyhow::Result<()> {
         ("src/analysis/", "analysis", "ADG, cascade, metrics, heatmap"),
         ("src/render/", "render", "3D visuals, materials, orbit camera"),
         ("src/ui/", "ui", "Controls, bridge, desktop"),
-        ("src/experiment/", "experiment", "Runner, metrics, export, paper"),
+        ("src/experiment/", "experiment", "Runner, metrics, export, presets"),
         ("src/sim_tests/", "sim_tests", "Integration test harness"),
     ];
 

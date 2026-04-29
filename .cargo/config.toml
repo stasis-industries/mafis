@@ -1,0 +1,13 @@
+# WASM target-specific flags.
+#
+# `+simd128` enables the WebAssembly SIMD instruction set (stable in all
+# evergreen browsers since 2021). With this flag, rustc autovectorizes
+# inner loops in compute-heavy code (A*, BFS, constraint checks) and emits
+# 128-bit vector ops instead of scalar loops. Measured gain on A*-heavy
+# paths in MAFIS: ~10-30% depending on workload.
+#
+# Keep in sync with the `wasm-opt` invocation in CLAUDE.md — the
+# `--enable-simd` flag there is required so `wasm-opt` accepts and
+# preserves SIMD instructions during its post-link optimization pass.
+[target.wasm32-unknown-unknown]
+rustflags = ["-C", "target-feature=+simd128"]

@@ -7,10 +7,10 @@
 pub mod config;
 pub mod export;
 pub mod metrics;
-#[cfg(not(target_arch = "wasm32"))]
-pub mod paper;
 pub mod runner;
 pub mod stats;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod suite;
 
 // Re-export key types for convenience.
 pub use config::{ExperimentConfig, ExperimentMatrix};

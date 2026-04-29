@@ -146,15 +146,13 @@ impl LifelongSolver for PibtLifelongSolver {
 // Legacy MAPFSolver impl — used by solve_on_enter (kept for compatibility)
 // ---------------------------------------------------------------------------
 
-const DEFAULT_MAX_TIMESTEPS: u64 = 1000;
-
 pub struct PibtSolver {
     pub max_timesteps: u64,
 }
 
 impl Default for PibtSolver {
     fn default() -> Self {
-        Self { max_timesteps: DEFAULT_MAX_TIMESTEPS }
+        Self { max_timesteps: crate::constants::PIBT_DEFAULT_MAX_TIMESTEPS }
     }
 }
 

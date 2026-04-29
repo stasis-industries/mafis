@@ -1,4 +1,5 @@
 use clap::{Parser, Subcommand};
+use std::path::PathBuf;
 
 #[derive(Parser)]
 #[command(
@@ -58,6 +59,28 @@ pub enum Command {
         #[arg(long)]
         native: bool,
     },
+
+    /// Run a fault experiment from a TOML config file
+    Fault {
+        #[command(subcommand)]
+        action: FaultCommand,
+    },
+}
+
+#[derive(Subcommand, Clone, Debug)]
+pub enum FaultCommand {
+    /// Run an experiment defined in a TOML fault config file
+    Run {
+        /// Path to the TOML fault config file (e.g. examples/fault_config.toml)
+        #[arg(long = "fault-config", value_name = "PATH")]
+        fault_config: PathBuf,
+    },
+    /// Validate a TOML fault config file without running anything
+    Validate {
+        /// Path to the TOML fault config file
+        #[arg(long = "fault-config", value_name = "PATH")]
+        fault_config: PathBuf,
+    },
 }
 
 #[derive(Subcommand, Clone, Debug)]
@@ -71,7 +94,7 @@ pub enum ExperimentCommand {
     },
     /// Quick smoke test (~1s)
     Smoke,
-    /// Run all paper experiments
+    /// Run all experiment presets
     RunAll,
 }
 

@@ -1,14 +1,12 @@
 use std::sync::atomic::Ordering;
 
 use crate::core::topology::TopologyRegistry;
-use crate::experiment::config::ExperimentMatrix;
 use crate::experiment::export::MetricColumn;
-use crate::experiment::runner::MatrixResult;
 use crate::solver::SOLVER_NAMES;
 
 use super::helpers::{
-    ExportFormat, PRESETS, TABLE_METRICS, export_button, metric_zone_color, sortable_header,
-    sync_topologies,
+    ExportFormat, PRESETS, TABLE_METRICS, export_button, matrix_result_from_summaries,
+    metric_zone_color, sortable_header, sync_topologies,
 };
 use super::{ExperimentCommand, ExperimentGuiState, ExperimentHandle, SortColumn};
 
@@ -132,29 +130,21 @@ pub fn experiment_panel(
             match std::fs::read_to_string(&path) {
                 Ok(json) => match crate::experiment::export::parse_summaries_from_json(&json) {
                     Ok(summaries) => {
-                        gui.last_result = Some(MatrixResult {
-                            matrix: ExperimentMatrix {
-                                solvers: vec![],
-                                topologies: vec![],
-                                scenarios: vec![],
-                                schedulers: vec![],
-                                agent_counts: vec![],
-                                seeds: vec![],
-                                tick_count: 0,
-                            },
-                            runs: vec![],
-                            summaries,
-                            wall_time_total_ms: 0,
-                        });
+                        gui.last_result = Some(matrix_result_from_summaries(summaries, vec![]));
                         gui.selected_row = None;
                         gui.show_drill_down = false;
+                        gui.import_error = None;
                     }
-                    Err(e) => eprintln!("Import error: {e}"),
+                    Err(e) => gui.import_error = Some(format!("Import error: {e}")),
                 },
-                Err(e) => eprintln!("File read error: {e}"),
+                Err(e) => gui.import_error = Some(format!("File read error: {e}")),
             }
         }
     });
+
+    if let Some(msg) = &gui.import_error {
+        ui.colored_label(egui::Color32::from_rgb(220, 80, 80), msg);
+    }
 
     // ── Results ────────────────────────────────────────────────────
     if gui.last_result.is_none() {
@@ -396,11 +386,12 @@ pub fn experiment_panel(
     // ── Export menu ────────────────────────────────────────────────
     ui.add_space(4.0);
     ui.horizontal(|ui| {
-        export_button(ui, "CSV Runs", &summaries, &runs, ExportFormat::CsvRuns);
-        export_button(ui, "CSV Summary", &summaries, &runs, ExportFormat::CsvSummary);
-        export_button(ui, "JSON", &summaries, &runs, ExportFormat::Json);
-        export_button(ui, "LaTeX", &summaries, &runs, ExportFormat::Latex);
-        export_button(ui, "Typst", &summaries, &runs, ExportFormat::Typst);
-        export_button(ui, "SVG Chart", &summaries, &runs, ExportFormat::Svg);
+        let m = gui.chart_metric;
+        export_button(ui, "CSV Runs", &summaries, &runs, ExportFormat::CsvRuns, m);
+        export_button(ui, "CSV Summary", &summaries, &runs, ExportFormat::CsvSummary, m);
+        export_button(ui, "JSON", &summaries, &runs, ExportFormat::Json, m);
+        export_button(ui, "LaTeX", &summaries, &runs, ExportFormat::Latex, m);
+        export_button(ui, "Typst", &summaries, &runs, ExportFormat::Typst, m);
+        export_button(ui, "SVG Chart", &summaries, &runs, ExportFormat::Svg, m);
     });
 }

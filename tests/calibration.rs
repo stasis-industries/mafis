@@ -22,6 +22,7 @@ fn run(solver: &str, topology: &str, agents: usize, ticks: u64, seed: u64) -> f6
         seed,
         tick_count: ticks,
         custom_map: None,
+        rhcr_override: None,
     };
     let result = run_single_experiment(&config);
     // No fault → baseline_metrics and faulted_metrics should be identical.
@@ -281,6 +282,7 @@ fn property_differential_measurement_validity() {
             seed,
             tick_count: ticks,
             custom_map: None,
+            rhcr_override: None,
         };
         let result = run_single_experiment(&config);
         faulted_total += result.faulted_metrics.total_tasks as f64;

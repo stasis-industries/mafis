@@ -70,7 +70,7 @@ pub const GRID_LINE_THRESHOLD: i32 = 64;
 ///
 /// Deeper cascades are truncated at this depth, which trades fidelity for
 /// bounded compute. Raised from 10 to 200 (2026-04-18) to support the
-/// PAAMS aisle-width sweep, where a fault in a width-1 corridor can lock
+/// aisle-width sweeps, where a fault in a width-1 corridor can lock
 /// up the entire convoy upstream — capping at 10 silently truncates that
 /// signal and biases per-solver cascade comparison.
 ///
@@ -159,11 +159,20 @@ pub const REPLAN_INTERVAL: u64 = 20;
 /// change constantly — computing 1000 steps wastes ~98% of work.
 pub const LIFELONG_PLAN_HORIZON: u64 = 20;
 
+/// Default maximum timesteps for the legacy `PibtSolver::solve` (one-shot
+/// MAPFSolver impl, used by `solve_on_enter` for the initial loading solve).
+pub const PIBT_DEFAULT_MAX_TIMESTEPS: u64 = 1000;
+
 // ── RHCR (Rolling-Horizon Collision Resolution) ───────────────────
 
 /// Maximum planning horizon (H). Li et al. 2021 use H=20 for dense warehouses;
 /// 40 allows larger maps where agents need longer paths to reach goals.
 pub const RHCR_MAX_HORIZON: usize = 40;
+
+/// PBS-specific cap on the planning horizon, applied inside `RhcrConfig::auto`.
+/// PBS tree search is exponential — capping below `RHCR_MAX_HORIZON` keeps
+/// worst-case replan cost bounded on dense fleets.
+pub const RHCR_PBS_MAX_HORIZON: usize = 15;
 
 /// Minimum planning horizon. Below 5, plans are too short for agents to clear
 /// even simple intersections (average aisle length ~4 cells in compact grids).
@@ -183,7 +192,7 @@ pub const PBS_MAX_NODE_LIMIT: usize = 10_000;
 
 // ── RHCR / PBS (reference-aligned) ──────────────────────────────────
 //
-// Constants for the faithful PBS port (PAAMS 2026 RHCR-PBS fix).
+// Constants for the faithful PBS port.
 // Each value cites a specific line in the canonical Jiaoyang-Li/RHCR
 // reference (`docs/papers_codes/rhcr/`) so reviewers can verify fidelity.
 
@@ -241,6 +250,10 @@ pub const ASTAR_MAX_EXPANSIONS: u64 = 5_000;
 
 /// Default duration for latency injection (ticks).
 pub const DEFAULT_LATENCY_DURATION: u32 = 20;
+
+/// How often (ticks) the runner sweeps stale entries from the solver's
+/// distance-map cache. Cache lookups are O(1); cleanup is O(cache size).
+pub const DIST_CACHE_EVICT_INTERVAL: u64 = 100;
 
 // ── Tick history ────────────────────────────────────────────────────
 

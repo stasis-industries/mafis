@@ -20,7 +20,8 @@ pub struct RunMetrics {
     /// This differs from `wait_ratio` which counts physical `Wait` actions.
     pub unassigned_ratio: f64,
     /// Cumulative wait ratio: `total_wait_actions / total_actions` across all agent-ticks.
-    /// Includes dead agents (permanent `Wait`). Higher = more congestion or faults.
+    /// Computed over alive agents only — dead agents are excluded since their loss
+    /// is captured by survival_rate. Higher = more congestion or faults.
     pub wait_ratio: f64,
 
     // ── Fault resilience (differential) ────────────────────────────
@@ -85,6 +86,13 @@ pub struct RunMetrics {
     pub impacted_area: f64,
     pub deficit_integral: i64,
 
+    // ── Solver-specific telemetry ─────────────────────────────────
+    /// Fraction of RHCR-PBS replan windows that returned `WindowResult::Partial`
+    /// and fell through to LRA + PIBT fallback. `None` for non-RHCR solvers or
+    /// when no windows were attempted. Used as an observatory probe for PBS
+    /// scalability cliffs (see paper §6.4 / Appendix B).
+    pub pbs_partial_rate: Option<f32>,
+
     // ── Performance ────────────────────────────────────────────────
     pub solver_step_time_avg_us: f64,
     pub solver_step_time_max_us: f64,
@@ -127,6 +135,9 @@ pub fn compute_baseline_self_metrics(
     };
     let solver_step_time_max_us = solver_step_times_us.iter().copied().fold(0.0_f64, f64::max);
 
+    // Baseline contract: NaN = undefined-for-baseline (no fault → metric has
+    // no meaningful value); 0.0 = no-fault-impact (deficit/recovery genuinely
+    // measured zero impact, since the baseline never deviates from itself).
     RunMetrics {
         avg_throughput,
         total_tasks,
@@ -143,13 +154,14 @@ pub fn compute_baseline_self_metrics(
         structural_cascade_avg: 0.0,
         structural_cascade_max: 0.0,
         mitigation_delta_avg: 0.0,
-        itae: 0.0,
-        rapidity: 0.0,
+        itae: f64::NAN,
+        rapidity: f64::NAN,
         attack_rate: 0.0,
         fleet_utilization: 1.0,
         survival_rate: 1.0,
         impacted_area: 0.0,
         deficit_integral: 0,
+        pbs_partial_rate: None,
         solver_step_time_avg_us,
         solver_step_time_max_us,
         wall_time_ms,
@@ -310,9 +322,14 @@ pub fn compute_run_metrics(
     let smooth_w = crate::constants::RAPIDITY_SMOOTH_WINDOW;
     let baseline_smooth = rolling_average(&baseline.throughput_series, smooth_w);
     let faulted_smooth = rolling_average(&faulted_analysis.throughput_series, smooth_w);
-    let rapidity = compute_rapidity(
+    // Gate on RAW series — smoothing dilutes the fault drop with pre-fault data
+    // (W-1 pre-fault ticks bound the smoothed ratio at start to (W-1)/W ≈ 0.95,
+    // tripping the threshold-0.9 gate even for severe sudden faults).
+    let rapidity = compute_rapidity_gated_on_raw(
         &baseline_smooth,
         &faulted_smooth,
+        &baseline.throughput_series,
+        &faulted_analysis.throughput_series,
         first_fault_idx,
         crate::constants::RAPIDITY_THRESHOLD,
         crate::constants::RAPIDITY_DWELL,
@@ -349,6 +366,7 @@ pub fn compute_run_metrics(
         survival_rate,
         impacted_area: diff.impacted_area,
         deficit_integral: diff.deficit_integral,
+        pbs_partial_rate: None,
         solver_step_time_avg_us,
         solver_step_time_max_us,
         wall_time_ms,
@@ -392,9 +410,9 @@ fn compute_throughput_recovery(
 fn compute_critical_time(
     baseline_tp: &[f64],
     faulted_tp: &[f64],
-    first_gap_tick: Option<u64>,
+    first_fault_tick: Option<u64>,
 ) -> f64 {
-    let start = match first_gap_tick {
+    let start = match first_fault_tick {
         Some(t) if t > 0 => (t - 1) as usize, // convert 1-indexed tick to 0-indexed
         Some(_) => return 0.0,                // tick 0 edge case
         None => return f64::NAN,              // no fault impact → metric undefined
@@ -456,6 +474,58 @@ fn compute_itae(baseline_tp: &[f64], faulted_tp: &[f64], start: Option<usize>) -
 /// still contains pre-fault data at `start`. A zero-or-near-zero Rapidity from a
 /// system that never visibly degraded is not a recovery measurement, so we return
 /// NaN. Rapidity is undefined in that case.
+/// Production variant of [`compute_rapidity`]: evaluates the degradation-observed
+/// gate on the RAW (unsmoothed) series and the dwell loop on the smoothed series.
+///
+/// Smoothing the gate input dilutes the fault drop with pre-fault baseline data
+/// (a window of W ticks at `start` contains W-1 pre-fault ticks, so the smoothed
+/// ratio is bounded below by (W-1)/W ≈ 0.95), which causes the gate to fire
+/// spuriously for sudden faults. Gating on the raw single-tick ratio at `start`
+/// avoids this dilution.
+fn compute_rapidity_gated_on_raw(
+    baseline_smooth: &[f64],
+    faulted_smooth: &[f64],
+    baseline_raw: &[f64],
+    faulted_raw: &[f64],
+    start: Option<usize>,
+    threshold: f64,
+    dwell: usize,
+) -> f64 {
+    let start = match start {
+        Some(s) => s,
+        None => return f64::NAN,
+    };
+    let len_raw = baseline_raw.len().min(faulted_raw.len());
+    if start >= len_raw {
+        return f64::NAN;
+    }
+    let b_raw = baseline_raw[start];
+    let r_raw = if b_raw == 0.0 { 0.0 } else { faulted_raw[start] / b_raw };
+    if r_raw >= threshold {
+        return f64::NAN;
+    }
+
+    let len = baseline_smooth.len().min(faulted_smooth.len());
+    if start >= len {
+        return f64::NAN;
+    }
+    let mut consec = 0_usize;
+    for i in start..len {
+        let b = baseline_smooth[i];
+        let r = if b == 0.0 { 0.0 } else { faulted_smooth[i] / b };
+        if r >= threshold {
+            consec += 1;
+            if consec >= dwell {
+                return (i + 1 - dwell - start) as f64;
+            }
+        } else {
+            consec = 0;
+        }
+    }
+    f64::NAN
+}
+
+#[cfg(test)]
 fn compute_rapidity(
     baseline_tp: &[f64],
     faulted_tp: &[f64],
@@ -775,5 +845,50 @@ mod tests {
             compute_rapidity(&bl_s, &ft_s, Some(5), 0.9, 5).is_nan(),
             "5-tick spike in 3.0 baseline should not trigger recovery with W=20 smoothing"
         );
+    }
+
+    /// Regression: production path must NOT return NaN for sudden burst faults
+    /// where the raw single-tick ratio at `start` is below threshold but the
+    /// smoothed ratio at `start` is bounded above (W-1)/W ≈ 0.95 by pre-fault data.
+    #[test]
+    fn rapidity_gated_on_raw_recovers_after_burst() {
+        // Pre-fault: identical baseline=faulted=10 for ticks [0..100].
+        // Fault at tick 100: faulted drops to 5 for 30 ticks, then recovers to 10.
+        let mut bl = vec![10.0; 200];
+        let mut ft = vec![10.0; 200];
+        for i in 100..200 {
+            bl[i] = 10.0;
+        }
+        for i in 100..130 {
+            ft[i] = 5.0;
+        }
+        for i in 130..200 {
+            ft[i] = 10.0;
+        }
+        let w = 20;
+        let bl_s = rolling_average(&bl, w);
+        let ft_s = rolling_average(&ft, w);
+
+        // Without raw-gate fix, the smoothed ratio at start=100 is
+        // (19*10 + 5) / (20*10) = 195/200 = 0.975 > 0.9 → NaN.
+        let bad = compute_rapidity(&bl_s, &ft_s, Some(100), 0.9, 5);
+        assert!(bad.is_nan(), "smoothed-only gate spuriously trips for burst");
+
+        // With the raw-gate fix: raw ratio at 100 is 5/10 = 0.5 < 0.9 → gate passes.
+        // Dwell loop on smoothed eventually finds R >= 0.9 for 5 consecutive ticks.
+        let r = compute_rapidity_gated_on_raw(&bl_s, &ft_s, &bl, &ft, Some(100), 0.9, 5);
+        assert!(!r.is_nan(), "raw-gated rapidity must recover, got NaN");
+        assert!(r > 0.0 && r < 100.0, "rapidity {r} out of expected [0, 100) range");
+    }
+
+    /// Verify the gate still fires when the system genuinely never degraded.
+    #[test]
+    fn rapidity_gated_on_raw_nan_when_never_degraded() {
+        let bl = vec![10.0; 100];
+        let ft = vec![10.0; 100]; // identical → no degradation
+        let bl_s = rolling_average(&bl, 20);
+        let ft_s = rolling_average(&ft, 20);
+        let r = compute_rapidity_gated_on_raw(&bl_s, &ft_s, &bl, &ft, Some(50), 0.9, 5);
+        assert!(r.is_nan(), "no-degradation case must return NaN");
     }
 }

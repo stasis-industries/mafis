@@ -100,6 +100,42 @@ pub struct RewindRequest {
 }
 
 // ---------------------------------------------------------------------------
+// PendingManualFaults — Update-side buffer drained in FixedUpdate
+// ---------------------------------------------------------------------------
+
+/// Buffered `FaultEvent`s produced in `Update` by `process_manual_faults`.
+///
+/// `propagate_cascade` (the reader) runs in `FixedUpdate`. Writing the event
+/// directly from `Update` makes the read order non-deterministic across
+/// schedules. We collect raw event payloads here and emit them as proper
+/// `FaultEvent` messages from a `FixedUpdate` system in `FaultSet::Schedule`.
+#[cfg(not(any(test, feature = "headless")))]
+#[derive(Resource, Default)]
+pub struct PendingManualFaults {
+    pub events: Vec<super::breakdown::FaultEvent>,
+}
+
+#[cfg(any(test, feature = "headless"))]
+#[derive(Resource, Default)]
+pub struct PendingManualFaults;
+
+#[cfg(not(any(test, feature = "headless")))]
+/// Drain `PendingManualFaults` collected in `Update` and emit `FaultEvent`
+/// messages in `FixedUpdate`. Runs in `FaultSet::Schedule` so cascade BFS
+/// readers pick them up on the same tick.
+pub fn drain_pending_manual_faults(
+    mut pending: ResMut<PendingManualFaults>,
+    mut writer: MessageWriter<super::breakdown::FaultEvent>,
+) {
+    if pending.events.is_empty() {
+        return;
+    }
+    for fe in pending.events.drain(..) {
+        writer.write(fe);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // apply_rewind system (render-dependent, excluded from test builds)
 // ---------------------------------------------------------------------------
 
@@ -357,6 +393,35 @@ fn restore_world_state(
     }
     res.dist_cache.clear();
 
+    // Restore solver-specific planning caches that `reset()` / `restore_priorities()`
+    // did not recover. Token Passing rebuilds its per-agent token paths (and,
+    // implicitly, the MasterConstraintIndex on the next step) from each agent's
+    // restored planned_actions. Without this, TP replay diverges because the
+    // constraint index starts empty while the original run had multi-step plans
+    // active at this tick. PIBT and RHCR-PBS default to no-op.
+    {
+        use crate::core::action::Action;
+        use crate::solver::lifelong::AgentRestoreState;
+        let actions_per_agent: Vec<Vec<Action>> = snapshot
+            .agents
+            .iter()
+            .map(|s| s.planned_actions.iter().map(|&b| Action::from_u8(b)).collect())
+            .collect();
+        let restore_data: Vec<AgentRestoreState> = snapshot
+            .agents
+            .iter()
+            .zip(actions_per_agent.iter())
+            .map(|(s, actions)| AgentRestoreState {
+                index: s.index,
+                pos: s.pos,
+                goal: Some(s.goal),
+                task_leg: s.reconstruct_task_leg(),
+                planned_actions: actions.as_slice(),
+            })
+            .collect();
+        res.solver.restore_state(&restore_data);
+    }
+
     // Restore lifelong task count + completion_ticks window for correct throughput
     res.lifelong.restore_from_snapshot(
         snapshot.lifelong_tasks_completed,
@@ -428,6 +493,30 @@ fn restore_runner_state(
     runner.solver_mut().reset();
     if !snapshot.solver_priorities.is_empty() {
         runner.solver_mut().restore_priorities(&snapshot.solver_priorities);
+    }
+
+    // Rebuild solver-specific planning caches (see comment on the ECS path).
+    {
+        use crate::core::action::Action;
+        use crate::solver::lifelong::AgentRestoreState;
+        let actions_per_agent: Vec<Vec<Action>> = snapshot
+            .agents
+            .iter()
+            .map(|s| s.planned_actions.iter().map(|&b| Action::from_u8(b)).collect())
+            .collect();
+        let restore_data: Vec<AgentRestoreState> = snapshot
+            .agents
+            .iter()
+            .zip(actions_per_agent.iter())
+            .map(|(s, actions)| AgentRestoreState {
+                index: s.index,
+                pos: s.pos,
+                goal: Some(s.goal),
+                task_leg: s.reconstruct_task_leg(),
+                planned_actions: actions.as_slice(),
+            })
+            .collect();
+        runner.solver_mut().restore_state(&restore_data);
     }
 
     // Completion state
@@ -580,12 +669,16 @@ pub fn replay_manual_faults(
 
 /// Processes manual fault commands. Runs in Update (works when Paused).
 /// Applies faults to both ECS (immediate visual) and runner (persistence).
+///
+/// `FaultEvent`s are buffered in `PendingManualFaults` here and emitted in
+/// `FixedUpdate` by `drain_pending_manual_faults` so the cascade BFS reader
+/// picks them up on the same schedule.
 #[cfg(not(any(test, feature = "headless")))]
 #[allow(clippy::too_many_arguments)]
 pub fn process_manual_faults(
     mut commands: Commands,
     mut manual_cmds: MessageReader<ManualFaultCommand>,
-    mut fault_events: MessageWriter<FaultEvent>,
+    mut pending_faults: ResMut<PendingManualFaults>,
     agent_registry: Res<AgentRegistry>,
     agents_query: Query<&LogicalAgent>,
     mut grid: ResMut<GridMap>,
@@ -668,7 +761,7 @@ pub fn process_manual_faults(
                     };
                     commands.entity(entity).insert(Dead);
                     grid.set_obstacle(pos);
-                    fault_events.write(FaultEvent {
+                    pending_faults.events.push(FaultEvent {
                         entity,
                         fault_type: FaultType::Breakdown,
                         source,
@@ -762,7 +855,7 @@ pub fn process_manual_faults(
                     commands.entity(entity).insert(LatencyFault { remaining: dur });
                     if let Ok(agent) = agents_query.get(entity) {
                         let pos = agent.current_pos;
-                        fault_events.write(FaultEvent {
+                        pending_faults.events.push(FaultEvent {
                             entity,
                             fault_type: FaultType::Latency,
                             source,

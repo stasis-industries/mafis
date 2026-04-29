@@ -3573,14 +3573,15 @@ body[data-phase="results"] #panel-right > .view-results-wrapper {
     border-color: var(--state-moving);
 }
 
-/* Results verdict label + dots color — mirrors the 3D banner verdict colors */
-.results-verdict-row[data-verdict="resilient"] .results-verdict-label,
-.results-verdict-row[data-verdict="resilient"] .dot.filled { color: rgb(45, 200, 60); background: rgb(45, 200, 60); border-color: rgb(45, 200, 60); }
+/* Results verdict label color — text only, no background */
+.results-verdict-row[data-verdict="resilient"] .results-verdict-label { color: rgb(45, 200, 60); }
 .results-verdict-row[data-verdict="moderate"]  .results-verdict-label { color: rgb(200, 185, 0); }
-.results-verdict-row[data-verdict="moderate"]  .dot.filled { background: rgb(200, 185, 0); border-color: rgb(200, 185, 0); }
 .results-verdict-row[data-verdict="degraded"]  .results-verdict-label { color: rgb(230, 140, 0); }
-.results-verdict-row[data-verdict="degraded"]  .dot.filled { background: rgb(230, 140, 0); border-color: rgb(230, 140, 0); }
 .results-verdict-row[data-verdict="fragile"]   .results-verdict-label { color: rgb(230, 44, 2);  }
+/* Results verdict dots — background fill */
+.results-verdict-row[data-verdict="resilient"] .dot.filled { background: rgb(45, 200, 60); border-color: rgb(45, 200, 60); }
+.results-verdict-row[data-verdict="moderate"]  .dot.filled { background: rgb(200, 185, 0); border-color: rgb(200, 185, 0); }
+.results-verdict-row[data-verdict="degraded"]  .dot.filled { background: rgb(230, 140, 0); border-color: rgb(230, 140, 0); }
 .results-verdict-row[data-verdict="fragile"]   .dot.filled { background: rgb(230, 44, 2);  border-color: rgb(230, 44, 2);  }
 
 /* Summary table */

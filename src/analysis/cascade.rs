@@ -253,6 +253,21 @@ pub fn structural_cascade_at(
     dead_cell: IVec2,
     agents: &[SimAgent],
 ) -> StructuralCascade {
+    // The betweenness identity `d_X(s) + d_X(t) == d_direct` only holds when
+    // `dead_cell` is walkable in the graph used for all three BFS computations.
+    // For permanent faults the runner already calls `grid.set_obstacle(dead_cell)`
+    // before this function runs (see runner/mod.rs), so we work on a clone with
+    // the obstacle cleared. For latency/intermittent/zone faults the cell stays
+    // walkable, so we borrow without cloning.
+    let working_grid: std::borrow::Cow<'_, GridMap> = if grid.is_obstacle(dead_cell) {
+        let mut g = grid.clone();
+        g.remove_obstacle(dead_cell);
+        std::borrow::Cow::Owned(g)
+    } else {
+        std::borrow::Cow::Borrowed(grid)
+    };
+    let grid: &GridMap = &working_grid;
+
     let d_x = bfs_distances_from(grid, dead_cell);
 
     let mut disrupted = 0u32;
@@ -293,7 +308,7 @@ pub fn structural_cascade_at(
 /// cells get distance 1 (this matters when the dead cell itself is now an
 /// obstacle but we still want to measure routes adjacent to it).
 fn bfs_distances_from(grid: &GridMap, source: IVec2) -> HashMap<IVec2, u32> {
-    let mut dist: HashMap<IVec2, u32> = HashMap::new();
+    let mut dist: HashMap<IVec2, u32> = HashMap::with_capacity((grid.width * grid.height) as usize);
     let mut queue: VecDeque<(IVec2, u32)> = VecDeque::new();
     dist.insert(source, 0);
     queue.push_back((source, 0));
@@ -316,7 +331,7 @@ fn bfs_shortest_distance(grid: &GridMap, source: IVec2, target: IVec2) -> Option
     if source == target {
         return Some(0);
     }
-    let mut visited: HashSet<IVec2> = HashSet::new();
+    let mut visited: HashSet<IVec2> = HashSet::with_capacity((grid.width * grid.height) as usize);
     let mut queue: VecDeque<(IVec2, u32)> = VecDeque::new();
     visited.insert(source);
     queue.push_back((source, 0));
@@ -546,6 +561,25 @@ mod tests {
         let r = structural_cascade_at(&grid, IVec2::new(2, 0), &agents);
         assert_eq!(r.agents_disrupted, 1, "agent on unique corridor must be flagged");
         assert_eq!(r.max_distance, 2, "dead cell is 2 steps from agent.pos");
+    }
+
+    /// Regression for the post-fault grid bug: the runner mutates the grid
+    /// (`set_obstacle(dead_cell)`) before this analysis runs for permanent
+    /// faults. The betweenness identity must still hold by reconstructing a
+    /// pre-fault view internally.
+    #[test]
+    fn structural_cascade_post_fault_grid_corridor_one_agent() {
+        // Same scenario as above, but the dead cell is already an obstacle —
+        // matching the production state for Breakdown / Wear / Burst faults.
+        let mut grid = GridMap::new(5, 1);
+        grid.set_obstacle(IVec2::new(2, 0));
+        let agents = vec![agent_at(IVec2::new(0, 0), IVec2::new(4, 0))];
+        let r = structural_cascade_at(&grid, IVec2::new(2, 0), &agents);
+        assert_eq!(
+            r.agents_disrupted, 1,
+            "post-fault grid: agent on unique corridor must still be flagged"
+        );
+        assert_eq!(r.max_distance, 2);
     }
 
     #[test]

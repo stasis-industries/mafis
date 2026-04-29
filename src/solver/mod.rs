@@ -29,6 +29,23 @@ use self::pibt::{PibtLifelongSolver, default_active_solver};
 use self::rhcr::{RhcrConfig, RhcrSolver};
 use self::token::TokenPassingSolver;
 
+/// Ablation override for RHCR-PBS `RhcrConfig`, applied after auto-computation.
+///
+/// Defined at the `solver` module level (not inside `rhcr/`) so it's available
+/// to wasm builds too — wasm can't instantiate RHCR but experiment-config code
+/// shared across platforms still needs to pass the type around. Non-RHCR
+/// solvers + wasm targets silently ignore it.
+///
+/// Fields left `None` keep the `RhcrConfig::auto()` default for that field.
+#[derive(Debug, Clone, Default)]
+pub struct RhcrConfigOverride {
+    /// Planning horizon (Li 2021 uses `w`). Clamped to
+    /// `[RHCR_MIN_HORIZON, RHCR_MAX_HORIZON]`.
+    pub horizon: Option<usize>,
+    /// Multiplier on `num_agents` for PBS node limit. Default is 3.
+    pub node_limit_mult: Option<usize>,
+}
+
 // ---------------------------------------------------------------------------
 // Solver registry
 // ---------------------------------------------------------------------------
@@ -65,14 +82,30 @@ pub const SOLVER_NAMES: &[(&str, &str)] = &[
 /// don't need touching; for tests the first-tick stall is invisible.
 pub fn lifelong_solver_from_name(
     name: &str,
+    grid_area: usize,
+    num_agents: usize,
+) -> Option<Box<dyn LifelongSolver>> {
+    lifelong_solver_from_name_with_override(name, grid_area, num_agents, None)
+}
+
+/// Like [`lifelong_solver_from_name`] but honors an optional
+/// [`RhcrConfigOverride`] for RHCR-PBS (horizon × PBS node-limit multiplier).
+/// Non-RHCR solvers ignore the override. Used by the experiment runner to
+/// sweep ablation axes.
+pub fn lifelong_solver_from_name_with_override(
+    name: &str,
     #[cfg_attr(target_arch = "wasm32", allow(unused_variables))] grid_area: usize,
     #[cfg_attr(target_arch = "wasm32", allow(unused_variables))] num_agents: usize,
+    #[cfg_attr(target_arch = "wasm32", allow(unused_variables))] rhcr_override: Option<
+        &RhcrConfigOverride,
+    >,
 ) -> Option<Box<dyn LifelongSolver>> {
     match name {
         "pibt" => Some(Box::new(PibtLifelongSolver::new())),
         #[cfg(not(target_arch = "wasm32"))]
         "rhcr_pbs" => {
-            let cfg = RhcrConfig::auto(grid_area, num_agents);
+            let cfg =
+                RhcrConfig::auto(grid_area, num_agents).with_override(rhcr_override, num_agents);
             Some(Box::new(RhcrSolver::new(cfg)))
         }
         "token_passing" => Some(Box::new(TokenPassingSolver::new())),
@@ -80,14 +113,12 @@ pub fn lifelong_solver_from_name(
     }
 }
 
-/// Create a LifelongSolver by name with **pre-sized scratch buffers** for
-/// solvers that benefit from knowing the grid dimensions at construction.
-///
-/// For RHCR specifically, this pre-allocates the `FlatConstraintIndex` /
-/// `SeqGoalGrid` / `FlatCAT` slabs (~3 MB at 1000 cells × 20 horizon) so the
-/// first `plan_window` call doesn't trigger an allocation spike on the WASM
-/// main thread. Other solvers ignore the grid dimensions (they don't
-/// pre-allocate from grid dims).
+/// Create a LifelongSolver by name. Currently only RHCR-PBS uses the grid
+/// dimensions: it pre-allocates the `FlatConstraintIndex` / `SeqGoalGrid` /
+/// `FlatCAT` slabs (~3 MB at 1000 cells × 20 horizon) so the first
+/// `plan_window` call doesn't trigger an allocation spike on the WASM main
+/// thread. PIBT and Token Passing ignore the grid dimensions — for them this
+/// factory is identical to [`lifelong_solver_from_name`].
 ///
 /// Production callers (`SetSolver` bridge command, `begin_loading` system)
 /// should use this entry point. Tests and the headless experiment runner can
@@ -153,6 +184,35 @@ mod factory_tests {
     fn solver_names_has_three_entries() {
         // Native: pibt, rhcr_pbs, token_passing
         assert_eq!(SOLVER_NAMES.len(), 3);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn rhcr_override_applied() {
+        // Build an RHCR solver through the override factory, then downcast
+        // via the direct RhcrSolver path to verify the override landed.
+        let num_agents = 50;
+        let cfg = rhcr::RhcrConfig::auto(1000, num_agents).with_override(
+            Some(&RhcrConfigOverride { horizon: Some(5), node_limit_mult: Some(6) }),
+            num_agents,
+        );
+        assert_eq!(cfg.horizon, 5, "override should force horizon=5");
+        assert_eq!(
+            cfg.pbs_node_limit,
+            num_agents * 6,
+            "override should force pbs_node_limit = num_agents * 6"
+        );
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn rhcr_override_none_keeps_auto() {
+        // Empty override must not change the auto-computed config.
+        let cfg_auto = rhcr::RhcrConfig::auto(1000, 50);
+        let cfg_with = rhcr::RhcrConfig::auto(1000, 50)
+            .with_override(Some(&RhcrConfigOverride::default()), 50);
+        assert_eq!(cfg_auto.horizon, cfg_with.horizon);
+        assert_eq!(cfg_auto.pbs_node_limit, cfg_with.pbs_node_limit);
     }
 
     #[cfg(target_arch = "wasm32")]

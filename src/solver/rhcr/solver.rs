@@ -28,6 +28,15 @@
 //! present in the canonical paper, and have been archived on
 //! `archive/cut-solvers`. Only PBS remains, matching Li et al.'s default
 //! configuration.
+//!
+//! KNOWN DEVIATION: `fill_goal_sequences` builds its task chain via a local
+//! zero-sized `RandomScheduler` instead of the active scheduler. The
+//! `LifelongSolver::step` signature is locked outside this stream's editable
+//! scope and does not thread `&dyn TaskScheduler` through. Using
+//! `RandomScheduler` is zero-cost (statically dispatched) and gives the same
+//! pickup/delivery alternation as the canonical reference. A future stream
+//! can plumb the active scheduler through `SolverContext` so the locality-
+//! aware `ClosestFirstScheduler::peek_task_chain` can be used here.
 
 use bevy::prelude::*;
 use smallvec::smallvec;
@@ -66,9 +75,8 @@ impl RhcrConfig {
     pub fn auto(grid_area: usize, num_agents: usize) -> Self {
         let density = if grid_area > 0 { num_agents as f32 / grid_area as f32 } else { 0.0 };
 
-        // PBS tree search is exponential — keep horizon small.
-        let mode_max_h = 15;
-
+        // PBS tree search is exponential — keep horizon small (see
+        // `RHCR_PBS_MAX_HORIZON` in `constants.rs`).
         // H: scale with grid size, but cap by density and mode
         let base_h = (grid_area as f32).sqrt().ceil() as usize;
         let h = if density > 0.15 {
@@ -76,7 +84,7 @@ impl RhcrConfig {
         } else if density > 0.05 {
             base_h.min(15)
         } else {
-            base_h.min(mode_max_h)
+            base_h.min(constants::RHCR_PBS_MAX_HORIZON)
         };
         let h = h.clamp(constants::RHCR_MIN_HORIZON, constants::RHCR_MAX_HORIZON);
 
@@ -93,6 +101,25 @@ impl RhcrConfig {
         let pbs_node_limit = (num_agents * 3).clamp(50, constants::PBS_MAX_NODE_LIMIT);
 
         Self { horizon: h, replan_interval: w, pbs_node_limit }
+    }
+}
+
+impl RhcrConfig {
+    /// Apply an optional ablation override on top of the auto-computed config.
+    pub fn with_override(
+        mut self,
+        ov: Option<&crate::solver::RhcrConfigOverride>,
+        num_agents: usize,
+    ) -> Self {
+        if let Some(o) = ov {
+            if let Some(h) = o.horizon {
+                self.horizon = h.clamp(constants::RHCR_MIN_HORIZON, constants::RHCR_MAX_HORIZON);
+            }
+            if let Some(m) = o.node_limit_mult {
+                self.pbs_node_limit = (num_agents * m).clamp(50, constants::PBS_MAX_NODE_LIMIT);
+            }
+        }
+        self
     }
 }
 
@@ -131,6 +158,13 @@ pub struct RhcrSolver {
     scratch_window_agents: Vec<WindowAgent>,
     scratch_initial_plans: Vec<Option<Vec<Action>>>,
     scratch_start_constraints: Vec<(IVec2, u64)>,
+    /// Total number of times `plan_window` was invoked during this run.
+    /// Incremented before each call; reset on `reset()`.
+    pbs_total_replans: usize,
+    /// Count of windows that returned `WindowResult::Partial` (fell into
+    /// LRA + PIBT fallback). Used to compute `pbs_partial_rate` as an
+    /// observatory probe for PBS scalability cliffs.
+    pbs_partial_count: usize,
 }
 
 impl RhcrSolver {
@@ -155,6 +189,8 @@ impl RhcrSolver {
             scratch_window_agents: Vec::new(),
             scratch_initial_plans: Vec::new(),
             scratch_start_constraints: Vec::new(),
+            pbs_total_replans: 0,
+            pbs_partial_count: 0,
         }
     }
 
@@ -188,6 +224,8 @@ impl RhcrSolver {
             scratch_window_agents: Vec::new(),
             scratch_initial_plans: Vec::new(),
             scratch_start_constraints: Vec::new(),
+            pbs_total_replans: 0,
+            pbs_partial_count: 0,
         }
     }
 
@@ -207,17 +245,10 @@ impl RhcrSolver {
     /// is far from `agent.pos` get a chain — sequential A* in `plan_agent`
     /// uses the chain to make horizon-bounded best-effort progress. The
     /// previous early-skip was the root cause of PBS's chronic NoSolution
-    /// failures on warehouse_single_dock (PAAMS 2026 fix).
+    /// failures on warehouse_single_dock.
     ///
-    /// **Scheduler instance**: this routine constructs a local
-    /// `RandomScheduler` instead of accepting a `&dyn TaskScheduler` from the
-    /// runner. The constraint is that `RhcrSolver::step()` is reached via the
-    /// `LifelongSolver` trait, whose signature is locked outside this stream's
-    /// editable scope. Using a unit-struct `RandomScheduler` is zero-cost
-    /// (the trait method dispatches statically) and gives the same alternation
-    /// semantics as the canonical reference. A future stream may plumb the
-    /// active scheduler reference through `SolverContext` so the locality-
-    /// aware `ClosestFirstScheduler::peek_task_chain` can be used instead.
+    /// See module-level `KNOWN DEVIATION` note for the local `RandomScheduler`
+    /// rationale.
     fn fill_goal_sequences(
         window_agents: &mut [WindowAgent],
         agent_states: &[AgentState],
@@ -566,6 +597,8 @@ impl LifelongSolver for RhcrSolver {
         self.scratch_window_agents.clear();
         self.scratch_initial_plans.clear();
         self.scratch_start_constraints.clear();
+        self.pbs_total_replans = 0;
+        self.pbs_partial_count = 0;
     }
 
     fn save_priorities(&self) -> Vec<f32> {
@@ -648,7 +681,7 @@ impl LifelongSolver for RhcrSolver {
 
         // Fill goal sequences (reference: KivaSystem::update_goal_locations).
         // No `dist_to_goal >= horizon` skip — see `fill_goal_sequences` doc
-        // comment for the rationale (PAAMS 2026 PBS throughput fix).
+        // comment for the rationale (PBS throughput fix).
         Self::fill_goal_sequences(
             &mut self.scratch_window_agents,
             agents,
@@ -719,6 +752,7 @@ impl LifelongSolver for RhcrSolver {
         // through so PBS can populate it with the augmented goal set
         // (primary + peek-chain) once and reuse those distance maps across
         // every branch of the PBS DFS — no per-window allocation churn.
+        self.pbs_total_replans += 1;
         let result = self.planner.plan_window(&window_ctx, distance_cache, rng);
 
         match result {
@@ -728,6 +762,7 @@ impl LifelongSolver for RhcrSolver {
                 }
             }
             WindowResult::Partial { solved, failed } => {
+                self.pbs_partial_count += 1;
                 // PBS uses per-agent LRA fallback: combine solved multi-step plans
                 // with single-Wait stubs for failed agents, then resolve
                 // conflicts timestep-by-timestep. This preserves plan structure
@@ -787,6 +822,14 @@ impl LifelongSolver for RhcrSolver {
         }
 
         StepResult::Replan(&self.plan_buffer)
+    }
+
+    fn pbs_partial_rate(&self) -> Option<f32> {
+        if self.pbs_total_replans == 0 {
+            None
+        } else {
+            Some(self.pbs_partial_count as f32 / self.pbs_total_replans as f32)
+        }
     }
 }
 
@@ -856,6 +899,71 @@ mod tests {
         }];
         let result = solver.step(&ctx, &agents_at_4, &mut cache, &mut rng);
         assert!(matches!(result, StepResult::Replan(_)));
+    }
+
+    #[test]
+    fn pbs_partial_rate_none_before_any_step() {
+        // Fresh solver has never called plan_window — rate must be None,
+        // not Some(0.0), so downstream code can distinguish "no data" from
+        // "zero partials over N windows".
+        let cfg = RhcrConfig { horizon: 10, replan_interval: 5, pbs_node_limit: 100 };
+        let solver = RhcrSolver::new(cfg);
+        assert_eq!(solver.pbs_partial_rate(), None);
+    }
+
+    #[test]
+    fn pbs_partial_rate_after_step_is_some_in_range() {
+        // After at least one step() that triggered a replan, the counter
+        // advances and the rate is Some(x) with x ∈ [0.0, 1.0].
+        let grid = GridMap::new(5, 5);
+        let zones = test_zones();
+        let cfg = RhcrConfig { horizon: 10, replan_interval: 1, pbs_node_limit: 500 };
+        let mut solver = RhcrSolver::new(cfg);
+        let mut cache = DistanceMapCache::default();
+        let mut rng = SeededRng::new(42);
+        let agents = vec![AgentState {
+            index: 0,
+            pos: IVec2::ZERO,
+            goal: Some(IVec2::new(4, 4)),
+            has_plan: false,
+            task_leg: TaskLeg::Free,
+        }];
+        let ctx = SolverContext { grid: &grid, zones: &zones, tick: 0, num_agents: 1 };
+
+        let _ = solver.step(&ctx, &agents, &mut cache, &mut rng);
+
+        match solver.pbs_partial_rate() {
+            Some(r) => {
+                assert!(r.is_finite(), "rate must be finite");
+                assert!((0.0..=1.0).contains(&r), "rate {} out of [0,1]", r);
+            }
+            None => panic!("expected Some(rate) after at least one replan"),
+        }
+    }
+
+    #[test]
+    fn pbs_partial_rate_reset_clears_counters() {
+        // reset() must zero both counters so rate returns to None.
+        let grid = GridMap::new(5, 5);
+        let zones = test_zones();
+        let cfg = RhcrConfig { horizon: 10, replan_interval: 1, pbs_node_limit: 500 };
+        let mut solver = RhcrSolver::new(cfg);
+        let mut cache = DistanceMapCache::default();
+        let mut rng = SeededRng::new(42);
+        let agents = vec![AgentState {
+            index: 0,
+            pos: IVec2::ZERO,
+            goal: Some(IVec2::new(4, 4)),
+            has_plan: false,
+            task_leg: TaskLeg::Free,
+        }];
+        let ctx = SolverContext { grid: &grid, zones: &zones, tick: 0, num_agents: 1 };
+
+        let _ = solver.step(&ctx, &agents, &mut cache, &mut rng);
+        assert!(solver.pbs_partial_rate().is_some(), "must have rate after step");
+
+        solver.reset();
+        assert_eq!(solver.pbs_partial_rate(), None, "reset must clear counters");
     }
 
     #[test]
@@ -1100,7 +1208,7 @@ mod tests {
     /// minor implementation drift doesn't break the test, but a regression that
     /// drops PBS to all-Wait or all-fallback behavior would trip it.
     ///
-    /// Measured baseline 2026-04-08 (post PAAMS 2026 RHCR-PBS fidelity port):
+    /// Measured baseline (post RHCR-PBS fidelity port):
     /// tp = 0.435 tasks/tick on warehouse_single_dock, 40 agents, random scheduler,
     /// 200 ticks. This is a 10× jump from the pre-port `0.040` baseline; the
     /// fix was the eager-mode + peek-chain + best-effort sequential-A* port
@@ -1131,6 +1239,7 @@ mod tests {
             seed: 42,
             tick_count: 200,
             custom_map: None,
+            rhcr_override: None,
         };
         let result = run_single_experiment(&config);
         let tp = result.baseline_metrics.avg_throughput;

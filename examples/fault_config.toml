@@ -1,0 +1,111 @@
+# MAFIS fault scenario configuration
+#
+# Usage:
+#   mafis fault run --fault-config examples/fault_config.toml
+#   mafis fault validate --fault-config examples/fault_config.toml
+#
+# Select one [scenario] block by uncommenting it (and commenting out the others).
+# All [experiment] fields are shared across all scenario types.
+#
+# Scenario types:
+#   burst_failure    -- kill X% of robots at a specific tick (permanent)
+#   wear_based       -- Weibull wear model: busiest robots fail over time (permanent)
+#   zone_outage      -- latency on all robots in a spatial strip for N ticks (temporary)
+#   intermittent_fault -- per-robot recurring latency via exponential inter-arrival (temporary)
+#
+# Aliases accepted for `type`:
+#   burst_20pct, burst_50pct  -> burst_failure
+#   wear_medium, wear_high    -> wear_based
+#   zone_50t                  -> zone_outage
+#   intermittent              -> intermittent_fault
+
+# ---------------------------------------------------------------------------
+# Scenario 1: burst_20pct
+# Kill 20% of robots at tick 100. Models a sudden catastrophic event
+# (power surge, network partition, software crash).
+# ---------------------------------------------------------------------------
+[scenario]
+type               = "burst_failure"
+burst_kill_percent = 20.0
+burst_at_tick      = 100
+
+# ---------------------------------------------------------------------------
+# Scenario 2: burst_50pct
+# Uncomment this block (and comment out the one above) for a 50% burst.
+# ---------------------------------------------------------------------------
+# [scenario]
+# type               = "burst_failure"
+# burst_kill_percent = 50.0
+# burst_at_tick      = 100
+
+# ---------------------------------------------------------------------------
+# Scenario 3: wear_medium
+# Weibull wear model, medium intensity (beta=2.5, eta=500).
+# ~63% of fleet fails by tick 500. Models typical industrial AGV deployment.
+# ---------------------------------------------------------------------------
+# [scenario]
+# type           = "wear_based"
+# wear_heat_rate = "medium"   # low | medium | high
+
+# ---------------------------------------------------------------------------
+# Scenario 4: wear_high
+# Weibull wear model, high intensity (beta=3.5, eta=150).
+# ~90% of fleet fails by tick 500. Models Carlson & Murphy 2005 field robots.
+# ---------------------------------------------------------------------------
+# [scenario]
+# type           = "wear_based"
+# wear_heat_rate = "high"
+
+# Optional: override Weibull preset with custom (beta, eta).
+# Both must be set or both must be absent.
+# weibull_beta = 3.5
+# weibull_eta  = 150.0
+
+# ---------------------------------------------------------------------------
+# Scenario 5: zone_50t
+# Latency on all robots in a randomly-selected vertical strip for 50 ticks.
+# Models a localised infrastructure failure (blocked aisle, sensor outage).
+# ---------------------------------------------------------------------------
+# [scenario]
+# type                   = "zone_outage"
+# zone_at_tick           = 100
+# zone_latency_duration  = 50
+
+# ---------------------------------------------------------------------------
+# Scenario 6: intermittent
+# Per-robot recurring latency: exponential inter-arrival, 80-tick MTBF,
+# 15-tick recovery per event. Models sensor recalibration, battery reconnect.
+# start_tick = 80 defers first fires by one MTBF for cross-seed comparability.
+# ---------------------------------------------------------------------------
+# [scenario]
+# type                         = "intermittent_fault"
+# intermittent_mtbf_ticks      = 80
+# intermittent_recovery_ticks  = 15
+# intermittent_start_tick      = 80
+
+# ---------------------------------------------------------------------------
+# Experiment parameters (shared by all scenario types)
+# ---------------------------------------------------------------------------
+[experiment]
+
+# Solver algorithm: pibt | rhcr_pbs | token_passing
+solver = "pibt"
+
+# Topology name (must match a JSON file in topologies/).
+# Available: warehouse_medium, warehouse_single_dock, compact_grid,
+#            warehouse_dual_dock, sorting_center, fullfilment_center
+topology = "warehouse_single_dock"
+
+# Task scheduler: random | closest
+scheduler = "random"
+
+# Number of agents. Must match the topology's required agent count
+# (defined in the topology JSON as "number_agents").
+num_agents = 40
+
+# Simulation length in ticks. 500 ticks ~ 100 tasks at steady state.
+tick_count = 500
+
+# Seeds to run. Each seed produces one baseline + one faulted run.
+# More seeds = tighter 95% confidence intervals (30 is standard for paper).
+seeds = [42, 123, 456, 789, 1024]

@@ -1,15 +1,15 @@
-//! Integration tests for paper experiments.
+//! Integration tests for the headline experiment suite.
 //!
-//! Run the full paper matrix:
-//!   cargo test --release full_paper_matrix -- --ignored --nocapture
+//! Run the full matrix:
+//!   cargo test --release full_legacy_matrix -- --ignored --nocapture
 //!
 //! Run the smoke test:
-//!   cargo test paper_smoke -- --nocapture
+//!   cargo test smoke -- --nocapture
 
 use mafis::experiment::ExperimentMatrix;
 use mafis::experiment::export;
-use mafis::experiment::paper;
 use mafis::experiment::runner::{MatrixResult, RunResult, run_matrix};
+use mafis::experiment::suite;
 use mafis::fault::scenario::{FaultScenario, FaultScenarioType, WearHeatRate};
 use std::fs;
 
@@ -21,8 +21,8 @@ fn ensure_output_dir() {
 
 /// Smoke test — 2 runs, ~1 second. Validates the pipeline end-to-end.
 #[test]
-fn paper_smoke() {
-    let matrix = paper::smoke_test();
+fn smoke() {
+    let matrix = suite::smoke_test();
     let result = run_matrix(&matrix, None);
 
     assert_eq!(result.runs.len(), 2);
@@ -38,16 +38,16 @@ fn paper_smoke() {
     assert_eq!(seed_42.len(), 1);
 }
 
-/// Full paper matrix — 300 runs across 5 experiments.
-/// Run with: cargo test --release full_paper_matrix -- --ignored --nocapture
+/// Full legacy matrix — 300 runs across 5 experiments.
+/// Run with: cargo test --release full_legacy_matrix -- --ignored --nocapture
 #[test]
 #[ignore]
-fn full_paper_matrix() {
+fn full_legacy_matrix() {
     ensure_output_dir();
 
-    let experiments = paper::all_paper_experiments();
+    let experiments = suite::all_legacy_experiments();
     let total_runs: usize = experiments.iter().map(|(_, m)| m.total_runs()).sum();
-    eprintln!("=== MAFIS Paper Experiments ===");
+    eprintln!("=== MAFIS Legacy Experiment Matrix ===");
     eprintln!("Total experiments: {}", experiments.len());
     eprintln!("Total runs: {total_runs}");
     eprintln!();
@@ -111,48 +111,48 @@ fn full_paper_matrix() {
 // ---------------------------------------------------------------------------
 
 /// Solver resilience — 75 runs.
-/// Run with: cargo test --release --test paper_experiments solver_resilience -- --ignored --nocapture
+/// Run with: cargo test --release --test experiment_suite solver_resilience -- --ignored --nocapture
 #[test]
 #[ignore]
 fn solver_resilience() {
     ensure_output_dir();
-    let matrix = paper::solver_resilience();
+    let matrix = suite::solver_resilience();
     eprintln!("─── solver_resilience ({} runs) ───", matrix.total_runs());
     let result = run_matrix(&matrix, None);
     write_experiment_results("solver_resilience", &result);
 }
 
 /// Scale sensitivity — 100 runs.
-/// Run with: cargo test --release --test paper_experiments scale_sensitivity -- --ignored --nocapture
+/// Run with: cargo test --release --test experiment_suite scale_sensitivity -- --ignored --nocapture
 #[test]
 #[ignore]
 fn scale_sensitivity() {
     ensure_output_dir();
-    let matrix = paper::scale_sensitivity();
+    let matrix = suite::scale_sensitivity();
     eprintln!("─── scale_sensitivity ({} runs) ───", matrix.total_runs());
     let result = run_matrix(&matrix, None);
     write_experiment_results("scale_sensitivity", &result);
 }
 
 /// Scheduler effect — 50 runs.
-/// Run with: cargo test --release --test paper_experiments scheduler_effect -- --ignored --nocapture
+/// Run with: cargo test --release --test experiment_suite scheduler_effect -- --ignored --nocapture
 #[test]
 #[ignore]
 fn scheduler_effect() {
     ensure_output_dir();
-    let matrix = paper::scheduler_effect();
+    let matrix = suite::scheduler_effect();
     eprintln!("─── scheduler_effect ({} runs) ───", matrix.total_runs());
     let result = run_matrix(&matrix, None);
     write_experiment_results("scheduler_effect", &result);
 }
 
 /// Topology medium — 25 runs.
-/// Run with: cargo test --release --test paper_experiments topology_medium -- --ignored --nocapture
+/// Run with: cargo test --release --test experiment_suite topology_medium -- --ignored --nocapture
 #[test]
 #[ignore]
 fn topology_medium() {
     ensure_output_dir();
-    let matrices = paper::topology_effect();
+    let matrices = suite::topology_effect();
     let matrix = &matrices[0]; // warehouse_single_dock
     eprintln!("─── topology_medium ({} runs) ───", matrix.total_runs());
     let result = run_matrix(matrix, None);
@@ -160,12 +160,12 @@ fn topology_medium() {
 }
 
 /// Topology large — 25 runs.
-/// Run with: cargo test --release --test paper_experiments topology_large -- --ignored --nocapture
+/// Run with: cargo test --release --test experiment_suite topology_large -- --ignored --nocapture
 #[test]
 #[ignore]
 fn topology_large() {
     ensure_output_dir();
-    let matrices = paper::topology_effect();
+    let matrices = suite::topology_effect();
     let matrix = &matrices[1]; // warehouse_dual_dock
     eprintln!("─── topology_large ({} runs) ───", matrix.total_runs());
     let result = run_matrix(matrix, None);
@@ -173,27 +173,27 @@ fn topology_large() {
 }
 
 /// Braess resilience — 6,000 runs (~60 min).
-/// Run with: cargo test --release --test paper_experiments braess_resilience -- --ignored --nocapture
+/// Run with: cargo test --release --test experiment_suite braess_resilience -- --ignored --nocapture
 #[test]
 #[ignore]
 fn braess_resilience() {
     ensure_output_dir();
-    let matrix = paper::braess_resilience();
+    let matrix = suite::braess_resilience();
     eprintln!("─── braess_resilience ({} runs) ───", matrix.total_runs());
     let result = run_matrix(&matrix, None);
     write_experiment_results("braess_resilience", &result);
 }
 
-/// PAAMS 2026 full experiment matrix — 7,920 runs (4 solvers × 6 scenarios × 3 topologies × 30 seeds).
-/// Run with: cargo test --release --test paper_experiments paams_full -- --ignored --nocapture
+/// Headline experiment matrix — 7,920 runs (4 solvers × 6 scenarios × 3 topologies × 30 seeds).
+/// Run with: cargo test --release --test experiment_suite full_experiment_suite -- --ignored --nocapture
 #[test]
 #[ignore]
-fn paams_full() {
+fn full_experiment_suite() {
     ensure_output_dir();
 
-    let experiments = paper::paams_experiments();
+    let experiments = suite::core_experiment_suite();
     let total_runs: usize = experiments.iter().map(|(_, m)| m.total_runs()).sum();
-    eprintln!("=== PAAMS 2026 Experiments ===");
+    eprintln!("=== Headline Experiment Suite ===");
     eprintln!("Total experiments: {}", experiments.len());
     eprintln!("Total runs: {total_runs}");
     eprintln!();
@@ -210,16 +210,16 @@ fn paams_full() {
     }
 
     let total_wall = overall_start.elapsed();
-    eprintln!("=== PAAMS experiments complete ===");
+    eprintln!("=== Experiment suite complete ===");
     eprintln!("Total runs: {}", all_runs.len());
     eprintln!("Total wall time: {:.1}s", total_wall.as_secs_f64());
     eprintln!("Avg per run: {:.0}ms", total_wall.as_millis() as f64 / all_runs.len() as f64);
 
     // Write combined output
     {
-        let mut f = fs::File::create(format!("{OUTPUT_DIR}/paams_all_runs.csv")).unwrap();
+        let mut f = fs::File::create(format!("{OUTPUT_DIR}/all_runs.csv")).unwrap();
         export::write_runs_csv(&mut f, &all_runs).unwrap();
-        eprintln!("Wrote {OUTPUT_DIR}/paams_all_runs.csv ({} rows)", all_runs.len() * 2);
+        eprintln!("Wrote {OUTPUT_DIR}/all_runs.csv ({} rows)", all_runs.len() * 2);
     }
 }
 
@@ -231,7 +231,7 @@ fn paams_full() {
 ///
 /// Run directly (for debugging):
 ///   MAFIS_FAULT_TYPE=burst_failure MAFIS_FAULT_SEEDS=42 \
-///   cargo test --test paper_experiments fault_from_env -- --nocapture
+///   cargo test --test experiment_suite fault_from_env -- --nocapture
 #[test]
 fn fault_from_env() {
     ensure_output_dir();
@@ -276,6 +276,7 @@ fn fault_from_env() {
         agent_counts: vec![num_agents],
         seeds: seeds.clone(),
         tick_count,
+        rhcr_overrides: vec![None],
     };
 
     let result = run_matrix(&matrix, None);

@@ -79,16 +79,6 @@ pub struct FaultConfig {
     pub intermittent_start_tick: u64,
 }
 
-impl FaultConfig {
-    /// Validate that the configuration is internally consistent.
-    /// Multi-fault lists may enable both weibull + intermittent — this is valid
-    /// because they use separate RNG consumption patterns (Weibull pre-samples
-    /// at init, intermittent samples per-tick from fault_rng).
-    pub fn validate(&self) {
-        // No assertions — all combinations are valid since multi-fault support.
-    }
-}
-
 impl Default for FaultConfig {
     fn default() -> Self {
         Self {

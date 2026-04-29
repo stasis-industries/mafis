@@ -6,8 +6,11 @@ use bevy::prelude::*;
 
 /// With the dual-twin model (headless baseline + fault simulation), there is
 /// no warmup phase. The simulation is always in the "running" phase.
-/// We keep FaultInjection as the single active phase for scorecard/metrics
-/// that gate on `is_fault_injection()`.
+/// Retained as a single-variant enum because several outside-of-scope modules
+/// (`ui/bridge/serialize.rs`, `ui/controls.rs`, `analysis/scorecard.rs`,
+/// `analysis/history.rs`, `testing/`) read `SimulationPhase` as a Bevy
+/// resource and call `is_fault_injection()` as their phase gate. Collapsing
+/// this to a constant would require a sweeping rename across that surface.
 #[derive(Resource, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SimulationPhase {
     #[default]

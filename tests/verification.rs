@@ -39,6 +39,7 @@ fn run(
         seed,
         tick_count: TICK_COUNT,
         custom_map: None,
+        rhcr_override: None,
     };
     run_single_experiment(&config)
 }
@@ -359,8 +360,8 @@ fn new_topologies_under_fault() {
         ("warehouse_dual_dock", 30),
         ("sorting_center", 15),
         ("compact_grid", 15),
-        ("warehouse_sd_w2", 30),
-        ("warehouse_sd_w3", 30),
+        ("warehouse_single_dock_w2", 30),
+        ("warehouse_single_dock_w3", 30),
     ] {
         let r = run("pibt", topology, "random", agents, Some(scenario.clone()), 42);
         assert!(r.baseline_metrics.total_tasks > 0, "{topology}: baseline produced no tasks");
@@ -838,6 +839,7 @@ fn all_schedulers_nonzero_throughput() {
             seed: 42,
             tick_count: 500,
             custom_map: None,
+            rhcr_override: None,
         };
         let r = run_single_experiment(&config);
         assert!(r.baseline_metrics.total_tasks > 0, "{sched}: zero tasks in 500 ticks");
@@ -945,6 +947,7 @@ fn wear_rate_ordering_invariant() {
             seed: 42,
             tick_count: 500,
             custom_map: None,
+            rhcr_override: None,
         };
         let r = run_single_experiment(&config);
         survivals.push(r.faulted_metrics.survival_rate);
@@ -1714,6 +1717,7 @@ fn solver_throughput_ordering_sanity() {
             seed: 42,
             tick_count,
             custom_map: None,
+            rhcr_override: None,
         };
         let r = run_single_experiment(&config);
         let tp = r.baseline_metrics.avg_throughput;
@@ -2019,6 +2023,270 @@ fn intermittent_first_fire_median() {
         ln2_mtbf + 20
     );
     eprintln!("  intermittent first-fire median={median} (theoretical ln(2)·{mtbf}={ln2_mtbf}) OK");
+}
+
+/// Regression test for the 2026-04-20 queue kick-back stranding bug.
+///
+/// User-visible symptom: agents displayed in the amber "picking" colour on
+/// the delivery-column corridor (cells in the `queue_x_range` below — the
+/// corridor between pickup cells at x=50 and delivery cells at x=55).
+///
+/// Pre-fix mechanism:
+///     (1) agent travels to queue cell, queue full on arrival.
+///     (2) kick-back at `queue/mod.rs:process_arrivals` sets
+///         `task_leg = Loading(pickup)`, `goal = pickup` while pos is still
+///         at the queue cell.
+///     (3) `recycle_goals_core` skips because pos != goal; `process_new_joins`
+///         requires pos == goal. Agent must walk 4-10 cells back to pickup
+///         before being re-queued — during which time the renderer paints
+///         it amber (Loading colour) in the x=51..54 corridor.
+///
+/// Post-fix: kick-back sets `goal = agent.pos`, so the agent is eligible
+/// for re-queuing on the very next tick without any backtrack. The max
+/// consecutive ticks ANY agent spends in `Loading(_)` while physically in
+/// the delivery-queue corridor should now be ≤2 (1 kick-back tick + at
+/// most 1 re-queue-latency tick).
+#[test]
+fn no_stuck_loading_on_delivery_corridor() {
+    use mafis::core::runner::SimulationRunner;
+    use mafis::core::task::TaskLeg;
+
+    let topo = ActiveTopology::from_name("warehouse_single_dock");
+    let output = topo.topology().generate(42);
+    let grid_area = (output.grid.width * output.grid.height) as usize;
+
+    let scheduler = ActiveScheduler::from_name("closest");
+    let queue_policy = ActiveQueuePolicy::from_name("closest");
+
+    // Moderate fleet — pressure on queues but not saturated. Single-dock
+    // has 11 delivery stations × ~4-slot queues = ~44 queue slots. 30
+    // agents produces frequent kick-back without queues remaining
+    // permanently full, so natural queue-wait time stays short and the
+    // residual corridor-Loading streak directly reflects the kick-back
+    // stranding.
+    let agent_count: usize = 30;
+    let mut rng_seed = SeededRng::new(42);
+    let agents = place_agents(agent_count, &output.grid, &output.zones, &mut rng_seed);
+    let rng_after_placement = rng_seed.clone();
+
+    let solver = mafis::solver::lifelong_solver_from_name("pibt", grid_area, agent_count)
+        .expect("pibt solver creation");
+    let mut runner = SimulationRunner::new(
+        output.grid,
+        output.zones,
+        agents,
+        solver,
+        rng_after_placement,
+        FaultConfig { enabled: false, ..Default::default() },
+        FaultSchedule::default(),
+    );
+
+    // Delivery corridor is x ∈ [51, 54]: between pickup cells at x=50 and
+    // delivery cells at x=55. An agent physically here in task_leg Loading
+    // is exactly the user-visible bug.
+    let in_corridor = |pos: IVec2| pos.x >= 51 && pos.x <= 54;
+
+    let mut streak_in_corridor: Vec<u64> = vec![0; agent_count];
+    let mut max_corridor_streak: Vec<u64> = vec![0; agent_count];
+    for _ in 1..=400u64 {
+        let _ = runner.tick(scheduler.scheduler(), queue_policy.policy());
+        for (i, a) in runner.agents.iter().enumerate() {
+            if matches!(a.task_leg, TaskLeg::Loading(_)) && in_corridor(a.pos) {
+                streak_in_corridor[i] += 1;
+                max_corridor_streak[i] = max_corridor_streak[i].max(streak_in_corridor[i]);
+            } else {
+                streak_in_corridor[i] = 0;
+            }
+        }
+    }
+    let worst = max_corridor_streak.iter().copied().max().unwrap_or(0);
+    // Ceiling 5: absorbs 1 kick-back tick + natural 1-4 tick queue-wait
+    // (while slots shuffle) at moderate overload. Pre-fix the forced
+    // backtrack-to-pickup added 4-10 corridor Loading ticks on top,
+    // routinely pushing the streak past 10. A regression that reintroduces
+    // the backtrack blows past 5 easily.
+    assert!(
+        worst <= 5,
+        "Max consecutive ticks with an agent in Loading state ON the \
+         delivery corridor (x=51..54) is {worst}; expected ≤5 post-fix. \
+         A higher value means the kick-back stranding is re-emerging.",
+    );
+}
+
+/// Diagnostic: matches the user-reported WASM scenario (SD-w2, Token Passing,
+/// 72 agents, closest scheduler) and dumps the worst 10 Loading streaks on
+/// the delivery corridor so we can distinguish (a) natural queue-wait,
+/// (b) kick-back residual, (c) unknown state-machine bug.
+#[test]
+#[ignore]
+fn diagnose_stuck_tp_sd_w2() {
+    use mafis::core::runner::SimulationRunner;
+    use mafis::core::task::TaskLeg;
+
+    let topo = ActiveTopology::from_name("warehouse_single_dock_w2");
+    let output = topo.topology().generate(42);
+    let grid_area = (output.grid.width * output.grid.height) as usize;
+    let scheduler = ActiveScheduler::from_name("closest");
+    let queue_policy = ActiveQueuePolicy::from_name("closest");
+    let agent_count: usize = 72;
+    let mut rng_seed = SeededRng::new(42);
+    let agents = place_agents(agent_count, &output.grid, &output.zones, &mut rng_seed);
+    let rng_after = rng_seed.clone();
+    let solver = mafis::solver::lifelong_solver_from_name("token_passing", grid_area, agent_count)
+        .expect("tp");
+    let mut runner = SimulationRunner::new(
+        output.grid.clone(),
+        output.zones.clone(),
+        agents,
+        solver,
+        rng_after,
+        FaultConfig { enabled: false, ..Default::default() },
+        FaultSchedule::default(),
+    );
+
+    // Delivery cells are at x=55 on SD-w2. Corridor = x∈[51,54]. Also track
+    // "at delivery column" = x ∈ [54, 55].
+    let in_corridor = |p: IVec2| p.x >= 51 && p.x <= 54;
+    let at_delivery = |p: IVec2| p.x >= 54;
+
+    let mut streak_corridor: Vec<u64> = vec![0; agent_count];
+    let mut max_corridor: Vec<u64> = vec![0; agent_count];
+    let mut streak_delivery: Vec<u64> = vec![0; agent_count];
+    let mut max_delivery: Vec<u64> = vec![0; agent_count];
+    let mut streak_any_loading: Vec<u64> = vec![0; agent_count];
+    let mut max_any_loading: Vec<u64> = vec![0; agent_count];
+
+    // "picking" visual colour = Loading OR TravelEmpty (both amber).
+    let is_amber =
+        |tl: &TaskLeg| matches!(tl, TaskLeg::Loading(_)) || matches!(tl, TaskLeg::TravelEmpty(_));
+    // Track per-agent total AMBER-at-delivery-column tick counts across
+    // the whole run — not just consecutive streaks — because a hot-cycling
+    // agent can look "stuck" even with 2-tick bursts if it keeps returning.
+    let mut total_amber_delivery: Vec<u64> = vec![0; agent_count];
+
+    for _t in 1..=500u64 {
+        let _ = runner.tick(scheduler.scheduler(), queue_policy.policy());
+        for (i, a) in runner.agents.iter().enumerate() {
+            let is_loading = matches!(a.task_leg, TaskLeg::Loading(_));
+            if is_loading {
+                streak_any_loading[i] += 1;
+                max_any_loading[i] = max_any_loading[i].max(streak_any_loading[i]);
+            } else {
+                streak_any_loading[i] = 0;
+            }
+            if is_loading && in_corridor(a.pos) {
+                streak_corridor[i] += 1;
+                max_corridor[i] = max_corridor[i].max(streak_corridor[i]);
+            } else {
+                streak_corridor[i] = 0;
+            }
+            if is_loading && at_delivery(a.pos) {
+                streak_delivery[i] += 1;
+                max_delivery[i] = max_delivery[i].max(streak_delivery[i]);
+            } else {
+                streak_delivery[i] = 0;
+            }
+            if is_amber(&a.task_leg) && a.pos.x >= 51 {
+                total_amber_delivery[i] += 1;
+            }
+        }
+    }
+
+    let w_any = *max_any_loading.iter().max().unwrap_or(&0);
+    let w_cor = *max_corridor.iter().max().unwrap_or(&0);
+    let w_del = *max_delivery.iter().max().unwrap_or(&0);
+    let total_agent_ticks = 500 * agent_count as u64;
+    let total_amber_sum: u64 = total_amber_delivery.iter().sum();
+    eprintln!("=== SD-w2 / TP / n=72 / 500 ticks — amber-at-delivery diagnostic ===");
+    eprintln!("  worst Loading streak anywhere    : {w_any}");
+    eprintln!("  worst Loading streak in corridor : {w_cor}  (x∈[51,54])");
+    eprintln!("  worst Loading streak at delivery : {w_del}  (x≥54)");
+    eprintln!(
+        "  total amber-ticks at delivery area (Loading|TravelEmpty with x≥51) : {total_amber_sum} / {total_agent_ticks}  ({:.2}%)",
+        100.0 * total_amber_sum as f64 / total_agent_ticks as f64
+    );
+    let worst_total = *total_amber_delivery.iter().max().unwrap_or(&0);
+    let avg_total = total_amber_sum as f64 / agent_count as f64;
+    eprintln!("  worst per-agent amber-ticks at delivery : {worst_total}");
+    eprintln!("  avg per-agent amber-ticks at delivery   : {avg_total:.1}");
+
+    // --- Movement / freeze diagnostic: same scenario at user's exact n=85
+    // and 800 ticks to catch post-200 freeze pattern --------------------
+    eprintln!("\n=== SD-w2 / TP / n=85 / 800 ticks — FREEZE diagnostic ===");
+    let topo2 = ActiveTopology::from_name("warehouse_single_dock_w2");
+    let output2 = topo2.topology().generate(42);
+    let grid_area2 = (output2.grid.width * output2.grid.height) as usize;
+    let n2: usize = 85;
+    let mut rng_seed2 = SeededRng::new(42);
+    let agents2 = place_agents(n2, &output2.grid, &output2.zones, &mut rng_seed2);
+    let rng_after2 = rng_seed2.clone();
+    let solver2 =
+        mafis::solver::lifelong_solver_from_name("token_passing", grid_area2, n2).expect("tp");
+    let mut runner2 = SimulationRunner::new(
+        output2.grid.clone(),
+        output2.zones.clone(),
+        agents2,
+        solver2,
+        rng_after2,
+        FaultConfig { enabled: false, ..Default::default() },
+        FaultSchedule::default(),
+    );
+
+    let mut prev_pos: Vec<IVec2> = runner2.agents.iter().map(|a| a.pos).collect();
+    let mut motionless_streak: Vec<u64> = vec![0; n2];
+    let mut max_motionless: Vec<u64> = vec![0; n2];
+    let mut tasks_over_time: Vec<u64> = Vec::new();
+
+    for _t in 1..=800u64 {
+        let r = runner2.tick(scheduler.scheduler(), queue_policy.policy());
+        tasks_over_time.push(r.tasks_completed);
+        for (i, a) in runner2.agents.iter().enumerate() {
+            if a.pos == prev_pos[i] {
+                motionless_streak[i] += 1;
+                max_motionless[i] = max_motionless[i].max(motionless_streak[i]);
+            } else {
+                motionless_streak[i] = 0;
+            }
+            prev_pos[i] = a.pos;
+        }
+    }
+
+    let w_frozen = *max_motionless.iter().max().unwrap_or(&0);
+    let frozen_count_200 = motionless_streak.iter().filter(|&&s| s >= 200).count();
+    let final_tasks = *tasks_over_time.last().unwrap_or(&0);
+    let tasks_first_200 = tasks_over_time.get(199).copied().unwrap_or(0);
+    let tasks_last_600 = final_tasks.saturating_sub(tasks_first_200);
+    eprintln!("  worst motionless streak : {w_frozen} ticks");
+    eprintln!("  agents motionless ≥ 200 ticks at end of run : {frozen_count_200} / {n2}");
+    eprintln!("  tasks completed in first 200 ticks  : {tasks_first_200}");
+    eprintln!("  tasks completed in last 600 ticks   : {tasks_last_600}");
+    eprintln!(
+        "  throughput collapse ratio (last-600 avg / first-200 avg) : {:.2}x",
+        (tasks_last_600 as f64 / 600.0) / (tasks_first_200 as f64 / 200.0).max(1e-9)
+    );
+    // Dump top 10 most-frozen agents
+    let mut idx2: Vec<usize> = (0..n2).collect();
+    idx2.sort_by_key(|&i| std::cmp::Reverse(max_motionless[i]));
+    eprintln!("  top 10 most-frozen agents:");
+    for i in idx2.iter().take(10) {
+        let a = &runner2.agents[*i];
+        eprintln!(
+            "    agent={} max_motionless={} final pos={:?} goal={:?} task_leg={:?}",
+            i, max_motionless[*i], a.pos, a.goal, a.task_leg
+        );
+    }
+
+    // Dump top 10 offenders
+    let mut idx: Vec<usize> = (0..agent_count).collect();
+    idx.sort_by_key(|&i| std::cmp::Reverse(max_any_loading[i]));
+    eprintln!("  top 10 Loading streaks:");
+    for i in idx.iter().take(10) {
+        let a = &runner.agents[*i];
+        eprintln!(
+            "    agent={} max_any={} max_corridor={} final pos={:?} goal={:?} task_leg={:?}",
+            i, max_any_loading[*i], max_corridor[*i], a.pos, a.goal, a.task_leg
+        );
+    }
 }
 
 /// Rewind determinism: run to T, reset to T/2 (restoring next_fault_tick),

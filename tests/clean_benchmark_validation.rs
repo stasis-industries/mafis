@@ -2,7 +2,7 @@
 //!
 //! Locks in the literature ranking expectations on no-fault baseline runs.
 //! If a port introduces a regression that violates the expected ranking,
-//! this gate fails and prevents the full PAAMS rerun from kicking off.
+//! this gate fails and prevents the full experiment rerun from kicking off.
 //!
 //! Run with:
 //! ```
@@ -19,7 +19,7 @@
 //! 1. **RHCR-PBS should beat or match PIBT** on throughput. Windowed PBS
 //!    with eager priority resolution outperforms myopic PIBT on structured
 //!    warehouse maps per Li et al. 2021. This is the acceptance gate for
-//!    the PAAMS 2026 RHCR-PBS fidelity port — if this fails, the port has
+//!    the RHCR-PBS fidelity port — if this fails, the port has
 //!    regressed.
 //! 2. **lacam3 should be competitive with RHCR-PBS** (within ±10%). Both
 //!    are SOTA-class planners. If lacam3 is materially worse than RHCR-PBS,
@@ -60,6 +60,7 @@ fn run_baseline(solver: &str) -> f64 {
         seed: SEED,
         tick_count: TICK_COUNT,
         custom_map: None,
+        rhcr_override: None,
     };
     let result = run_single_experiment(&config);
     let tp = result.baseline_metrics.avg_throughput;
@@ -106,7 +107,7 @@ fn clean_benchmark_ranking_gate() {
          Check src/solver/lacam3/pibt.rs port."
     );
 
-    // Invariant 3 (PAAMS 2026 RHCR-PBS fidelity gate): After the 2026-04-08
+    // Invariant 3 (RHCR-PBS fidelity gate): After the 2026-04-08
     // eager-mode + peek-chain + best-effort sequential-A* port, RHCR-PBS
     // must beat or match PIBT on this baseline instance. Measured 2026-04-08:
     // rhcr_pbs=0.468, pibt=0.418 — a 12% margin. This is the acceptance
@@ -119,7 +120,7 @@ fn clean_benchmark_ranking_gate() {
     assert!(
         rhcr_tp >= pibt_tp,
         "RHCR-PBS ({rhcr_tp:.4}) must be ≥ PIBT ({pibt_tp:.4}) after the \
-         PBS fidelity port (Streams B + C, PAAMS 2026 sprint). If this \
+         PBS fidelity port. If this \
          fails, `find_consistent_paths`, `plan_agent`, or the best-partial \
          `spacetime_astar_sequential` fallback has regressed."
     );
@@ -173,6 +174,7 @@ fn lacam3_cross_seed_stability() {
             seed,
             tick_count: 200,
             custom_map: None,
+            rhcr_override: None,
         };
         let result = run_single_experiment(&config);
         let tp = result.baseline_metrics.avg_throughput;

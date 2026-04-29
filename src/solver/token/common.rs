@@ -1,6 +1,6 @@
 //! Common types shared between Token Passing solvers.
 //!
-//! Extracted so that `token_passing.rs` and future solvers (e.g. TPTS) can
+//! Extracted so that `token_passing.rs` and future token-based solvers can
 //! reuse `Token`, `MasterConstraintIndex`, and `dir_ordinal` without
 //! duplicating the logic.
 

@@ -64,7 +64,9 @@ use crate::core::seed::SeededRng;
 use crate::core::task::TaskLeg;
 
 use super::common::{MasterConstraintIndex, Token};
-use crate::solver::lifelong::{AgentPlan, AgentState, LifelongSolver, SolverContext, StepResult};
+use crate::solver::lifelong::{
+    AgentPlan, AgentRestoreState, AgentState, LifelongSolver, SolverContext, StepResult,
+};
 use crate::solver::shared::astar::{SpacetimeGrid, spacetime_astar_fast};
 use crate::solver::shared::heuristics::DistanceMapCache;
 use crate::solver::shared::traits::{Optimality, Scalability, SolverInfo};
@@ -211,6 +213,56 @@ impl LifelongSolver for TokenPassingSolver {
         self.initialized = false;
     }
 
+    /// Restore TP's per-agent token paths from the snapshot's restored
+    /// `planned_actions`. Called during rewind AFTER `reset()`. Without this,
+    /// the master constraint index rebuilt on the next `step()` would be
+    /// empty (every token length 1), which changes A* results and makes the
+    /// rewound replay diverge from the original run.
+    fn restore_state(&mut self, agents: &[AgentRestoreState]) {
+        if agents.is_empty() {
+            return;
+        }
+
+        // Re-initialise agent_map / reverse_map from the post-rewind agent
+        // set. We fabricate the minimal `AgentState` slice that
+        // `ensure_initialized` needs — `has_plan` / `task_leg` are ignored
+        // there, only `index` and `pos` matter.
+        let init_states: Vec<AgentState> = agents
+            .iter()
+            .map(|a| AgentState {
+                index: a.index,
+                pos: a.pos,
+                goal: a.goal,
+                has_plan: !a.planned_actions.is_empty(),
+                task_leg: a.task_leg.clone(),
+            })
+            .collect();
+        self.initialized = false;
+        self.ensure_initialized(&init_states);
+
+        // Walk each restored planned-action sequence to rebuild the position
+        // stream of the token. The token stores the positions the agent IS
+        // at now and will pass through in the next `planned_actions.len()`
+        // ticks — exactly what `MasterConstraintIndex` consumes in the next
+        // `step()` at line 257 to rebuild the shared vertex/edge blocks.
+        for restore in agents {
+            if let Some(&local) = self.agent_map.get(restore.index)
+                && local < self.token.paths.len()
+            {
+                let mut positions = Vec::with_capacity(restore.planned_actions.len() + 1);
+                positions.push(restore.pos);
+                let mut p = restore.pos;
+                for action in restore.planned_actions {
+                    p = action.apply(p);
+                    positions.push(p);
+                }
+                self.token.set_path(local, positions);
+            }
+        }
+        // master_ci is rebuilt at the top of the next step() from these
+        // restored tokens, so no explicit rebuild here.
+    }
+
     fn step<'a>(
         &'a mut self,
         ctx: &SolverContext,
@@ -231,17 +283,42 @@ impl LifelongSolver for TokenPassingSolver {
         // equivalent of pibt2's `current_timestep++` (tp.cpp line 165 `P->update()`).
         self.token.advance();
 
-        // Sync actual positions — MAFIS-specific fault handling.
-        // pibt2 has no equivalent because it's a finite-task experiment with
-        // no fault model. If an agent didn't move as expected (fault, latency,
-        // collision recovery), its token diverges from reality; reset to
-        // [actual_pos] so the next replan starts fresh.
+        // Sync actual positions AND detect goal changes — MAFIS-specific
+        // fault/queue handling. pibt2 has no equivalent because it's a
+        // finite-task experiment with no fault model and no queue manager.
+        //
+        // Two invalidation triggers:
+        //
+        // 1. **Position drift**: agent didn't move as the token predicted
+        //    (fault, latency injection, collision forced Wait, external
+        //    position reset). Reset token to `[actual_pos]`.
+        //
+        // 2. **Goal drift**: agent's task leg now targets a different
+        //    endpoint than the token's final cell. This happens when the
+        //    queue manager kicks an agent from `Queuing` back to
+        //    `Loading(pickup)` (queue full / queue reassignment), or when
+        //    the task scheduler reassigns a pickup. Without this check, TP
+        //    keeps executing the stale plan toward the old endpoint and
+        //    agents appear "stuck" at the queue cell while displayed in the
+        //    picking-state colour.
         for a in agents {
             if let Some(&local) = self.agent_map.get(a.index)
                 && local < self.token.paths.len()
             {
-                let token_pos = self.token.paths[local].front().copied();
-                if token_pos != Some(a.pos) {
+                let path = &self.token.paths[local];
+                let token_pos = path.front().copied();
+                let token_end = path.back().copied();
+
+                // Mirror `plan_for_agent` target-selection logic exactly.
+                let current_target = match &a.task_leg {
+                    TaskLeg::TravelEmpty(pickup) => Some(*pickup),
+                    TaskLeg::TravelLoaded { to, .. } => Some(*to),
+                    _ => a.goal,
+                };
+                let goal_stale =
+                    path.len() > 1 && current_target.is_some() && token_end != current_target;
+
+                if token_pos != Some(a.pos) || goal_stale {
                     self.token.set_path(local, vec![a.pos]);
                 }
             }
@@ -485,6 +562,122 @@ mod tests {
         assert!(solver.token.paths.is_empty());
     }
 
+    /// Regression for the 2026-04-20 goal-change-sync bug (Issue 1 of the
+    /// TP audit). When an agent's `task_leg` changes to a new target (e.g.
+    /// queue manager kicks `Queuing` back to `Loading(pickup)`), the token's
+    /// stale endpoint must trigger a token reset so the agent replans toward
+    /// the new goal instead of continuing along the old plan.
+    #[test]
+    fn tp_goal_change_resets_token() {
+        let grid = GridMap::new(8, 3);
+        let zones = test_zones();
+        let mut solver = TokenPassingSolver::new();
+        let mut cache = DistanceMapCache::default();
+        let mut rng = SeededRng::new(42);
+
+        // Tick 0: agent at (0,1) planning toward far goal (7,1).
+        let far_goal = IVec2::new(7, 1);
+        let near_goal = IVec2::new(2, 1);
+        let start = IVec2::new(0, 1);
+
+        let ctx = SolverContext { grid: &grid, zones: &zones, tick: 0, num_agents: 1 };
+        let agents_far = vec![AgentState {
+            index: 0,
+            pos: start,
+            goal: Some(far_goal),
+            has_plan: false,
+            task_leg: TaskLeg::TravelEmpty(far_goal),
+        }];
+        let _ = solver.step(&ctx, &agents_far, &mut cache, &mut rng);
+        let token_end_after_first_step = solver.token.paths[0].back().copied();
+        assert_eq!(
+            token_end_after_first_step,
+            Some(far_goal),
+            "token should end at the planned goal after the first step",
+        );
+        assert!(
+            solver.token.paths[0].len() > 1,
+            "token should hold a multi-step plan to the far goal",
+        );
+
+        // Tick 1: same agent, same position — but target has changed from
+        // far_goal to near_goal (analogous to the queue-kick case).
+        let ctx1 = SolverContext { grid: &grid, zones: &zones, tick: 1, num_agents: 1 };
+        let agents_near = vec![AgentState {
+            index: 0,
+            pos: start,
+            goal: Some(near_goal),
+            has_plan: true,
+            task_leg: TaskLeg::TravelEmpty(near_goal),
+        }];
+        let _ = solver.step(&ctx1, &agents_near, &mut cache, &mut rng);
+        let token_end_after_second_step = solver.token.paths[0].back().copied();
+        assert_eq!(
+            token_end_after_second_step,
+            Some(near_goal),
+            "token must re-plan to the new target after a goal change, not continue the stale plan",
+        );
+    }
+
+    /// Regression for the 2026-04-20 rewind-determinism bug (Issue 3 of the
+    /// TP audit). After `restore_state`, each agent's token must equal the
+    /// position sequence derived from walking its restored `planned_actions`
+    /// from `pos`, so the `MasterConstraintIndex` rebuilt on the next
+    /// `step()` matches the original run bit-for-bit.
+    #[test]
+    fn tp_restore_state_rebuilds_token_from_actions() {
+        use crate::core::action::{Action, Direction};
+        use crate::solver::lifelong::AgentRestoreState;
+
+        let mut solver = TokenPassingSolver::new();
+        solver.reset(); // starts uninitialised
+
+        let actions_0 = vec![
+            Action::Move(Direction::East),
+            Action::Move(Direction::East),
+            Action::Move(Direction::East),
+        ];
+        let actions_1 = vec![Action::Move(Direction::North), Action::Move(Direction::North)];
+
+        let restore = vec![
+            AgentRestoreState {
+                index: 0,
+                pos: IVec2::new(0, 0),
+                goal: Some(IVec2::new(3, 0)),
+                task_leg: TaskLeg::TravelEmpty(IVec2::new(3, 0)),
+                planned_actions: &actions_0,
+            },
+            AgentRestoreState {
+                index: 1,
+                pos: IVec2::new(5, 0),
+                goal: Some(IVec2::new(5, 2)),
+                task_leg: TaskLeg::TravelEmpty(IVec2::new(5, 2)),
+                planned_actions: &actions_1,
+            },
+        ];
+
+        solver.restore_state(&restore);
+
+        // Tokens should trace [start, after_action_0, after_action_1, ...].
+        let token_0: Vec<IVec2> = solver.token.paths[0].iter().copied().collect();
+        assert_eq!(
+            token_0,
+            vec![IVec2::new(0, 0), IVec2::new(1, 0), IVec2::new(2, 0), IVec2::new(3, 0),],
+        );
+        let token_1: Vec<IVec2> = solver.token.paths[1].iter().copied().collect();
+        assert_eq!(token_1, vec![IVec2::new(5, 0), IVec2::new(5, 1), IVec2::new(5, 2)],);
+    }
+
+    /// Empty restore is a no-op (exercises the early-return branch).
+    #[test]
+    fn tp_restore_state_empty_is_noop() {
+        use crate::solver::lifelong::AgentRestoreState;
+        let mut solver = TokenPassingSolver::new();
+        solver.restore_state(&[] as &[AgentRestoreState]);
+        assert!(solver.token.paths.is_empty(), "empty restore must not touch tokens");
+        assert!(!solver.initialized);
+    }
+
     /// Regression test for the Token Passing audit (Step 3 of solver-refocus).
     ///
     /// Locks the current MAFIS TP throughput on a known instance so that the
@@ -514,6 +707,7 @@ mod tests {
             seed: 42,
             tick_count: 200,
             custom_map: None,
+            rhcr_override: None,
         };
         let result = run_single_experiment(&config);
         let tp = result.baseline_metrics.avg_throughput;

@@ -17,6 +17,7 @@ pub fn write_runs_csv<W: Write>(writer: &mut W, runs: &[RunResult]) -> std::io::
          cascade_depth_avg,cascade_spread_avg,\
          structural_cascade_avg,structural_cascade_max,mitigation_delta_avg,\
          itae,rapidity,attack_rate,fleet_utilization,\
+         pbs_partial_rate,\
          solver_step_avg_us,solver_step_max_us,wall_time_ms"
     )?;
 
@@ -51,6 +52,7 @@ fn write_run_row<W: Write>(
          {},{},\
          {},{},{},\
          {},{},{},{},\
+         {},\
          {},{},{}",
         config.solver_name,
         config.topology_name,
@@ -81,6 +83,7 @@ fn write_run_row<W: Write>(
         csv_f64(m.rapidity, 2),
         csv_f64(m.attack_rate, 4),
         csv_f64(m.fleet_utilization, 4),
+        m.pbs_partial_rate.map_or("".to_string(), |v| format!("{:.4}", v)),
         csv_f64(m.solver_step_time_avg_us, 1),
         csv_f64(m.solver_step_time_max_us, 1),
         m.wall_time_ms,
@@ -185,15 +188,18 @@ pub fn write_summary_csv<W: Write>(
 }
 
 /// Build the deduplication key for a run's baseline.
-/// Configs sharing `(solver, topology, scheduler, num_agents, seed)` produce identical baselines.
+/// Configs sharing `(solver, topology, scheduler, num_agents, seed, rhcr_override)`
+/// produce identical baselines; the ablation label is included so h=5 and h=20
+/// baselines don't collide.
 fn baseline_key_str(config: &super::config::ExperimentConfig) -> String {
     format!(
-        "{}|{}|{}|{}|{}",
+        "{}|{}|{}|{}|{}|{}",
         config.solver_name,
         config.topology_name,
         config.scheduler_name,
         config.num_agents,
         config.seed,
+        config.rhcr_override_label(),
     )
 }
 
@@ -892,6 +898,7 @@ mod tests {
             seed: 42,
             tick_count: 20,
             custom_map: None,
+            rhcr_override: None,
         })
     }
 
@@ -920,6 +927,7 @@ mod tests {
                 agent_counts: vec![3],
                 seeds: vec![42],
                 tick_count: 20,
+                rhcr_overrides: vec![None],
             },
             runs: vec![run],
             summaries: vec![],
@@ -945,6 +953,7 @@ mod tests {
             agent_counts: vec![3],
             seeds: vec![42, 123],
             tick_count: 20,
+            rhcr_overrides: vec![None],
         };
         let result = crate::experiment::runner::run_matrix(&matrix, None);
 
@@ -969,6 +978,7 @@ mod tests {
             agent_counts: vec![3],
             seeds: vec![42],
             tick_count: 20,
+            rhcr_overrides: vec![None],
         };
         let result = crate::experiment::runner::run_matrix(&matrix, None);
 
@@ -995,6 +1005,7 @@ mod tests {
             agent_counts: vec![3],
             seeds: vec![42],
             tick_count: 20,
+            rhcr_overrides: vec![None],
         };
         let result = crate::experiment::runner::run_matrix(&matrix, None);
 
@@ -1015,6 +1026,7 @@ mod tests {
             agent_counts: vec![3],
             seeds: vec![42],
             tick_count: 20,
+            rhcr_overrides: vec![None],
         };
         let result = crate::experiment::runner::run_matrix(&matrix, None);
 

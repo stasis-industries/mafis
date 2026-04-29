@@ -128,7 +128,6 @@ impl SimulationRunner {
         fault_config: FaultConfig,
         fault_schedule: FaultSchedule,
     ) -> Self {
-        fault_config.validate();
         let mut fault_rng = SeededRng::new(rng.seed() ^ FAULT_RNG_SALT);
         let queue_manager = QueueManager::new(&zones.queue_lines);
         let weibull_failure_ticks = if fault_config.weibull_enabled {
@@ -387,7 +386,7 @@ impl SimulationRunner {
             self.replan_after_fault();
         }
 
-        // Phase 10: Build result + return fault_events buffer
+        // Phase 9: Build result + return fault_events buffer
         let result = self.build_result(moves, &mut fault_events);
         self.fault_events_buf = fault_events;
         result
@@ -735,7 +734,7 @@ impl SimulationRunner {
             let col = &mut self.collision;
             col.clear_targets();
             let mut collision_found = false;
-            for (i, a) in self.agents.iter().enumerate() {
+            for (_i, a) in self.agents.iter().enumerate() {
                 if !a.alive {
                     continue;
                 }
@@ -748,7 +747,7 @@ impl SimulationRunner {
                         #[cfg(not(target_arch = "wasm32"))]
                         eprintln!(
                             "WARNING: post-hoc collision at tick {} pos {:?} (agent {})",
-                            self.tick, a.pos, i
+                            self.tick, a.pos, _i
                         );
                     }
                     col.target_count[idx] += 1;
@@ -937,7 +936,7 @@ impl SimulationRunner {
         self.solver_states_buf = agent_states;
 
         // Evict stale cache entries periodically
-        if self.tick.is_multiple_of(100) {
+        if self.tick.is_multiple_of(crate::constants::DIST_CACHE_EVICT_INTERVAL) {
             let goals: Vec<IVec2> = self.agents.iter().map(|a| a.goal).collect();
             self.dist_cache.retain_goals(&goals);
         }

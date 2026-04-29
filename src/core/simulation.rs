@@ -7,6 +7,10 @@ use super::grid::GridMap;
 // ---------------------------------------------------------------------------
 // Core collision resolution (shared by ECS and headless baseline)
 // ---------------------------------------------------------------------------
+//
+// `tick_agents_core` is the pure-function collision resolver shared between
+// the ECS path and the headless baseline. There is no plugin: the live tick
+// chain is registered by `CorePlugin` (see `core/mod.rs`).
 
 /// Input for one agent to collision resolution.
 pub struct AgentMoveInput {
@@ -124,12 +128,4 @@ pub fn tick_agents_core(
     }
 
     moves.iter().map(|m| ResolvedMove { new_pos: m.2, action: m.1, was_forced: m.3 }).collect()
-}
-
-pub struct SimulationPlugin;
-
-impl Plugin for SimulationPlugin {
-    fn build(&self, _app: &mut App) {
-        // Old tick_agents ECS system removed — SimulationRunner drives ticks.
-    }
 }

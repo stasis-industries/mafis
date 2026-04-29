@@ -4,7 +4,10 @@
 import { get_simulation_state as wasmGetState, send_command as wasmSendCommand } from './mafis.js';
 // Re-export for module-scoped usage
 const get_simulation_state = wasmGetState;
-window._getState = () => { try { return JSON.parse(wasmGetState()); } catch(e) { return null; } };
+// Debug backdoor — only attached when window.__MAFIS_DEBUG === true is set in console
+if (window.__MAFIS_DEBUG === true) {
+    window._getState = () => { try { return JSON.parse(wasmGetState()); } catch(e) { return null; } };
+}
 
 const POLL_INTERVAL = 100; // ms
 // No chart point cap — arrays grow unbounded (memory is negligible)
@@ -60,6 +63,7 @@ function escapeHtml(str) {
 }
 
 // Performance warning thresholds
+// keep aligned with src/constants.rs MAX_AGENTS / MAX_GRID_DIM
 const WASM_WARN_AGENTS = 200;
 const WASM_WARN_GRID_AREA = 128 * 128; // 16384
 
@@ -67,7 +71,6 @@ let pollTimer = null;
 let selectedAgentId = null;
 let activeTopologyId = null; // tracks the selected topology preset ID
 let lastAgentCount = -1;
-let _baselineLoggedForRun = false;
 let prevMetricValues = {};
 let chartInsts = {};
 let chartData = {
@@ -87,7 +90,7 @@ let chartData = {
 // Chart toggle state
 let throughputChartMode = 'raw'; // 'raw' or 'gap'
 let tasksChartMode = 'abs';      // 'abs' or 'norm'
-let resultsThrouputMode = 'raw'; // 'raw' or 'gap' (results panel)
+let resultsThroughputMode = 'raw'; // 'raw' or 'gap' (results panel)
 let resultsTasksMode = 'abs';    // 'abs' or 'norm' (results panel)
 let _lastShowBaseline = false;   // cached from updateChartData for redrawChartsForMode
 let lastChartTick = -1;
@@ -105,12 +108,10 @@ const METRIC_KEYS = [
 // When NRR is N/A (permanent deaths, no cascade recovery), its weight is
 // redistributed proportionally to the remaining three metrics.
 //
-// ⚠ NOT A RESEARCH-GRADE METRIC. The weights (0.30/0.25/0.25/0.20) are
-// hand-picked for the live observatory dashboard and have no theoretical
-// derivation. Reviewers will (correctly) attack this as an ad-hoc index.
-// Used here only as an at-a-glance UI verdict — DO NOT cite in papers.
-// The PAAMS 2026 paper reports the 5 primary metrics directly, not this
-// composite. See docs/papers/paper1_drafts/paams2026/scope_decisions.md §4.
+// ⚠ NOT A RESEARCH-GRADE METRIC. The weights are hand-picked for the live
+// observatory dashboard and have no theoretical derivation. Used here only
+// as an at-a-glance UI verdict — DO NOT cite in papers.
+// See RELIABILITY.md for scorecard weight rationale.
 function computeCompositeScore(sc) {
     const ft = Math.min(sc.fault_tolerance || 0, 1.0); // Cap FT at 1.0 for composite (Braess doesn't inflate verdict)
     const critNorm = Math.max(0, Math.min(1, 1.0 - (sc.critical_time || 0)));
@@ -253,8 +254,10 @@ function sendCommand(cmd) {
         // WASM not ready
     }
 }
-// Expose for debugging / automated testing
-window._sendCommand = sendCommand;
+// Debug backdoor — only attached when window.__MAFIS_DEBUG === true is set in console
+if (window.__MAFIS_DEBUG === true) {
+    window._sendCommand = sendCommand;
+}
 
 // ---------------------------------------------------------------------------
 // Loading overlay
@@ -1665,15 +1668,15 @@ function updateLiveStats(s) {
         tp.textContent = s.lifelong.throughput.toFixed(2) + '/t';
     }
 
-    // Impact (impacted area)
-    const impact = document.getElementById('live-impact');
-    if (impact && s.baseline_diff) {
-        const ia = s.baseline_diff.impacted_area || 0;
-        impact.textContent = ia.toFixed(1) + '%';
-        impact.style.color = ia < 0 ? 'var(--state-fault)' : ia > 0 ? 'var(--state-moving)' : '';
-    } else if (impact) {
-        impact.textContent = '\u2014';
-        impact.style.color = '';
+    // Fault Tolerance (from live scorecard)
+    const ftEl = document.getElementById('live-ft');
+    if (ftEl && s.scorecard) {
+        const ft = s.scorecard.fault_tolerance;
+        ftEl.textContent = ft != null ? ft.toFixed(2) : '\u2014';
+        ftEl.style.color = ft != null && ft < 0.5 ? 'var(--state-fault)' : '';
+    } else if (ftEl) {
+        ftEl.textContent = '\u2014';
+        ftEl.style.color = '';
     }
 
     // Faults
@@ -2241,7 +2244,7 @@ function renderResultsCharts(heatEnabled) {
         const blTpMA = d._blTpMA && d._blTpMA.length > 0 ? d._blTpMA : null;
 
         let tpSeries, tpData, tpLegend;
-        if (resultsThrouputMode === 'gap' && hasBaseline && blTpMA) {
+        if (resultsThroughputMode === 'gap' && hasBaseline && blTpMA) {
             // GAP mode: single line = live_MA - baseline_MA + zero reference
             const gapData = tpMA.map((v, i) => {
                 const bl = blTpMA[i];
@@ -2276,11 +2279,11 @@ function renderResultsCharts(heatEnabled) {
             if (hasBaseline) {
                 const btn = document.createElement('button');
                 btn.className = 'chart-toggle-btn';
-                btn.textContent = resultsThrouputMode === 'raw' ? '[RAW]' : '[GAP]';
+                btn.textContent = resultsThroughputMode === 'raw' ? '[RAW]' : '[GAP]';
                 btn.title = 'Toggle gap mode (live MA - baseline MA)';
                 btn.addEventListener('click', (e) => {
                     e.stopPropagation();
-                    resultsThrouputMode = resultsThrouputMode === 'raw' ? 'gap' : 'raw';
+                    resultsThroughputMode = resultsThroughputMode === 'raw' ? 'gap' : 'raw';
                     // Capture width before destroy to prevent layout shift
                     const cell = document.getElementById('results-chart-throughput');
                     if (cell) cell.style.minWidth = cell.offsetWidth + 'px';
@@ -2435,9 +2438,8 @@ function populateResultsFromState(s) {
         const sc = s.scorecard;
         const metrics = [
             { key: 'ft',   name: 'Fault Tolerance',  value: sc.fault_tolerance || 0 },
-            { key: 'nrr',  name: 'NRR',              value: sc.nrr },
-            { key: 'sr',   name: 'Survival Rate',     value: sc.survival_rate || 0 },
             { key: 'crit', name: 'Critical Time',     value: sc.critical_time || 0 },
+            { key: 'sr',   name: 'Survival Rate',     value: sc.survival_rate || 0 },
         ];
         scorecardBars.innerHTML = metrics.map(m => {
             const label = m.value != null ? (m.value * 100).toFixed(0) + '%' : 'N/A';
@@ -2476,18 +2478,15 @@ function populateResultsFromState(s) {
             const impactedArea = bd.impacted_area || 0;
             const blIdleRatio = bd.has_baseline && bd.baseline_wait_ratio_at_tick != null
                 ? bd.baseline_wait_ratio_at_tick : null;
+            const ft = s.scorecard ? s.scorecard.fault_tolerance : null;
+            const ct = s.scorecard ? s.scorecard.critical_time : null;
             const rows = [
+                { name: 'Fault Tolerance', baseline: null, current: ft, noCompare: true },
+                { name: 'Critical Time', baseline: null, current: ct, noCompare: true },
                 { name: 'Throughput (avg)', baseline: blThroughput, current: avgThroughput },
                 { name: 'Tasks Completed', baseline: blTasks, current: liveTasks, integer: true },
-                { name: 'Idle Ratio (avg)', baseline: blIdleRatio, current: m.wait_ratio, inverted: true },
-                { name: 'Impacted Area', baseline: null, current: impactedArea, noCompare: true, suffix: '%' },
-                { name: 'Deficit', baseline: null, current: bd.deficit_integral || 0, integer: true, noCompare: true },
-                { name: 'Surplus', baseline: null, current: bd.surplus_integral || 0, integer: true, noCompare: true },
-                { name: 'MTTR', baseline: null, current: m.fault_mttr, noCompare: true },
-                { name: 'MTBF', baseline: null, current: m.fault_mtbf, noCompare: true },
-                ...(s.scorecard && s.scorecard.nrr != null ? [{ name: 'NRR', baseline: null, current: s.scorecard.nrr, noCompare: true }] : []),
-                { name: 'Propagation Rate', baseline: null, current: m.propagation_rate, noCompare: true },
                 { name: 'Survival Rate', baseline: null, current: survivalRate, noCompare: true },
+                { name: 'Cascade Depth', baseline: null, current: m.cascade_depth_avg || 0, noCompare: true },
             ];
             summaryBody.innerHTML = rows.map(r => {
                 const fmt = v => r.integer ? String(Math.round(v)) : v.toFixed(3);
@@ -3073,15 +3072,6 @@ function updateChartData(s) {
         if (tasksChartMode !== 'abs') tasksChartMode = 'abs';
     }
 
-    // One-time diagnostic log when baseline data first arrives
-    if (_showBaseline && !_baselineLoggedForRun) {
-        _baselineLoggedForRun = true;
-        console.log('[BASELINE JS] total_tasks:', bd.baseline_total_tasks,
-            'avg_tp:', bd.baseline_avg_throughput,
-            'tasks_at_tick:', bd.baseline_tasks_at_tick,
-            'tick:', s.tick);
-    }
-
     chartData.ticks.push(s.tick);
     chartData.avgHeat.push(avgHeat);
     chartData.alive.push(s.alive_agents);
@@ -3166,7 +3156,7 @@ function resetChartData() {
     chartData = { ticks: [], avgHeat: [], alive: [], dead: [], throughput: [], baselineThroughput: [], tasksCumulative: [], baselineTasksCumulative: [], idleRatio: [], baselineIdleRatio: [], cascadeSpread: [], _tpMA: [], _blTpMA: [] };
     throughputChartMode = 'raw';
     tasksChartMode = 'abs';
-    resultsThrouputMode = 'raw';
+    resultsThroughputMode = 'raw';
     resultsTasksMode = 'abs';
     _lastShowBaseline = false;
     lastChartTick = -1;
@@ -3176,7 +3166,6 @@ function resetChartData() {
     if (resTpBtn) resTpBtn.textContent = '[RAW]';
     const resTaskBtn = document.querySelector('#results-chart-tasks .chart-toggle-btn');
     if (resTaskBtn) resTaskBtn.textContent = '[ABS]';
-    _baselineLoggedForRun = false;
 
     lastTimelineMarkerCount = -1;
     lastFaultEventCount = -1;
@@ -3700,6 +3689,7 @@ async function loadTopologyManifest() {
                 const hasPickup = data.cells && data.cells.some(c => c.type === 'pickup');
                 const hasDelivery = data.cells && data.cells.some(c => c.type === 'delivery');
                 if (!hasPickup || !hasDelivery) {
+                    // TODO: surface in UI (per-topology errors aggregated in topology-empty when ALL fail)
                     console.warn(`Topology ${filename}: missing pickup or delivery zones, skipping`);
                     continue;
                 }
@@ -3708,6 +3698,7 @@ async function loadTopologyManifest() {
                 }
                 loadedTopologies.push({ filename, data, name, id, imported: false });
             } catch (e) {
+                // TODO: surface in UI (per-topology errors aggregated in topology-empty when ALL fail)
                 console.warn('Failed to load topology:', filename, e);
             }
         }
@@ -3825,11 +3816,13 @@ function populateExpTopologyUI() {
 
 function importExpMap(file) {
     const reader = new FileReader();
+    const expStatus = document.getElementById('exp-status');
     reader.onload = (e) => {
         try {
             const data = JSON.parse(e.target.result);
             if (!data.width || !data.height) {
                 console.warn('Invalid map file: missing width/height');
+                if (expStatus) expStatus.textContent = `Import error: ${file.name} missing width/height`;
                 return;
             }
             const name = data.name || file.name.replace(/\.json$/, '');
@@ -3838,6 +3831,7 @@ function importExpMap(file) {
             // Avoid duplicates
             if (experimentImportedMaps.some(t => t.id === id)) {
                 console.warn('Map already imported:', name);
+                if (expStatus) expStatus.textContent = `Already imported: ${name}`;
                 return;
             }
 
@@ -3850,8 +3844,10 @@ function importExpMap(file) {
             experimentImportedMaps.push({ data, name, id, imported: true });
             populateExpTopologyUI();
             updateExpRunCount();
+            if (expStatus) expStatus.textContent = `Imported: ${name}`;
         } catch (err) {
             console.error('Failed to parse map file:', err);
+            if (expStatus) expStatus.textContent = `Import error: failed to parse ${file.name}`;
         }
     };
     reader.readAsText(file);
@@ -4573,6 +4569,7 @@ function bindCustomMapImport() {
                 }
             } catch (e) {
                 console.error('Failed to load custom map from localStorage:', e);
+                if (statusEl) statusEl.innerHTML = '<div class="import-err">Failed to load custom map from Map Maker</div>';
             }
             localStorage.removeItem('mapfis_custom_map');
         }
@@ -4683,19 +4680,19 @@ let experimentLastExpStage = 'config'; // remember last stage for toggling back
 let experimentTopoData = {};  // topology_name → topo.data (preserved from experiment configs)
 
 const EXPERIMENT_METRICS = [
-    { key: 'fault_tolerance', label: 'Fault Tolerance', decimals: 2 },
+    // Primary differential metrics
+    { key: 'fault_tolerance', label: 'FT', decimals: 3 },
+    { key: 'critical_time', label: 'CT', decimals: 3 },
+    { key: 'itae', label: 'ITAE', decimals: 0 },
+    { key: 'attack_rate', label: 'AR', decimals: 3 },
+    { key: 'cascade_depth', label: 'Casc. Depth', decimals: 2 },
+    { key: 'rapidity', label: 'Rapidity', decimals: 1 },
+    // Context
     { key: 'throughput', label: 'Throughput', decimals: 2 },
-    { key: 'nrr', label: 'NRR', decimals: 2 },
-    { key: 'critical_time', label: 'Critical Time', decimals: 2 },
-    { key: 'survival_rate', label: 'Survival Rate', decimals: 2 },
-    { key: 'mttr', label: 'MTTR', decimals: 1 },
-    { key: 'propagation_rate', label: 'Propagation Rate', decimals: 2 },
-    { key: 'wait_ratio', label: 'Wait Ratio', decimals: 2 },
-    { key: 'impacted_area', label: 'Impacted Area', decimals: 2 },
-    { key: 'total_tasks', label: 'Tasks Completed', decimals: 0 },
-    { key: 'deficit_integral', label: 'Deficit Integral', decimals: 0 },
-    { key: 'solver_step_us', label: 'Solver Time (\u00b5s)', decimals: 1 },
-    { key: 'wall_time_ms', label: 'Wall Time (ms)', decimals: 0 },
+    { key: 'survival_rate', label: 'Survival', decimals: 2 },
+    // Timing
+    { key: 'solver_step_us', label: 'Solver \u00b5s', decimals: 1 },
+    { key: 'wall_time_ms', label: 'Wall ms', decimals: 0 },
 ];
 
 // ---------------------------------------------------------------------------
@@ -4754,21 +4751,17 @@ function computeStatSummaryJS(values) {
 
 // Metric mapping: run JSON key -> summary JSON key
 const METRIC_MAP = [
-    ['avg_throughput', 'throughput'],
-    ['total_tasks', 'total_tasks'],
-    ['wait_ratio', 'wait_ratio'],
+    // Primary differential metrics
     ['fault_tolerance', 'fault_tolerance'],
-    ['nrr', 'nrr'],
     ['critical_time', 'critical_time'],
-    ['deficit_recovery', 'deficit_recovery'],
-    ['throughput_recovery', 'throughput_recovery'],
-    ['propagation_rate', 'propagation_rate'],
+    ['itae', 'itae'],
+    ['attack_rate', 'attack_rate'],
+    ['cascade_depth_avg', 'cascade_depth'],
+    ['rapidity', 'rapidity'],
+    // Context
+    ['avg_throughput', 'throughput'],
     ['survival_rate', 'survival_rate'],
-    ['impacted_area', 'impacted_area'],
-    ['deficit_integral', 'deficit_integral'],
-    // Note: 'mttr' (EXPERIMENT_METRICS key) has no run-level JSON field —
-    // the experiment export schema (write_metrics_json) does not include MTTR.
-    // Per-seed tab correctly shows N/A for MTTR (null from runKeyForMetric).
+    // Timing
     ['solver_step_avg_us', 'solver_step_us'],
     ['wall_time_ms', 'wall_time_ms'],
 ];
@@ -4941,17 +4934,17 @@ const EXPERIMENT_PRESETS = {
 
 function metricZoneClass(key, val) {
     switch (key) {
-        case 'fault_tolerance': case 'nrr': case 'survival_rate':
+        case 'fault_tolerance': case 'survival_rate':
             return val >= 0.7 ? 'zone-good' : val >= 0.4 ? 'zone-fair' : 'zone-poor';
-        case 'critical_time': case 'propagation_rate':
+        case 'critical_time': case 'attack_rate':
             return val <= 0.2 ? 'zone-good' : val <= 0.5 ? 'zone-fair' : 'zone-poor';
-        case 'impacted_area':
-            // impacted_area: negative = deficit (bad), positive = surplus/Braess (good), near zero = neutral
-            return val >= 0 ? 'zone-good' : val >= -10 ? 'zone-fair' : 'zone-poor';
-        case 'mttr':
-            return val <= 20 ? 'zone-good' : val <= 60 ? 'zone-fair' : 'zone-poor';
-        case 'wait_ratio':
-            return val <= 0.3 ? 'zone-good' : val <= 0.6 ? 'zone-fair' : 'zone-poor';
+        case 'itae':
+            return val <= 15000 ? 'zone-good' : val <= 30000 ? 'zone-fair' : 'zone-poor';
+        case 'cascade_depth':
+            return val <= 0.1 ? 'zone-good' : val <= 0.5 ? 'zone-fair' : 'zone-poor';
+        case 'rapidity':
+            if (isNaN(val) || val === null) return 'zone-neutral';
+            return val <= 20 ? 'zone-good' : val <= 100 ? 'zone-fair' : 'zone-poor';
         default:
             return 'zone-neutral';
     }
@@ -4959,15 +4952,17 @@ function metricZoneClass(key, val) {
 
 function metricZoneHex(key, val) {
     switch (key) {
-        case 'fault_tolerance': case 'nrr': case 'survival_rate':
+        case 'fault_tolerance': case 'survival_rate':
             return val >= 0.7 ? '#78b478' : val >= 0.4 ? '#c8aa64' : '#b45050';
-        case 'critical_time': case 'propagation_rate':
+        case 'critical_time': case 'attack_rate':
             return val <= 0.2 ? '#78b478' : val <= 0.5 ? '#c8aa64' : '#b45050';
-        case 'impacted_area':
-            // negative = deficit (bad), positive = surplus/Braess (good)
-            return val >= 0 ? '#78b478' : val >= -10 ? '#c8aa64' : '#b45050';
-        case 'mttr':
-            return val <= 20 ? '#78b478' : val <= 60 ? '#c8aa64' : '#b45050';
+        case 'itae':
+            return val <= 15000 ? '#78b478' : val <= 30000 ? '#c8aa64' : '#b45050';
+        case 'cascade_depth':
+            return val <= 0.1 ? '#78b478' : val <= 0.5 ? '#c8aa64' : '#b45050';
+        case 'rapidity':
+            if (isNaN(val) || val === null) return '#6688aa';
+            return val <= 20 ? '#78b478' : val <= 100 ? '#c8aa64' : '#b45050';
         default:
             return '#6688aa';
     }
@@ -5784,8 +5779,11 @@ function renderExpChart() {
     }
     if (maxVal < 1e-9) maxVal = 1;
 
-    // NRR N/A note: if metric is NRR and all summaries have n===0, show explanation text
-    const allNrrNA = metricKey === 'nrr' && sortedIndices.every(idx => getStat(summaries[idx], 'nrr').n === 0);
+    // Rapidity is NaN for permanent faults — show explanation when all rows are N/A
+    const allRapNA = metricKey === 'rapidity' && sortedIndices.every(idx => {
+        const s = getStat(summaries[idx], 'rapidity');
+        return s.n === 0 || isNaN(s.mean);
+    });
 
     let svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${totalW} ${totalH}" ` +
         `font-family="'DM Mono', monospace" font-size="8">`;
@@ -5818,11 +5816,9 @@ function renderExpChart() {
     }
 
     svg += '</svg>';
-    if (allNrrNA) {
-        // Note: using a <p> below the SVG (not SVG <text>) for easier CSS styling.
-        // This is a deliberate deviation from the spec which said "SVG text note."
+    if (allRapNA) {
         container.innerHTML = svg +
-            '<p class="exp-chart-na-note">NRR not applicable — requires ≥2 fault events per run.</p>';
+            '<p class="exp-chart-na-note">Rapidity not applicable for permanent faults (no recovery path).</p>';
     } else {
         container.innerHTML = svg;
     }

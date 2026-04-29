@@ -65,10 +65,16 @@ pub struct FaultMetrics {
     pub avg_cascade_spread: f32,
 
     /// Mean Time Between Faults — average ticks between consecutive fault events.
-    /// Requires 2+ events. (Or 2025)
+    /// Requires 2+ events.
     pub mtbf: Option<f32>,
     /// Propagation Rate — avg(agents_affected / alive_at_event) across all faults.
     /// Normalized 0-1 fraction of fleet affected per event.
+    ///
+    /// **Observatory-only.** Retained for the live UI scorecard but
+    /// intentionally dropped from the experiment metrics pipeline because it
+    /// largely echoes fault-config knobs (e.g., burst kill percent) rather
+    /// than measuring system response. Not stale dead code — kept for the
+    /// live simulator's at-a-glance fault impact display.
     pub propagation_rate: f32,
 
     pub wait_ratio: f32,
@@ -311,7 +317,8 @@ impl FaultMetrics {
     }
 
     /// Compute MTBF (Mean Time Between Faults) from fault event ticks.
-    /// Requires 2+ events. Returns None with 0 or 1 events. (Or 2025)
+    /// Requires 2+ events. Returns None with 0 or 1 events.
+    // citation: TODO
     pub fn compute_mtbf(event_ticks: &[u64]) -> Option<f32> {
         if event_ticks.len() < 2 {
             return None;
@@ -377,16 +384,15 @@ pub fn register_fault_recovery(
         }
         fault_metrics.mtbf_last_tick = Some(entry.tick);
 
-        // Update propagation rate running aggregate.
-        if alive_now > 0 {
-            fault_metrics.propagation_rate_sum += entry.agents_affected as f32 / alive_now as f32;
-            fault_metrics.propagation_rate_count += 1;
-        }
-
+        // Build the event record first so propagation rate uses the
+        // per-event denominator (`alive_at_event`) instead of a batch-wide
+        // value. Currently `alive_at_event = alive_now` for all events in a
+        // batch, but coupling these guarantees consistency if the per-event
+        // alive count is ever populated more precisely upstream.
         // The event id is the *cumulative* count (monotonic across the full
         // simulation), not `event_records.len()` which would reset on eviction.
         let event_id = fault_metrics.cascade_spreads_count as usize - 1;
-        fault_metrics.push_event_record(FaultEventRecord {
+        let record = FaultEventRecord {
             id: event_id,
             tick: entry.tick,
             fault_type: entry.fault_type,
@@ -397,7 +403,17 @@ pub fn register_fault_recovery(
             recovered: false,
             recovery_tick: None,
             alive_at_event: alive_now,
-        });
+        };
+
+        // Update propagation rate running aggregate using the event's own
+        // recorded denominator.
+        if record.alive_at_event > 0 {
+            fault_metrics.propagation_rate_sum +=
+                record.agents_affected as f32 / record.alive_at_event as f32;
+            fault_metrics.propagation_rate_count += 1;
+        }
+
+        fault_metrics.push_event_record(record);
 
         for (&entity, record) in &cascade.records {
             if entity == entry.faulted_entity {

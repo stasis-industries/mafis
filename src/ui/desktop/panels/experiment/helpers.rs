@@ -2,16 +2,47 @@ use egui::Color32;
 
 use crate::experiment::config::ExperimentMatrix;
 use crate::experiment::export::MetricColumn;
-use crate::experiment::runner::{ConfigSummary, RunResult};
+use crate::experiment::runner::{ConfigSummary, MatrixResult, RunResult};
 
 use super::SortColumn;
+
+// ---------------------------------------------------------------------------
+// MatrixResult constructors
+// ---------------------------------------------------------------------------
+
+/// Build an empty `ExperimentMatrix` — used when reconstructing `MatrixResult`
+/// from imported summaries (no live matrix exists).
+fn empty_matrix() -> ExperimentMatrix {
+    ExperimentMatrix {
+        solvers: vec![],
+        topologies: vec![],
+        scenarios: vec![],
+        schedulers: vec![],
+        agent_counts: vec![],
+        seeds: vec![],
+        tick_count: 0,
+        rhcr_overrides: vec![None],
+    }
+}
+
+/// Build a placeholder `MatrixResult` from imported summaries only —
+/// no per-run data, no matrix, zero wall-time. Used by JSON import paths
+/// and by the JSON exporter when re-wrapping summaries.
+pub fn matrix_result_from_summaries(
+    summaries: Vec<ConfigSummary>,
+    runs: Vec<RunResult>,
+) -> MatrixResult {
+    MatrixResult { matrix: empty_matrix(), runs, summaries, wall_time_total_ms: 0 }
+}
 
 // ---------------------------------------------------------------------------
 // Presets
 // ---------------------------------------------------------------------------
 
-#[allow(clippy::type_complexity)]
-pub const PRESETS: &[(&str, fn() -> PresetConfig)] = &[
+/// Factory returning a fresh `PresetConfig` for the named preset.
+pub type PresetFactory = fn() -> PresetConfig;
+
+pub const PRESETS: &[(&str, PresetFactory)] = &[
     ("Solver Resilience (75 runs)", preset_solver_resilience),
     ("Scale Sensitivity (100 runs)", preset_scale_sensitivity),
     ("Scheduler Effect (50 runs)", preset_scheduler_effect),
@@ -221,6 +252,7 @@ pub fn export_button(
     summaries: &[ConfigSummary],
     runs: &[RunResult],
     fmt: ExportFormat,
+    chart_metric: MetricColumn,
 ) {
     if ui.small_button(label).clicked() {
         let ext = fmt.extension();
@@ -228,7 +260,7 @@ pub fn export_button(
             .set_title("Export")
             .add_filter(fmt.filter_name(), &[ext])
             .save_file()
-            && let Err(e) = write_export(&path, summaries, runs, fmt)
+            && let Err(e) = write_export(&path, summaries, runs, fmt, chart_metric)
         {
             eprintln!("Export error: {e}");
         }
@@ -240,6 +272,7 @@ pub fn write_export(
     summaries: &[ConfigSummary],
     runs: &[RunResult],
     fmt: ExportFormat,
+    chart_metric: MetricColumn,
 ) -> Result<(), String> {
     let mut file = std::fs::File::create(path).map_err(|e| format!("create: {e}"))?;
     use crate::experiment::export;
@@ -252,21 +285,8 @@ pub fn write_export(
             export::write_summary_csv(&mut file, summaries).map_err(|e| format!("{e}"))?;
         }
         ExportFormat::Json => {
-            // Re-create a MatrixResult for JSON export
-            let result = crate::experiment::runner::MatrixResult {
-                matrix: ExperimentMatrix {
-                    solvers: vec![],
-                    topologies: vec![],
-                    scenarios: vec![],
-                    schedulers: vec![],
-                    agent_counts: vec![],
-                    seeds: vec![],
-                    tick_count: 0,
-                },
-                runs: runs.to_vec(),
-                summaries: summaries.to_vec(),
-                wall_time_total_ms: 0,
-            };
+            // Re-wrap summaries + runs into a MatrixResult for JSON export.
+            let result = matrix_result_from_summaries(summaries.to_vec(), runs.to_vec());
             export::write_matrix_json(&mut file, &result).map_err(|e| format!("{e}"))?;
         }
         ExportFormat::Latex => {
@@ -279,7 +299,7 @@ pub fn write_export(
         }
         ExportFormat::Svg => {
             let indices: Vec<usize> = (0..summaries.len()).collect();
-            export::write_svg_chart(&mut file, summaries, MetricColumn::FaultTolerance, &indices)
+            export::write_svg_chart(&mut file, summaries, chart_metric, &indices)
                 .map_err(|e| format!("{e}"))?;
         }
     }

@@ -1,9 +1,9 @@
 {
-  "name": "warehouse-sd-w2",
+  "name": "warehouse-single-dock-w2",
   "width": 57,
   "height": 44,
   "seed": 42,
-  "number_agents": 85,
+  "number_agents": 72,
   "cells": [
     {
       "x": 0,

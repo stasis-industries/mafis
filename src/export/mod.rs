@@ -65,10 +65,7 @@ impl Plugin for ExportPlugin {
             .add_message::<ExportRequest>()
             .add_systems(
                 FixedUpdate,
-                log_fault_events
-                    .after(FaultSet::FaultCheck)
-                    .before(FaultSet::Replan)
-                    .run_if(in_state(SimState::Running)),
+                log_fault_events.after(FaultSet::Schedule).run_if(in_state(SimState::Running)),
             )
             .add_systems(
                 FixedUpdate,

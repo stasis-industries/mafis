@@ -40,13 +40,17 @@ pub fn update_metrics(
     cascade: Res<CascadeState>,
     mut metrics: ResMut<SimMetrics>,
 ) {
-    // Track which agents have newly reached their goal
+    // Track which agents have newly reached their goal.
+    // Probe the map only when the agent actually reached its goal — avoids
+    // a per-tick HashMap entry() call for every alive agent.
     for (entity, agent) in &agents {
-        let entry = metrics.agent_finish_ticks.entry(entity).or_insert(None);
-        if agent.has_reached_goal() && entry.is_none() {
-            *entry = Some(sim_config.tick);
-            metrics.finished_count += 1;
-            metrics.finished_time_sum += sim_config.tick;
+        if agent.has_reached_goal() {
+            let entry = metrics.agent_finish_ticks.entry(entity).or_insert(None);
+            if entry.is_none() {
+                *entry = Some(sim_config.tick);
+                metrics.finished_count += 1;
+                metrics.finished_time_sum += sim_config.tick;
+            }
         }
     }
 

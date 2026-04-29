@@ -47,6 +47,21 @@ pub fn run_streaming(program: &str, args: &[&str], cwd: &Path) -> io::Result<Exi
         .status()
 }
 
+/// Run a command with stdout/stderr inherited and extra environment variables set.
+pub fn run_streaming_with_env(
+    program: &str,
+    args: &[&str],
+    cwd: &Path,
+    env: &[(String, String)],
+) -> io::Result<ExitStatus> {
+    let mut cmd = Command::new(program);
+    cmd.args(args).current_dir(cwd).stdout(Stdio::inherit()).stderr(Stdio::inherit());
+    for (k, v) in env {
+        cmd.env(k, v);
+    }
+    cmd.status()
+}
+
 /// Run a command with an animated spinner, capturing output.
 pub fn run_with_spinner(
     message: &str,

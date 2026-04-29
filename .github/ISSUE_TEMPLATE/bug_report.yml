@@ -37,7 +37,7 @@ body:
     attributes:
       label: Solver
       description: Which solver was active?
-      placeholder: "e.g., PIBT, RHCR+PIBT, RHCR+PBS, RT-LaCAM"
+      placeholder: "e.g., PIBT, RHCR-PBS, Token Passing"
 
   - type: input
     id: agent-count

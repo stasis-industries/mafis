@@ -243,6 +243,8 @@ fn heatmap_density_accumulates_when_visible() {
 fn heatmap_traffic_accumulates_when_visible() {
     let mut h = SimHarness::new(4);
     h.app.world_mut().resource_mut::<crate::analysis::AnalysisConfig>().heatmap_visible = true;
+    h.app.world_mut().resource_mut::<crate::analysis::heatmap::HeatmapState>().mode =
+        crate::analysis::heatmap::HeatmapMode::Traffic;
     h.run_ticks(5);
     let total: u32 = h.heatmap().traffic.iter().sum();
     assert!(total > 0, "got {total}");

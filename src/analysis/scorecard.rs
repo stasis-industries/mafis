@@ -81,37 +81,6 @@ impl ScorecardState {
 }
 
 // ---------------------------------------------------------------------------
-// Pure math helpers
-// ---------------------------------------------------------------------------
-
-/// Shannon entropy from an iterator of density values, normalized to [0, 1].
-/// Zero-allocation: iterates twice via Clone.
-pub fn compute_heatmap_entropy(
-    density: impl Iterator<Item = f32> + Clone,
-    grid_cells: usize,
-) -> f64 {
-    if grid_cells == 0 {
-        return 0.0;
-    }
-
-    let total: f32 = density.clone().sum();
-    if total <= 0.0 {
-        return 0.0;
-    }
-
-    let mut entropy: f64 = 0.0;
-    for d in density {
-        if d > 0.0 {
-            let p = d as f64 / total as f64;
-            entropy -= p * p.ln();
-        }
-    }
-
-    let max_entropy = (grid_cells as f64).ln();
-    if max_entropy > 0.0 { (entropy / max_entropy).clamp(0.0, 1.0) } else { 0.0 }
-}
-
-// ---------------------------------------------------------------------------
 // System
 // ---------------------------------------------------------------------------
 
@@ -224,27 +193,6 @@ mod tests {
         assert_eq!(sc.survival_rate, 1.0);
         assert_eq!(sc.critical_time, 0.0);
         assert!(!sc.has_faults);
-    }
-
-    // ── Heatmap entropy ──────────────────────────────────────────────
-
-    #[test]
-    fn entropy_empty_is_zero() {
-        assert_eq!(compute_heatmap_entropy(std::iter::empty(), 0), 0.0);
-    }
-
-    #[test]
-    fn entropy_uniform_is_maximal() {
-        let density = [1.0f32, 1.0, 1.0, 1.0];
-        let e = compute_heatmap_entropy(density.iter().copied(), 4);
-        assert!((e - 1.0).abs() < 0.01, "expected ~1.0, got {e}");
-    }
-
-    #[test]
-    fn entropy_concentrated_is_near_zero() {
-        let density = [100.0f32, 0.0, 0.0, 0.0];
-        let e = compute_heatmap_entropy(density.iter().copied(), 4);
-        assert!(e < 0.1, "expected < 0.1, got {e}");
     }
 
     // ── Fault Tolerance (FT = P_fault / P_nominal) ───────────────────

@@ -76,7 +76,7 @@ impl fmt::Display for SolverError {
 }
 
 pub trait MAPFSolver: Send + Sync + 'static {
-    /// Short identifier for this solver (e.g. `"cbs"`, `"pibt"`, `"lacam"`).
+    /// Short identifier for this solver (e.g. `"pibt"`, `"rhcr_pbs"`, `"token_passing"`).
     fn name(&self) -> &str;
 
     /// Structured metadata about this solver's properties.

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Topology Effect Analysis for MAFIS Paper.
+Topology Effect Analysis for MAFIS.
 
 RQ2: Does warehouse layout affect fault resilience?
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Solver Resilience Analysis for MAFIS Paper.
+Solver Resilience Analysis for MAFIS.
 
 RQ1: How do different solvers degrade under each fault type?
 

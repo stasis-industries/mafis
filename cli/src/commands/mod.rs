@@ -1,5 +1,6 @@
 mod build;
 mod experiment;
+mod fault;
 mod results;
 mod test;
 
@@ -35,5 +36,9 @@ pub fn dispatch(cmd: Command) -> anyhow::Result<()> {
         Command::Test { filter, release } => test::test(&root, filter.as_deref(), release),
         Command::Serve { no_build, port } => build::serve(&root, no_build, port),
         Command::Build { native } => build::build(&root, native),
+        Command::Fault { action } => match action {
+            FaultCommand::Run { fault_config } => fault::run_with_config(&root, &fault_config),
+            FaultCommand::Validate { fault_config } => fault::validate_config(&fault_config),
+        },
     }
 }

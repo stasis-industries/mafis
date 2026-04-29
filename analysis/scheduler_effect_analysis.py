@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Scheduler Effect Analysis for MAFIS Paper.
+Scheduler Effect Analysis for MAFIS.
 
 RQ4: Does task assignment strategy affect fault resilience?
 

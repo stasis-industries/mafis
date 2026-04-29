@@ -33,7 +33,6 @@ impl Plugin for CorePlugin {
                 grid::GridPlugin,
                 agent::AgentPlugin,
                 seed::SeedPlugin,
-                simulation::SimulationPlugin,
                 task::TaskPlugin,
                 queue::QueuePlugin,
                 phase::PhasePlugin,

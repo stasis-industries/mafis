@@ -229,7 +229,8 @@ impl Plugin for AnalysisPlugin {
                         .run_if(|m: Res<MetricsConfig>| m.any_fault()),
                     baseline::update_baseline_diff
                         .in_set(AnalysisSet::Metrics)
-                        .run_if(in_state(SimState::Running)),
+                        .run_if(in_state(SimState::Running))
+                        .run_if(|m: Res<MetricsConfig>| m.any_core()),
                     #[cfg(target_arch = "wasm32")]
                     baseline::check_position_parity
                         .in_set(AnalysisSet::Metrics)
@@ -241,22 +242,25 @@ impl Plugin for AnalysisPlugin {
                     heatmap::accumulate_heatmap_density
                         .in_set(AnalysisSet::Metrics)
                         .run_if(in_state(SimState::Running))
-                        .run_if(|config: Res<AnalysisConfig>| config.heatmap_visible),
+                        .run_if(|config: Res<AnalysisConfig>, hm: Res<heatmap::HeatmapState>| {
+                            config.heatmap_visible && hm.mode == heatmap::HeatmapMode::Density
+                        }),
                     heatmap::accumulate_heatmap_traffic
                         .in_set(AnalysisSet::Metrics)
                         .run_if(in_state(SimState::Running))
-                        .run_if(|config: Res<AnalysisConfig>| config.heatmap_visible),
+                        .run_if(|config: Res<AnalysisConfig>, hm: Res<heatmap::HeatmapState>| {
+                            config.heatmap_visible && hm.mode == heatmap::HeatmapMode::Traffic
+                        }),
                     heatmap::accumulate_heatmap_criticality
                         .in_set(AnalysisSet::Metrics)
-                        .after(AnalysisSet::BuildGraph)
                         .run_if(in_state(SimState::Running))
                         .run_if(|config: Res<AnalysisConfig>, hm: Res<heatmap::HeatmapState>| {
                             config.heatmap_visible && hm.mode == heatmap::HeatmapMode::Criticality
                         }),
                     dependency::compute_betweenness_criticality
                         .in_set(AnalysisSet::Metrics)
-                        .after(AnalysisSet::BuildGraph)
-                        .run_if(in_state(SimState::Running)),
+                        .run_if(in_state(SimState::Running))
+                        .run_if(|m: Res<MetricsConfig>| m.any_cascade()),
                 ),
             )
             .add_systems(

@@ -33,3 +33,11 @@ results/
 # OS artifacts
 Thumbs.db
 Desktop.ini
+
+# Owner's local working files (paper drafts + experiment data)
+/tmp/
+/results_apr9_backup/
+/CLAUDE.original.md
+
+# Demo asset (host as GitHub release attachment instead)
+/assets/gif/demo.gif

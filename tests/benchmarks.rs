@@ -140,6 +140,7 @@ fn run_on_map(
         seed,
         tick_count: TICK_COUNT,
         custom_map: Some((grid, zones)),
+        rhcr_override: None,
     };
     run_single_experiment(&config)
 }

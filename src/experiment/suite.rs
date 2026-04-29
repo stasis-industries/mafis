@@ -1,4 +1,4 @@
-//! Paper experiment matrix definitions.
+//! Headline experiment matrix definitions.
 //!
 //! Three focused experiments designed to answer distinct research questions:
 //!
@@ -30,6 +30,13 @@ const SEEDS_50: &[u64] = &[
 
 /// Standard simulation length — 500 ticks gives ~100 tasks at steady state.
 const TICK_COUNT: u64 = 500;
+
+/// Observatory-proof tick count — 300 ticks preserves fault-regime signal
+/// while cutting per-run cost ~40% vs `TICK_COUNT`. Used by the cheap
+/// `run_rhcr_braess_observatory_proof` launcher to satisfy workshop-tier
+/// rigor (correlation, not causation) without the 20-50h full-ablation cost.
+#[cfg(test)]
+const TICK_COUNT_PROOF: u64 = 300;
 
 // ---------------------------------------------------------------------------
 // Fault scenarios used across all experiments
@@ -108,7 +115,7 @@ fn intermittent() -> FaultScenario {
 ///
 /// Category 1 — Recoverable: ZoneOutage (spatial strip, 50t), IntermittentFault
 /// Category 2 — Permanent-distributed: BurstFailure (20%/50%), WearBased (medium/high)
-fn paper_scenarios() -> Vec<Option<FaultScenario>> {
+fn core_scenarios() -> Vec<Option<FaultScenario>> {
     vec![
         Some(burst_20()),
         Some(burst_50()),
@@ -135,11 +142,12 @@ pub fn solver_resilience() -> ExperimentMatrix {
     ExperimentMatrix {
         solvers: vec!["pibt".into(), "rhcr_pbs".into(), "token_passing".into()],
         topologies: vec!["warehouse_single_dock".into()],
-        scenarios: paper_scenarios(),
+        scenarios: core_scenarios(),
         schedulers: vec!["random".into()],
         agent_counts: vec![40],
         seeds: SEEDS.to_vec(),
         tick_count: TICK_COUNT,
+        rhcr_overrides: vec![None],
     }
 }
 
@@ -160,7 +168,7 @@ pub fn solver_resilience() -> ExperimentMatrix {
 /// Note: agent counts are per-topology, not Cartesian. This function returns
 /// 5 separate matrices (one per topology) to be run and merged.
 pub fn topology_effect() -> Vec<ExperimentMatrix> {
-    let scenarios = paper_scenarios();
+    let scenarios = core_scenarios();
     vec![
         ExperimentMatrix {
             solvers: vec!["pibt".into()],
@@ -170,6 +178,7 @@ pub fn topology_effect() -> Vec<ExperimentMatrix> {
             agent_counts: vec![40],
             seeds: SEEDS.to_vec(),
             tick_count: TICK_COUNT,
+            rhcr_overrides: vec![None],
         },
         ExperimentMatrix {
             solvers: vec!["pibt".into()],
@@ -179,6 +188,7 @@ pub fn topology_effect() -> Vec<ExperimentMatrix> {
             agent_counts: vec![80],
             seeds: SEEDS.to_vec(),
             tick_count: TICK_COUNT,
+            rhcr_overrides: vec![None],
         },
         ExperimentMatrix {
             solvers: vec!["pibt".into()],
@@ -188,6 +198,7 @@ pub fn topology_effect() -> Vec<ExperimentMatrix> {
             agent_counts: vec![30],
             seeds: SEEDS.to_vec(),
             tick_count: TICK_COUNT,
+            rhcr_overrides: vec![None],
         },
         ExperimentMatrix {
             solvers: vec!["pibt".into()],
@@ -197,6 +208,7 @@ pub fn topology_effect() -> Vec<ExperimentMatrix> {
             agent_counts: vec![25],
             seeds: SEEDS.to_vec(),
             tick_count: TICK_COUNT,
+            rhcr_overrides: vec![None],
         },
         ExperimentMatrix {
             solvers: vec!["pibt".into()],
@@ -206,6 +218,7 @@ pub fn topology_effect() -> Vec<ExperimentMatrix> {
             agent_counts: vec![35],
             seeds: SEEDS.to_vec(),
             tick_count: TICK_COUNT,
+            rhcr_overrides: vec![None],
         },
     ]
 }
@@ -226,11 +239,12 @@ pub fn scale_sensitivity() -> ExperimentMatrix {
     ExperimentMatrix {
         solvers: vec!["pibt".into()],
         topologies: vec!["warehouse_single_dock".into()],
-        scenarios: paper_scenarios(),
+        scenarios: core_scenarios(),
         schedulers: vec!["random".into()],
         agent_counts: vec![10, 20, 40, 80],
         seeds: SEEDS.to_vec(),
         tick_count: TICK_COUNT,
+        rhcr_overrides: vec![None],
     }
 }
 
@@ -250,11 +264,12 @@ pub fn scheduler_effect() -> ExperimentMatrix {
     ExperimentMatrix {
         solvers: vec!["pibt".into()],
         topologies: vec!["warehouse_single_dock".into()],
-        scenarios: paper_scenarios(),
+        scenarios: core_scenarios(),
         schedulers: vec!["random".into(), "closest".into()],
         agent_counts: vec![40],
         seeds: SEEDS.to_vec(),
         tick_count: TICK_COUNT,
+        rhcr_overrides: vec![None],
     }
 }
 
@@ -280,11 +295,12 @@ pub fn braess_resilience() -> ExperimentMatrix {
     ExperimentMatrix {
         solvers: vec!["pibt".into(), "rhcr_pbs".into(), "token_passing".into()],
         topologies: vec!["warehouse_single_dock".into()],
-        scenarios: paper_scenarios(),
+        scenarios: core_scenarios(),
         schedulers: vec!["random".into()],
         agent_counts: vec![10, 20, 40, 80],
         seeds: SEEDS_50.to_vec(),
         tick_count: TICK_COUNT,
+        rhcr_overrides: vec![None],
     }
 }
 
@@ -297,7 +313,7 @@ pub fn braess_resilience() -> ExperimentMatrix {
 /// experiments). The overlap is intentional — each experiment is self-contained
 /// and produces its own table. Deduplication happens at the analysis stage if
 /// needed, not at the run stage.
-pub fn all_paper_experiments() -> Vec<(&'static str, ExperimentMatrix)> {
+pub fn all_legacy_experiments() -> Vec<(&'static str, ExperimentMatrix)> {
     let mut experiments = vec![
         ("solver_resilience", solver_resilience()),
         ("scale_sensitivity", scale_sensitivity()),
@@ -324,7 +340,7 @@ pub fn all_paper_experiments() -> Vec<(&'static str, ExperimentMatrix)> {
 ///
 /// Every solver has a faithful Rust implementation traceable to a
 /// public reference.
-fn paams_solvers() -> Vec<String> {
+fn experiment_solvers() -> Vec<String> {
     vec!["pibt".into(), "rhcr_pbs".into(), "token_passing".into()]
 }
 
@@ -333,17 +349,19 @@ fn paams_solvers() -> Vec<String> {
 /// Per-topology matrices with agent counts varying by map capacity.
 /// Three density levels per topology: low / default / high.
 ///
-/// E1: 3 solvers × 6 scenarios × 3 agent counts × 3 topologies × 30 seeds = 4,860 runs
-/// E2: 3 solvers × 6 scenarios × 2 schedulers × 1 topology × 30 seeds = 1,080 runs
-/// Total: 4,320 runs
-pub fn paams_experiments() -> Vec<(&'static str, ExperimentMatrix)> {
-    let solvers = paams_solvers();
-    let scenarios = paper_scenarios();
+/// E1a (single-dock):  3 solvers × 6 scenarios × 3 agent counts × 30 seeds = 1,620 paired
+/// E1b (dual-dock):    3 solvers × 6 scenarios × 3 agent counts × 30 seeds = 1,620 paired
+/// E1 total:                                                                  3,240 paired
+/// E2 (scheduler):     3 solvers × 6 scenarios × 2 schedulers × 1 count × 30 seeds = 1,080 paired
+/// Grand total:                                                                       4,320 paired runs
+pub fn core_experiment_suite() -> Vec<(&'static str, ExperimentMatrix)> {
+    let solvers = experiment_solvers();
+    let scenarios = core_scenarios();
 
     vec![
         // E1a: warehouse_single_dock (57×33) — 20/40/60 agents
         (
-            "paams_warehouse_single_dock",
+            "warehouse_single_dock_experiment",
             ExperimentMatrix {
                 solvers: solvers.clone(),
                 topologies: vec!["warehouse_single_dock".into()],
@@ -352,11 +370,12 @@ pub fn paams_experiments() -> Vec<(&'static str, ExperimentMatrix)> {
                 agent_counts: vec![20, 40, 60],
                 seeds: SEEDS.to_vec(),
                 tick_count: TICK_COUNT,
+                rhcr_overrides: vec![None],
             },
         ),
         // E1b: warehouse_dual_dock (61×33) — 40/80/120 agents
         (
-            "paams_warehouse_dual_dock",
+            "warehouse_dual_dock_experiment",
             ExperimentMatrix {
                 solvers: solvers.clone(),
                 topologies: vec!["warehouse_dual_dock".into()],
@@ -365,11 +384,12 @@ pub fn paams_experiments() -> Vec<(&'static str, ExperimentMatrix)> {
                 agent_counts: vec![40, 80, 120],
                 seeds: SEEDS.to_vec(),
                 tick_count: TICK_COUNT,
+                rhcr_overrides: vec![None],
             },
         ),
         // E2: Scheduler effect (warehouse_single_dock, 40 agents)
         (
-            "paams_scheduler_effect",
+            "scheduler_effect_experiment",
             ExperimentMatrix {
                 solvers,
                 topologies: vec!["warehouse_single_dock".into()],
@@ -378,19 +398,20 @@ pub fn paams_experiments() -> Vec<(&'static str, ExperimentMatrix)> {
                 agent_counts: vec![40],
                 seeds: SEEDS.to_vec(),
                 tick_count: TICK_COUNT,
+                rhcr_overrides: vec![None],
             },
         ),
     ]
 }
 
 // ---------------------------------------------------------------------------
-// Aisle-width sweep (PAAMS 2026 — structural cascade claim)
+// Aisle-width sweep — structural cascade claim
 // ---------------------------------------------------------------------------
 //
 // Three single-dock variants that differ ONLY in inter-rack aisle width:
 //   SD-w1 (57×33, aisle=1): existing warehouse_single_dock, fleet {20, 40, 60}
-//   SD-w2 (57×44, aisle=2): warehouse_sd_w2,               fleet {36, 72, 108}
-//   SD-w3 (57×55, aisle=3): warehouse_sd_w3,               fleet {50, 100, 151}
+//   SD-w2 (57×44, aisle=2): warehouse_single_dock_w2,               fleet {36, 72, 108}
+//   SD-w3 (57×55, aisle=3): warehouse_single_dock_w3,               fleet {50, 100, 151}
 //
 // Rack count (800 cells), pickup density, and fleet-density (agents /
 // walkable-cell) are held constant across the three maps; only aisle width —
@@ -431,10 +452,10 @@ pub fn paams_experiments() -> Vec<(&'static str, ExperimentMatrix)> {
 ///   SD-w3 out-env   2 solvers × 1 count  × 6 × 30 =  360
 ///   ────────────────────────────────────────────────────
 ///                                                   4500
-pub fn paams_aisle_width() -> Vec<(&'static str, ExperimentMatrix)> {
-    let solvers_all = paams_solvers();
+pub fn aisle_width_sweep() -> Vec<(&'static str, ExperimentMatrix)> {
+    let solvers_all = experiment_solvers();
     let solvers_scalable: Vec<String> = vec!["pibt".into(), "rhcr_pbs".into()];
-    let scenarios = paper_scenarios();
+    let scenarios = core_scenarios();
 
     vec![
         // SD-w1 (aisle width 1) — fully in-envelope
@@ -448,6 +469,7 @@ pub fn paams_aisle_width() -> Vec<(&'static str, ExperimentMatrix)> {
                 agent_counts: vec![20, 40, 60],
                 seeds: SEEDS.to_vec(),
                 tick_count: TICK_COUNT,
+                rhcr_overrides: vec![None],
             },
         ),
         // SD-w2 (aisle width 2) in-envelope
@@ -455,12 +477,13 @@ pub fn paams_aisle_width() -> Vec<(&'static str, ExperimentMatrix)> {
             "aisle_width_w2_in_env",
             ExperimentMatrix {
                 solvers: solvers_all.clone(),
-                topologies: vec!["warehouse_sd_w2".into()],
+                topologies: vec!["warehouse_single_dock_w2".into()],
                 scenarios: scenarios.clone(),
                 schedulers: vec!["closest".into()],
                 agent_counts: vec![36, 72],
                 seeds: SEEDS.to_vec(),
                 tick_count: TICK_COUNT,
+                rhcr_overrides: vec![None],
             },
         ),
         // SD-w2 out-envelope — PIBT + RHCR-PBS only
@@ -468,12 +491,13 @@ pub fn paams_aisle_width() -> Vec<(&'static str, ExperimentMatrix)> {
             "aisle_width_w2_out_env",
             ExperimentMatrix {
                 solvers: solvers_scalable.clone(),
-                topologies: vec!["warehouse_sd_w2".into()],
+                topologies: vec!["warehouse_single_dock_w2".into()],
                 scenarios: scenarios.clone(),
                 schedulers: vec!["closest".into()],
                 agent_counts: vec![108],
                 seeds: SEEDS.to_vec(),
                 tick_count: TICK_COUNT,
+                rhcr_overrides: vec![None],
             },
         ),
         // SD-w3 (aisle width 3) in-envelope
@@ -481,12 +505,13 @@ pub fn paams_aisle_width() -> Vec<(&'static str, ExperimentMatrix)> {
             "aisle_width_w3_in_env",
             ExperimentMatrix {
                 solvers: solvers_all,
-                topologies: vec!["warehouse_sd_w3".into()],
+                topologies: vec!["warehouse_single_dock_w3".into()],
                 scenarios: scenarios.clone(),
                 schedulers: vec!["closest".into()],
                 agent_counts: vec![50, 100],
                 seeds: SEEDS.to_vec(),
                 tick_count: TICK_COUNT,
+                rhcr_overrides: vec![None],
             },
         ),
         // SD-w3 out-envelope — PIBT + RHCR-PBS only
@@ -494,12 +519,13 @@ pub fn paams_aisle_width() -> Vec<(&'static str, ExperimentMatrix)> {
             "aisle_width_w3_out_env",
             ExperimentMatrix {
                 solvers: solvers_scalable,
-                topologies: vec!["warehouse_sd_w3".into()],
+                topologies: vec!["warehouse_single_dock_w3".into()],
                 scenarios,
                 schedulers: vec!["closest".into()],
                 agent_counts: vec![151],
                 seeds: SEEDS.to_vec(),
                 tick_count: TICK_COUNT,
+                rhcr_overrides: vec![None],
             },
         ),
     ]
@@ -520,6 +546,7 @@ pub fn smoke_test() -> ExperimentMatrix {
         agent_counts: vec![15],
         seeds: vec![42, 123],
         tick_count: 100,
+        rhcr_overrides: vec![None],
     }
 }
 
@@ -538,6 +565,7 @@ pub fn solver_benchmark() -> ExperimentMatrix {
         agent_counts: vec![40],
         seeds: vec![42, 123, 456, 789, 1024],
         tick_count: 500,
+        rhcr_overrides: vec![None],
     }
 }
 
@@ -571,15 +599,15 @@ mod tests {
     }
 
     #[test]
-    fn all_paper_total() {
-        let all = all_paper_experiments();
+    fn all_legacy_total() {
+        let all = all_legacy_experiments();
         let total: usize = all.iter().map(|(_, m)| m.total_runs()).sum();
         assert_eq!(total, 2520); // 540 + 900 + 720 + 360
     }
 
     #[test]
-    fn paams_experiment_counts() {
-        let experiments = paams_experiments();
+    fn experiment_counts() {
+        let experiments = core_experiment_suite();
         let total: usize = experiments.iter().map(|(_, m)| m.total_runs()).sum();
         // E1: 3 solvers × 6 scenarios × 3 counts × 30 seeds × 2 topos = 3,240
         // E2: 3 solvers × 6 scenarios × 2 schedulers × 30 seeds = 1,080
@@ -587,8 +615,8 @@ mod tests {
     }
 
     #[test]
-    fn paams_aisle_width_counts() {
-        let experiments = paams_aisle_width();
+    fn aisle_width_counts() {
+        let experiments = aisle_width_sweep();
         assert_eq!(experiments.len(), 5);
         let total: usize = experiments.iter().map(|(_, m)| m.total_runs()).sum();
         //   SD-w1:          3 × 3 × 6 × 30 = 1620
@@ -601,9 +629,9 @@ mod tests {
     }
 
     #[test]
-    fn paams_aisle_width_tp_only_in_envelope() {
+    fn aisle_width_tp_only_in_envelope() {
         // Token Passing must appear only in cells with num_agents ≤ 100.
-        for (name, m) in paams_aisle_width() {
+        for (name, m) in aisle_width_sweep() {
             let has_tp = m.solvers.iter().any(|s| s == "token_passing");
             let max_n = *m.agent_counts.iter().max().unwrap();
             if has_tp {
@@ -642,6 +670,7 @@ mod tests {
             agent_counts: vec![20, 40],
             seeds: SEEDS.to_vec(),
             tick_count: TICK_COUNT,
+            rhcr_overrides: vec![None],
         };
 
         let total = matrix.total_runs();
@@ -682,6 +711,7 @@ mod tests {
             agent_counts: vec![20],
             seeds: SEEDS.to_vec(),
             tick_count: TICK_COUNT,
+            rhcr_overrides: vec![None],
         };
 
         let total = matrix.total_runs();
@@ -736,7 +766,7 @@ mod tests {
     /// warehouse_single_dock with 40 agents for 500 ticks (5 seeds, no faults)
     /// and validates:
     /// 1. All solvers produce non-zero throughput
-    /// 2. Performance ranking roughly matches paper expectations
+    /// 2. Performance ranking roughly matches reference expectations
     /// 3. No solver is catastrophically worse than expected
     ///
     /// Usage: cargo test run_solver_benchmark -- --ignored --nocapture
@@ -758,6 +788,7 @@ mod tests {
             agent_counts: vec![40],
             seeds: vec![42, 123, 456, 789, 1024],
             tick_count: 500,
+            rhcr_overrides: vec![None],
         };
 
         let total = matrix.total_runs();
@@ -817,7 +848,7 @@ mod tests {
     /// written to `results/aisle_width/`. Set `MAFIS_TICK_EXPORT_DIR` to capture
     /// per-tick throughput series (see runner::export_tick_series_if_enabled).
     ///
-    /// Total: 4500 runs (see paams_aisle_width_counts test).
+    /// Total: 4500 runs (see aisle_width_counts test).
     ///
     /// Usage:
     ///   MAFIS_TICK_EXPORT_DIR="$(pwd)/results/aisle_width/ticks" \
@@ -834,7 +865,7 @@ mod tests {
         let out_dir = "results/aisle_width";
         fs::create_dir_all(out_dir).unwrap();
 
-        let matrices = paams_aisle_width();
+        let matrices = aisle_width_sweep();
         let grand_total: usize = matrices.iter().map(|(_, m)| m.total_runs()).sum();
         let sweep_start = Instant::now();
 
@@ -864,6 +895,515 @@ mod tests {
         let total_s = sweep_start.elapsed().as_secs();
         eprintln!(
             "\n=== Aisle-width sweep complete: {grand_total} runs in {}h{:02}m{:02}s ===",
+            total_s / 3600,
+            (total_s % 3600) / 60,
+            total_s % 60,
+        );
+    }
+
+    /// Post-kick-back-fix re-run of the full aisle-width sweep.
+    ///
+    /// Drops SD-w1 n=20 (lowest density — contamination <1%, not worth the
+    /// ~540 runs). Writes to `results/aisle_width/post_kickback_fix/` so
+    /// pre/post CSVs coexist for diff analysis. Total: ~3960 runs.
+    ///
+    /// Usage:
+    ///   cargo test --release --lib run_aisle_width_priority_rerun -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn run_aisle_width_priority_rerun() {
+        use crate::experiment::config::ExperimentMatrix;
+        use crate::experiment::export::{write_runs_csv, write_summary_csv};
+        use crate::experiment::runner::{ExperimentProgress, run_matrix};
+        use std::fs;
+        use std::sync::{Arc, Mutex};
+        use std::time::Instant;
+
+        let out_dir = "results/aisle_width/post_kickback_fix";
+        fs::create_dir_all(out_dir).unwrap();
+
+        let solvers_all = experiment_solvers();
+        let solvers_scalable: Vec<String> = vec!["pibt".into(), "rhcr_pbs".into()];
+        let scenarios = core_scenarios();
+
+        // Same cells as `aisle_width_sweep` MINUS SD-w1 n=20 (lowest
+        // density, <1% drift expected from the kick-back fix). Priority
+        // cells are all the medium and high-density tiers across all
+        // three topologies plus the out-envelope tiers for paradigm-limit
+        // continuity.
+        let matrices: Vec<(&'static str, ExperimentMatrix)> = vec![
+            (
+                "aisle_width_w1_mh",
+                ExperimentMatrix {
+                    solvers: solvers_all.clone(),
+                    topologies: vec!["warehouse_single_dock".into()],
+                    scenarios: scenarios.clone(),
+                    schedulers: vec!["closest".into()],
+                    agent_counts: vec![40, 60],
+                    seeds: SEEDS.to_vec(),
+                    tick_count: TICK_COUNT,
+                    rhcr_overrides: vec![None],
+                },
+            ),
+            (
+                "aisle_width_w2_in_env",
+                ExperimentMatrix {
+                    solvers: solvers_all.clone(),
+                    topologies: vec!["warehouse_single_dock_w2".into()],
+                    scenarios: scenarios.clone(),
+                    schedulers: vec!["closest".into()],
+                    agent_counts: vec![36, 72],
+                    seeds: SEEDS.to_vec(),
+                    tick_count: TICK_COUNT,
+                    rhcr_overrides: vec![None],
+                },
+            ),
+            (
+                "aisle_width_w2_out_env",
+                ExperimentMatrix {
+                    solvers: solvers_scalable.clone(),
+                    topologies: vec!["warehouse_single_dock_w2".into()],
+                    scenarios: scenarios.clone(),
+                    schedulers: vec!["closest".into()],
+                    agent_counts: vec![108],
+                    seeds: SEEDS.to_vec(),
+                    tick_count: TICK_COUNT,
+                    rhcr_overrides: vec![None],
+                },
+            ),
+            (
+                "aisle_width_w3_in_env",
+                ExperimentMatrix {
+                    solvers: solvers_all,
+                    topologies: vec!["warehouse_single_dock_w3".into()],
+                    scenarios: scenarios.clone(),
+                    schedulers: vec!["closest".into()],
+                    agent_counts: vec![50, 100],
+                    seeds: SEEDS.to_vec(),
+                    tick_count: TICK_COUNT,
+                    rhcr_overrides: vec![None],
+                },
+            ),
+            (
+                "aisle_width_w3_out_env",
+                ExperimentMatrix {
+                    solvers: solvers_scalable,
+                    topologies: vec!["warehouse_single_dock_w3".into()],
+                    scenarios,
+                    schedulers: vec!["closest".into()],
+                    agent_counts: vec![151],
+                    seeds: SEEDS.to_vec(),
+                    tick_count: TICK_COUNT,
+                    rhcr_overrides: vec![None],
+                },
+            ),
+        ];
+
+        let grand_total: usize = matrices.iter().map(|(_, m)| m.total_runs()).sum();
+        let sweep_start = Instant::now();
+        eprintln!(
+            "\n=== Post-kick-back-fix aisle-width re-run: {grand_total} runs across {} matrices ===",
+            matrices.len()
+        );
+
+        for (name, matrix) in matrices {
+            let total = matrix.total_runs();
+            eprintln!("\n--- {name}: {total} runs ---");
+            let progress =
+                Arc::new(Mutex::new(ExperimentProgress { current: 0, total, label: name.into() }));
+            let m_start = Instant::now();
+            let result = run_matrix(&matrix, Some(&progress));
+            let m_wall_s = m_start.elapsed().as_secs();
+            eprintln!(
+                "  done in {m_wall_s}s ({:.2} runs/s)",
+                total as f64 / m_wall_s.max(1) as f64
+            );
+            let runs_path = format!("{out_dir}/{name}_runs.csv");
+            let summary_path = format!("{out_dir}/{name}_summary.csv");
+            write_runs_csv(&mut fs::File::create(&runs_path).unwrap(), &result.runs).unwrap();
+            write_summary_csv(&mut fs::File::create(&summary_path).unwrap(), &result.summaries)
+                .unwrap();
+            eprintln!("  wrote {runs_path}, {summary_path}");
+        }
+
+        let total_s = sweep_start.elapsed().as_secs();
+        eprintln!(
+            "\n=== Post-kick-back-fix re-run complete: {grand_total} runs in {}h{:02}m{:02}s ===",
+            total_s / 3600,
+            (total_s % 3600) / 60,
+            total_s % 60,
+        );
+    }
+
+    /// TP-only re-run of the in-envelope aisle-width cells. Used after the
+    /// 2026-04-20 TP goal-change-sync + rewind-determinism bug fixes to
+    /// produce clean TP mitigation-delta / cascade numbers without reruning
+    /// the (unaffected) PIBT + RHCR-PBS cells.
+    ///
+    /// Total: 1260 runs
+    ///   SD-w1 TP × {20, 40, 60} × 6 scenarios × 30 seeds = 540
+    ///   SD-w2 TP × {36, 72}     × 6            × 30      = 360
+    ///   SD-w3 TP × {50, 100}    × 6            × 30      = 360
+    ///
+    /// Usage:
+    ///   cargo test --release --lib run_aisle_width_tp_only -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn run_aisle_width_tp_only() {
+        use crate::experiment::config::ExperimentMatrix;
+        use crate::experiment::export::{write_runs_csv, write_summary_csv};
+        use crate::experiment::runner::{ExperimentProgress, run_matrix};
+        use std::fs;
+        use std::sync::{Arc, Mutex};
+        use std::time::Instant;
+
+        let out_dir = "results/aisle_width/tp_rerun";
+        fs::create_dir_all(out_dir).unwrap();
+
+        let scenarios = core_scenarios();
+        let tp_solver: Vec<String> = vec!["token_passing".into()];
+
+        let matrices: Vec<(&'static str, ExperimentMatrix)> = vec![
+            (
+                "aisle_width_w1_tp",
+                ExperimentMatrix {
+                    solvers: tp_solver.clone(),
+                    topologies: vec!["warehouse_single_dock".into()],
+                    scenarios: scenarios.clone(),
+                    schedulers: vec!["closest".into()],
+                    agent_counts: vec![20, 40, 60],
+                    seeds: SEEDS.to_vec(),
+                    tick_count: TICK_COUNT,
+                    rhcr_overrides: vec![None],
+                },
+            ),
+            (
+                "aisle_width_w2_in_env_tp",
+                ExperimentMatrix {
+                    solvers: tp_solver.clone(),
+                    topologies: vec!["warehouse_single_dock_w2".into()],
+                    scenarios: scenarios.clone(),
+                    schedulers: vec!["closest".into()],
+                    agent_counts: vec![36, 72],
+                    seeds: SEEDS.to_vec(),
+                    tick_count: TICK_COUNT,
+                    rhcr_overrides: vec![None],
+                },
+            ),
+            (
+                "aisle_width_w3_in_env_tp",
+                ExperimentMatrix {
+                    solvers: tp_solver,
+                    topologies: vec!["warehouse_single_dock_w3".into()],
+                    scenarios,
+                    schedulers: vec!["closest".into()],
+                    agent_counts: vec![50, 100],
+                    seeds: SEEDS.to_vec(),
+                    tick_count: TICK_COUNT,
+                    rhcr_overrides: vec![None],
+                },
+            ),
+        ];
+
+        let grand_total: usize = matrices.iter().map(|(_, m)| m.total_runs()).sum();
+        let sweep_start = Instant::now();
+        eprintln!("\n=== TP re-run: {grand_total} runs across {} matrices ===", matrices.len());
+
+        for (name, matrix) in matrices {
+            let total = matrix.total_runs();
+            eprintln!("\n--- {name}: {total} runs ---");
+            let progress =
+                Arc::new(Mutex::new(ExperimentProgress { current: 0, total, label: name.into() }));
+            let m_start = Instant::now();
+            let result = run_matrix(&matrix, Some(&progress));
+            let m_wall_s = m_start.elapsed().as_secs();
+            eprintln!(
+                "  done in {m_wall_s}s ({:.2} runs/s)",
+                total as f64 / m_wall_s.max(1) as f64
+            );
+            let runs_path = format!("{out_dir}/{name}_runs.csv");
+            let summary_path = format!("{out_dir}/{name}_summary.csv");
+            write_runs_csv(&mut fs::File::create(&runs_path).unwrap(), &result.runs).unwrap();
+            write_summary_csv(&mut fs::File::create(&summary_path).unwrap(), &result.summaries)
+                .unwrap();
+            eprintln!("  wrote {runs_path}, {summary_path}");
+        }
+
+        let total_s = sweep_start.elapsed().as_secs();
+        eprintln!(
+            "\n=== TP re-run complete: {grand_total} runs in {}h{:02}m{:02}s ===",
+            total_s / 3600,
+            (total_s % 3600) / 60,
+            total_s % 60,
+        );
+    }
+
+    /// RHCR-PBS Braess ablation — horizon × PBS node-limit sweep across all
+    /// density tiers on the 3 aisle-width topologies under the 2 temporary-fault
+    /// scenarios (ZoneOutage, IntermittentFault).
+    ///
+    /// Purpose: test whether the 6 flagged FT > 1.2 cells in the frozen
+    /// aisle-width sweep are driven by the default horizon h=15 saturating
+    /// PBS's `num_agents*3` node limit (→ LRA + PIBT fallback → brittle
+    /// baseline) or reflect a genuine fault-induced throughput gain.
+    ///
+    /// Axes:
+    /// - `horizon` ∈ {5, 10, 20} — middle of Li et al. 2021's w ∈ {5,10,20,∞}
+    /// - `node_limit_mult` ∈ {1, 3, 6} — 1× tests whether Braess worsens under
+    ///   tighter budget; 6× tests whether raising the budget eliminates it
+    ///
+    /// Volume: 3 topos × 3 densities × 2 scenarios × 9 overrides × 30 seeds
+    /// = 4860 faulted configs + 2430 baselines (cache-deduped across scenarios)
+    /// ≈ 7290 unique runs, ~40-50h on 8-core.
+    ///
+    /// Outputs: `results/aisle_width/rhcr_braess_ablation/{matrix_name}_{runs,summary}.csv`.
+    ///
+    /// Usage:
+    ///   cargo test --release --lib run_rhcr_braess_ablation -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn run_rhcr_braess_ablation() {
+        use crate::experiment::config::{ExperimentMatrix, RhcrConfigOverride};
+        use crate::experiment::export::{write_runs_csv, write_summary_csv};
+        use crate::experiment::runner::{ExperimentProgress, run_matrix};
+        use std::fs;
+        use std::sync::{Arc, Mutex};
+        use std::time::Instant;
+
+        let out_dir = "results/aisle_width/rhcr_braess_ablation";
+        fs::create_dir_all(out_dir).unwrap();
+
+        // Temporary-fault scenarios only — permanent faults (burst/wear) are
+        // out of the Braess regime per the frozen-result analysis.
+        let temp_scenarios = vec![Some(zone_outage()), Some(intermittent())];
+
+        // 9 ablation points: horizon × node_limit_mult
+        let overrides: Vec<Option<RhcrConfigOverride>> = {
+            let mut v = Vec::new();
+            for &h in &[5usize, 10, 20] {
+                for &m in &[1usize, 3, 6] {
+                    v.push(Some(RhcrConfigOverride { horizon: Some(h), node_limit_mult: Some(m) }));
+                }
+            }
+            v
+        };
+
+        let matrices: Vec<(&'static str, ExperimentMatrix)> = vec![
+            (
+                "rhcr_braess_w1",
+                ExperimentMatrix {
+                    solvers: vec!["rhcr_pbs".into()],
+                    topologies: vec!["warehouse_single_dock".into()],
+                    scenarios: temp_scenarios.clone(),
+                    schedulers: vec!["closest".into()],
+                    agent_counts: vec![20, 40, 60],
+                    seeds: SEEDS.to_vec(),
+                    tick_count: TICK_COUNT,
+                    rhcr_overrides: overrides.clone(),
+                },
+            ),
+            (
+                "rhcr_braess_w2",
+                ExperimentMatrix {
+                    solvers: vec!["rhcr_pbs".into()],
+                    topologies: vec!["warehouse_single_dock_w2".into()],
+                    scenarios: temp_scenarios.clone(),
+                    schedulers: vec!["closest".into()],
+                    agent_counts: vec![36, 72, 108],
+                    seeds: SEEDS.to_vec(),
+                    tick_count: TICK_COUNT,
+                    rhcr_overrides: overrides.clone(),
+                },
+            ),
+            (
+                "rhcr_braess_w3",
+                ExperimentMatrix {
+                    solvers: vec!["rhcr_pbs".into()],
+                    topologies: vec!["warehouse_single_dock_w3".into()],
+                    scenarios: temp_scenarios,
+                    schedulers: vec!["closest".into()],
+                    agent_counts: vec![50, 100, 151],
+                    seeds: SEEDS.to_vec(),
+                    tick_count: TICK_COUNT,
+                    rhcr_overrides: overrides,
+                },
+            ),
+        ];
+
+        let grand_total: usize = matrices.iter().map(|(_, m)| m.total_runs()).sum();
+        let sweep_start = Instant::now();
+        eprintln!(
+            "\n=== RHCR Braess ablation: {grand_total} runs across {} matrices ===",
+            matrices.len()
+        );
+
+        for (name, matrix) in matrices {
+            let total = matrix.total_runs();
+            eprintln!("\n--- {name}: {total} runs ---");
+            let progress =
+                Arc::new(Mutex::new(ExperimentProgress { current: 0, total, label: name.into() }));
+            let m_start = Instant::now();
+            let result = run_matrix(&matrix, Some(&progress));
+            let m_wall_s = m_start.elapsed().as_secs();
+            eprintln!(
+                "  done in {m_wall_s}s ({:.2} runs/s)",
+                total as f64 / m_wall_s.max(1) as f64
+            );
+            let runs_path = format!("{out_dir}/{name}_runs.csv");
+            let summary_path = format!("{out_dir}/{name}_summary.csv");
+            write_runs_csv(&mut fs::File::create(&runs_path).unwrap(), &result.runs).unwrap();
+            write_summary_csv(&mut fs::File::create(&summary_path).unwrap(), &result.summaries)
+                .unwrap();
+            eprintln!("  wrote {runs_path}, {summary_path}");
+        }
+
+        let total_s = sweep_start.elapsed().as_secs();
+        eprintln!(
+            "\n=== RHCR Braess ablation complete: {grand_total} runs in {}h{:02}m{:02}s ===",
+            total_s / 3600,
+            (total_s % 3600) / 60,
+            total_s % 60,
+        );
+    }
+
+    /// Observatory-proof run — cheap workshop-tier correlation between
+    /// `rhcr_partial_rate` and Fault Tolerance at the 6 flagged Braess cells.
+    ///
+    /// **Purpose:** demonstrate that the `rhcr_partial_rate` probe surfaces
+    /// the PBS scalability regime responsible for FT > 1.0 observations,
+    /// without running a full horizon × node-limit ablation (that's journal
+    /// scope — see follow-up roadmap).
+    ///
+    /// **Scope:** 3 flagged topo-density cells × 2 temporary-fault scenarios
+    /// × 5 override points × 20 seeds × 300 ticks. ~600 faulted configs +
+    /// ~300 cache-deduped baselines ≈ 900 sims. Wall ~2-3h on 8-core.
+    ///
+    /// **Override axis (minimal corner set):**
+    /// - `default` — no override (auto h=15, n=3); reproduces flagged FT
+    /// - `tight`          — h=5,  n_mult=1; tiny PBS tree
+    /// - `short_generous` — h=5,  n_mult=6; tiny tree, roomy budget
+    /// - `long_tight`     — h=20, n_mult=1; big tree, tight budget
+    /// - `long_generous`  — h=20, n_mult=6; big tree, roomy budget
+    ///
+    /// Interpretation: if Braess survives only at `default` and vanishes at
+    /// `long_generous`, the mechanism is PBS node-budget saturation. If it
+    /// persists across all 5, it's a deeper resilience phenomenon.
+    ///
+    /// Outputs: `results/aisle_width/rhcr_braess_observatory_proof/{matrix}_{runs,summary}.csv`.
+    ///
+    /// Usage:
+    ///   cargo test --release --lib run_rhcr_braess_observatory_proof -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn run_rhcr_braess_observatory_proof() {
+        use crate::experiment::config::{ExperimentMatrix, RhcrConfigOverride};
+        use crate::experiment::export::{write_runs_csv, write_summary_csv};
+        use crate::experiment::runner::{ExperimentProgress, run_matrix};
+        use std::fs;
+        use std::sync::{Arc, Mutex};
+        use std::time::Instant;
+
+        let out_dir = "results/aisle_width/rhcr_braess_observatory_proof";
+        fs::create_dir_all(out_dir).unwrap();
+
+        let temp_scenarios = vec![Some(zone_outage()), Some(intermittent())];
+
+        // 5 corners: default + 4 extremes of (h, n_mult)
+        let overrides: Vec<Option<RhcrConfigOverride>> = vec![
+            None,
+            Some(RhcrConfigOverride { horizon: Some(5), node_limit_mult: Some(1) }),
+            Some(RhcrConfigOverride { horizon: Some(5), node_limit_mult: Some(6) }),
+            Some(RhcrConfigOverride { horizon: Some(20), node_limit_mult: Some(1) }),
+            Some(RhcrConfigOverride { horizon: Some(20), node_limit_mult: Some(6) }),
+        ];
+
+        // 20-seed subset of SEEDS — sufficient for correlation + single-paragraph claim
+        let seeds_proof: Vec<u64> = SEEDS.iter().copied().take(20).collect();
+
+        // Flagged cells: one density per topology (the envelope-saturating row)
+        let matrices: Vec<(&'static str, ExperimentMatrix)> = vec![
+            (
+                "proof_w1_n60",
+                ExperimentMatrix {
+                    solvers: vec!["rhcr_pbs".into()],
+                    topologies: vec!["warehouse_single_dock".into()],
+                    scenarios: temp_scenarios.clone(),
+                    schedulers: vec!["closest".into()],
+                    agent_counts: vec![60],
+                    seeds: seeds_proof.clone(),
+                    tick_count: TICK_COUNT_PROOF,
+                    rhcr_overrides: overrides.clone(),
+                },
+            ),
+            (
+                "proof_w2_n108",
+                ExperimentMatrix {
+                    solvers: vec!["rhcr_pbs".into()],
+                    topologies: vec!["warehouse_single_dock_w2".into()],
+                    scenarios: temp_scenarios.clone(),
+                    schedulers: vec!["closest".into()],
+                    agent_counts: vec![108],
+                    seeds: seeds_proof.clone(),
+                    tick_count: TICK_COUNT_PROOF,
+                    rhcr_overrides: overrides.clone(),
+                },
+            ),
+            (
+                "proof_w3_n151",
+                ExperimentMatrix {
+                    solvers: vec!["rhcr_pbs".into()],
+                    topologies: vec!["warehouse_single_dock_w3".into()],
+                    scenarios: temp_scenarios,
+                    schedulers: vec!["closest".into()],
+                    agent_counts: vec![151],
+                    seeds: seeds_proof,
+                    tick_count: TICK_COUNT_PROOF,
+                    rhcr_overrides: overrides,
+                },
+            ),
+        ];
+
+        let grand_total: usize = matrices.iter().map(|(_, m)| m.total_runs()).sum();
+        let sweep_start = Instant::now();
+        eprintln!(
+            "\n=== RHCR Braess observatory proof: {grand_total} runs across {} matrices ===",
+            matrices.len()
+        );
+
+        for (name, matrix) in matrices {
+            let runs_path = format!("{out_dir}/{name}_runs.csv");
+            let summary_path = format!("{out_dir}/{name}_summary.csv");
+
+            // Idempotent resume: if this matrix already produced both CSVs,
+            // skip it. The prior run's OS kill (Apr 22) left only partial
+            // output, so retrying is cheap and correct.
+            if std::path::Path::new(&runs_path).exists()
+                && std::path::Path::new(&summary_path).exists()
+            {
+                eprintln!("\n--- {name}: skipping, already complete ({runs_path}) ---");
+                continue;
+            }
+
+            let total = matrix.total_runs();
+            eprintln!("\n--- {name}: {total} runs ---");
+            let progress =
+                Arc::new(Mutex::new(ExperimentProgress { current: 0, total, label: name.into() }));
+            let m_start = Instant::now();
+            let result = run_matrix(&matrix, Some(&progress));
+            let m_wall_s = m_start.elapsed().as_secs();
+            eprintln!(
+                "  done in {m_wall_s}s ({:.2} runs/s)",
+                total as f64 / m_wall_s.max(1) as f64
+            );
+            write_runs_csv(&mut fs::File::create(&runs_path).unwrap(), &result.runs).unwrap();
+            write_summary_csv(&mut fs::File::create(&summary_path).unwrap(), &result.summaries)
+                .unwrap();
+            eprintln!("  wrote {runs_path}, {summary_path}");
+        }
+
+        let total_s = sweep_start.elapsed().as_secs();
+        eprintln!(
+            "\n=== Observatory proof complete: {grand_total} runs in {}h{:02}m{:02}s ===",
             total_s / 3600,
             (total_s % 3600) / 60,
             total_s % 60,

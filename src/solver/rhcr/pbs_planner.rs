@@ -52,7 +52,7 @@
 //!    is what unlocks RHCR-PBS from ~0.020 to ~0.45 tasks/tick on
 //!    warehouse_single_dock — without it, `plan_agent` fails for any agent whose
 //!    primary goal is farther than `horizon` and PBS falls back to single-step
-//!    PIBT. See `src/solver/shared/astar.rs` and the PAAMS 2026 sprint report.
+//!    PIBT. See `src/solver/shared/astar.rs` for the goal-sequence A* details.
 //!
 //! ## Deliberate deviations from the reference
 //!
@@ -62,9 +62,9 @@
 //!   `PBS_MAX_NODE_LIMIT` (1,000 on wasm / 10,000 on native). Accepted in
 //!   exchange for reproducibility.
 //!
-//! ## Historical deviations closed 2026-04-08 (PAAMS 2026 RHCR-PBS sprint)
+//! ## Historical deviations now closed
 //!
-//! Before the 2026-04-08 port, MAFIS's RHCR-PBS deviated from the reference in
+//! Before the RHCR-PBS fidelity port, MAFIS's RHCR-PBS deviated from the reference in
 //! five ways: (1) lazy priority resolution only, (2) no `prioritize_start`,
 //! (3) no `nogood` set, (4) `conflicts ASC` tie-break instead of `g_val ASC`,
 //! (5) single-goal A* without goal sequences. The combination of (1) and (5)
@@ -72,8 +72,7 @@
 //! exceeded `horizon = 15`, so PBS exhausted after 2 nodes on warehouse_single_dock
 //! and the wrapper fell back to per-agent PIBT — pinning RHCR-PBS throughput
 //! to ~0.020 tasks/tick, 32-40× below the published reference. All five
-//! deviations are now closed; see the PAAMS 2026 writing for the historical
-//! context and the before/after numbers.
+//! deviations are now closed.
 
 use bevy::prelude::*;
 use std::collections::BTreeSet;

@@ -1,2 +1,4 @@
 pub mod solver;
-pub use solver::{PibtLifelongSolver, PibtSolver, default_active_solver};
+#[cfg(any(target_arch = "wasm32", not(feature = "headless")))]
+pub(crate) use solver::PibtSolver;
+pub use solver::{PibtLifelongSolver, default_active_solver};

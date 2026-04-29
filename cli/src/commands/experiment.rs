@@ -17,8 +17,8 @@ struct ExperimentInfo {
 const EXPERIMENTS: &[ExperimentInfo] = &[
     ExperimentInfo {
         name: "solver_resilience",
-        runs: 720,
-        description: "4 solvers \u{00d7} 6 scenarios \u{00d7} 30 seeds",
+        runs: 540,
+        description: "3 solvers \u{00d7} 6 scenarios \u{00d7} 30 seeds",
         test_fn: "solver_resilience",
     },
     ExperimentInfo {
@@ -47,15 +47,15 @@ const EXPERIMENTS: &[ExperimentInfo] = &[
     },
     ExperimentInfo {
         name: "braess_resilience",
-        runs: 4800,
-        description: "4 solvers \u{00d7} 4 densities \u{00d7} 6 scenarios \u{00d7} 50 seeds",
+        runs: 3600,
+        description: "3 solvers \u{00d7} 4 densities \u{00d7} 6 scenarios \u{00d7} 50 seeds",
         test_fn: "braess_resilience",
     },
     ExperimentInfo {
-        name: "paams_full",
-        runs: 7920,
-        description: "Full suite: 3 solvers \u{00d7} 2 topologies \u{00d7} 6 scenarios \u{00d7} 30 seeds",
-        test_fn: "paams_full",
+        name: "full_experiment_suite",
+        runs: 4320,
+        description: "3 solvers \u{00d7} 6 scenarios \u{00d7} (single-dock 3 counts + dual-dock 3 counts + 2 schedulers) \u{00d7} 30 seeds",
+        test_fn: "full_experiment_suite",
     },
 ];
 
@@ -104,7 +104,7 @@ pub fn run(root: &Path, name: &str) -> anyhow::Result<()> {
             "test",
             "--release",
             "--test",
-            "paper_experiments",
+            "experiment_suite",
             exp.test_fn,
             "--",
             "--ignored",
@@ -128,7 +128,7 @@ pub fn smoke(root: &Path) -> anyhow::Result<()> {
 
     let status = shell::run_streaming(
         "cargo",
-        &["test", "--test", "paper_experiments", "paper_smoke", "--", "--nocapture"],
+        &["test", "--test", "experiment_suite", "smoke", "--", "--nocapture"],
         root,
     )?;
 
@@ -142,7 +142,7 @@ pub fn smoke(root: &Path) -> anyhow::Result<()> {
 
 pub fn run_all(root: &Path) -> anyhow::Result<()> {
     let total: usize = EXPERIMENTS.iter().map(|e| e.runs).sum();
-    println!("{}", style::section("Full Paper Suite"));
+    println!("{}", style::section("Full Experiment Suite"));
     println!("  {} total runs across {} experiments", total, EXPERIMENTS.len());
     println!();
 
@@ -152,8 +152,8 @@ pub fn run_all(root: &Path) -> anyhow::Result<()> {
             "test",
             "--release",
             "--test",
-            "paper_experiments",
-            "full_paper_matrix",
+            "experiment_suite",
+            "full_legacy_matrix",
             "--",
             "--ignored",
             "--nocapture",

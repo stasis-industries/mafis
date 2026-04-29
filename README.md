@@ -52,9 +52,9 @@ cargo test    # ~3 min, 502 tests
 
 See [ROADMAP.md](ROADMAP.md) for planned improvements and known gaps.
 
-## Contributing
+## Contributing & quality gates
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for how to report bugs, run tests, and submit pull requests.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for how to report bugs, run tests, and submit pull requests. Quality gates for adding solvers, fault models, metrics, or topologies are tracked in [RELIABILITY.md](RELIABILITY.md).
 
 ## Security
 

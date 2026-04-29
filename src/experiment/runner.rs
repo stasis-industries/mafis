@@ -105,6 +105,7 @@ pub fn run_single_experiment(config: &ExperimentConfig) -> RunResult {
 
     // 2. Create scheduler + queue policy (shared across both runs)
     let scheduler = ActiveScheduler::from_name(&config.scheduler_name);
+    // Queue policy is fixed to "closest" — current setup has no second policy
     let queue_policy = ActiveQueuePolicy::from_name("closest");
 
     // 3. Place agents using shared RNG — clone rng AFTER placement
@@ -114,11 +115,15 @@ pub fn run_single_experiment(config: &ExperimentConfig) -> RunResult {
 
     // ── Run baseline (faults disabled) ──────────────────────────────
     let baseline_record;
-    let baseline_metrics;
+    let mut baseline_metrics;
     {
-        let solver =
-            crate::solver::lifelong_solver_from_name(&config.solver_name, grid_area, actual_agents)
-                .unwrap_or_else(|| Box::new(crate::solver::pibt::PibtLifelongSolver::new()));
+        let solver = crate::solver::lifelong_solver_from_name_with_override(
+            &config.solver_name,
+            grid_area,
+            actual_agents,
+            config.rhcr_override.as_ref(),
+        )
+        .unwrap_or_else(|| Box::new(crate::solver::pibt::PibtLifelongSolver::new()));
 
         let fault_config = FaultConfig { enabled: false, ..Default::default() };
 
@@ -144,16 +149,18 @@ pub fn run_single_experiment(config: &ExperimentConfig) -> RunResult {
         analysis.compute_aggregates();
 
         let bl_wall_ms = wall_start.elapsed().as_millis() as u64;
+        let partial_rate = runner.solver().pbs_partial_rate();
 
         // Baseline self-metrics (no clone needed — computed directly from engine)
         baseline_metrics =
             super::metrics::compute_baseline_self_metrics(&analysis, &step_times, bl_wall_ms);
+        baseline_metrics.pbs_partial_rate = partial_rate;
 
         // Consume engine into baseline record (no clone!)
         baseline_record = analysis.into_baseline_record(
             0, // config_hash not needed for experiment
             config.tick_count,
-            config.num_agents,
+            actual_agents,
         );
 
         // Optional per-tick throughput export (set MAFIS_TICK_EXPORT_DIR to enable)
@@ -164,9 +171,13 @@ pub fn run_single_experiment(config: &ExperimentConfig) -> RunResult {
     // ── Run faulted (same topology + agents, faults enabled) ────────
     let faulted_metrics;
     {
-        let solver =
-            crate::solver::lifelong_solver_from_name(&config.solver_name, grid_area, actual_agents)
-                .unwrap_or_else(|| Box::new(crate::solver::pibt::PibtLifelongSolver::new()));
+        let solver = crate::solver::lifelong_solver_from_name_with_override(
+            &config.solver_name,
+            grid_area,
+            actual_agents,
+            config.rhcr_override.as_ref(),
+        )
+        .unwrap_or_else(|| Box::new(crate::solver::pibt::PibtLifelongSolver::new()));
 
         let (fault_config, fault_schedule) = match &config.scenario {
             Some(scenario) => {
@@ -244,6 +255,7 @@ pub fn run_single_experiment(config: &ExperimentConfig) -> RunResult {
         analysis.compute_aggregates();
 
         let faulted_wall_ms = faulted_start.elapsed().as_millis() as u64;
+        let partial_rate = runner.solver().pbs_partial_rate();
 
         let mut fm = compute_run_metrics(
             &baseline_record,
@@ -252,6 +264,7 @@ pub fn run_single_experiment(config: &ExperimentConfig) -> RunResult {
             &step_times,
             faulted_wall_ms,
         );
+        fm.pbs_partial_rate = partial_rate;
 
         fm.cascade_depth_avg = if cascade_depths.is_empty() {
             0.0
@@ -322,8 +335,9 @@ fn export_tick_series_if_enabled(config: &ExperimentConfig, kind: &str, series: 
     let full = path.join(filename);
     let mut s = String::with_capacity(series.len() * 8);
     s.push_str("throughput\n");
+    use std::fmt::Write;
     for v in series {
-        s.push_str(&format!("{v}\n"));
+        let _ = writeln!(s, "{v}");
     }
     let _ = std::fs::write(full, s);
 }
@@ -342,6 +356,9 @@ struct BaselineKey {
     scheduler_name: String,
     num_agents: usize,
     seed: u64,
+    /// RHCR ablation label (`"h5n3"`, `"default"`, etc.). Required so
+    /// overridden-horizon baselines don't collide with default-horizon ones.
+    rhcr_override_label: String,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -353,6 +370,7 @@ impl BaselineKey {
             scheduler_name: config.scheduler_name.clone(),
             num_agents: config.num_agents,
             seed: config.seed,
+            rhcr_override_label: config.rhcr_override_label(),
         }
     }
 }
@@ -381,14 +399,19 @@ fn run_baseline_only(config: &ExperimentConfig) -> CachedBaseline {
     let actual_agents = config.num_agents.min(grid.walkable_count());
 
     let scheduler = ActiveScheduler::from_name(&config.scheduler_name);
+    // Queue policy is fixed to "closest" — current setup has no second policy
     let queue_policy = ActiveQueuePolicy::from_name("closest");
 
     let mut rng = SeededRng::new(config.seed);
     let agents = place_agents(actual_agents, &grid, &zones, &mut rng);
 
-    let solver =
-        crate::solver::lifelong_solver_from_name(&config.solver_name, grid_area, actual_agents)
-            .unwrap_or_else(|| Box::new(crate::solver::pibt::PibtLifelongSolver::new()));
+    let solver = crate::solver::lifelong_solver_from_name_with_override(
+        &config.solver_name,
+        grid_area,
+        actual_agents,
+        config.rhcr_override.as_ref(),
+    )
+    .unwrap_or_else(|| Box::new(crate::solver::pibt::PibtLifelongSolver::new()));
 
     let fault_config = FaultConfig { enabled: false, ..Default::default() };
     let mut runner = SimulationRunner::new(
@@ -413,8 +436,11 @@ fn run_baseline_only(config: &ExperimentConfig) -> CachedBaseline {
     analysis.compute_aggregates();
 
     let bl_wall_ms = wall_start.elapsed().as_millis() as u64;
-    let metrics = super::metrics::compute_baseline_self_metrics(&analysis, &step_times, bl_wall_ms);
-    let record = analysis.into_baseline_record(0, config.tick_count, config.num_agents);
+    let partial_rate = runner.solver().pbs_partial_rate();
+    let mut metrics =
+        super::metrics::compute_baseline_self_metrics(&analysis, &step_times, bl_wall_ms);
+    metrics.pbs_partial_rate = partial_rate;
+    let record = analysis.into_baseline_record(0, config.tick_count, actual_agents);
 
     CachedBaseline { record, metrics }
 }
@@ -437,14 +463,19 @@ fn run_faulted_only(config: &ExperimentConfig, cached: &CachedBaseline) -> RunRe
     let actual_agents = config.num_agents.min(grid.walkable_count());
 
     let scheduler = ActiveScheduler::from_name(&config.scheduler_name);
+    // Queue policy is fixed to "closest" — current setup has no second policy
     let queue_policy = ActiveQueuePolicy::from_name("closest");
 
     let mut rng = SeededRng::new(config.seed);
     let agents = place_agents(actual_agents, &grid, &zones, &mut rng);
 
-    let solver =
-        crate::solver::lifelong_solver_from_name(&config.solver_name, grid_area, actual_agents)
-            .unwrap_or_else(|| Box::new(crate::solver::pibt::PibtLifelongSolver::new()));
+    let solver = crate::solver::lifelong_solver_from_name_with_override(
+        &config.solver_name,
+        grid_area,
+        actual_agents,
+        config.rhcr_override.as_ref(),
+    )
+    .unwrap_or_else(|| Box::new(crate::solver::pibt::PibtLifelongSolver::new()));
 
     let (fault_config, fault_schedule) = match &config.scenario {
         Some(scenario) => {
@@ -510,6 +541,7 @@ fn run_faulted_only(config: &ExperimentConfig, cached: &CachedBaseline) -> RunRe
     analysis.compute_aggregates();
 
     let faulted_wall_ms = faulted_start.elapsed().as_millis() as u64;
+    let partial_rate = runner.solver().pbs_partial_rate();
 
     let mut fm = compute_run_metrics(
         &cached.record,
@@ -518,6 +550,7 @@ fn run_faulted_only(config: &ExperimentConfig, cached: &CachedBaseline) -> RunRe
         &step_times,
         faulted_wall_ms,
     );
+    fm.pbs_partial_rate = partial_rate;
 
     fm.cascade_depth_avg = if cascade_depths.is_empty() {
         0.0
@@ -606,10 +639,14 @@ pub fn run_matrix(
     };
     let n_baselines = baseline_entries.len();
     let n_cached = total.saturating_sub(n_baselines);
-    eprintln!(
-        "Experiment: {total} configs, {n_baselines} unique baselines \
-         ({n_cached} cached), {num_threads} threads"
-    );
+    let verbose_progress =
+        std::env::var("MAFIS_PROGRESS_VERBOSE").map(|v| !v.is_empty()).unwrap_or(false);
+    if verbose_progress {
+        eprintln!(
+            "Experiment: {total} configs, {n_baselines} unique baselines \
+             ({n_cached} cached), {num_threads} threads"
+        );
+    }
 
     let baseline_counter = AtomicUsize::new(0);
     let baselines: std::collections::HashMap<BaselineKey, Arc<CachedBaseline>> =
@@ -619,14 +656,16 @@ pub fn run_matrix(
                 .map(|(key, config_idx)| {
                     let config = &configs[*config_idx];
                     let i = baseline_counter.fetch_add(1, Ordering::Relaxed) + 1;
-                    eprintln!(
-                        "[baseline {i}/{n_baselines}] {} / {} / {} / {} agents / seed {}",
-                        config.solver_name,
-                        config.topology_name,
-                        config.scheduler_name,
-                        config.num_agents,
-                        config.seed,
-                    );
+                    if verbose_progress {
+                        eprintln!(
+                            "[baseline {i}/{n_baselines}] {} / {} / {} / {} agents / seed {}",
+                            config.solver_name,
+                            config.topology_name,
+                            config.scheduler_name,
+                            config.num_agents,
+                            config.seed,
+                        );
+                    }
                     (key.clone(), Arc::new(run_baseline_only(config)))
                 })
                 .collect()
@@ -648,7 +687,9 @@ pub fn run_matrix(
                     config.num_agents,
                     config.seed,
                 );
-                eprintln!("[{i}/{total}] {label}");
+                if verbose_progress {
+                    eprintln!("[{i}/{total}] {label}");
+                }
 
                 let key = BaselineKey::from_config(config);
                 let cached = &baselines[&key];
@@ -845,6 +886,7 @@ pub fn wasm_experiment_finish() -> String {
                 agent_counts: vec![],
                 seeds: vec![],
                 tick_count: 0,
+                rhcr_overrides: vec![None],
             },
             runs: runs.clone(),
             summaries,
@@ -937,6 +979,7 @@ fn parse_config_json(json: &str) -> Option<ExperimentConfig> {
         seed,
         tick_count,
         custom_map,
+        rhcr_override: None,
     })
 }
 
@@ -970,6 +1013,7 @@ mod tests {
             seed: 42,
             tick_count: 100,
             custom_map: None,
+            rhcr_override: None,
         };
         let result = run_single_experiment(&config);
         assert!(result.baseline_metrics.total_tasks > 0);
@@ -989,6 +1033,7 @@ mod tests {
             seed: 123,
             tick_count: 100,
             custom_map: None,
+            rhcr_override: None,
         };
         let r1 = run_single_experiment(&config);
         let r2 = run_single_experiment(&config);
@@ -1013,6 +1058,7 @@ mod tests {
             seed: 42,
             tick_count: 100,
             custom_map: None,
+            rhcr_override: None,
         };
         let result = run_single_experiment(&config);
         // Survival rate should be < 1.0 (some agents killed)
@@ -1047,6 +1093,7 @@ mod tests {
             seed: 42,
             tick_count: 100,
             custom_map: None,
+            rhcr_override: None,
         };
         let result = run_single_experiment(&config);
         let ar = result.faulted_metrics.attack_rate;
@@ -1066,6 +1113,7 @@ mod tests {
             seed: 42,
             tick_count: 100,
             custom_map: None,
+            rhcr_override: None,
         };
         let result = run_single_experiment(&config);
         assert_eq!(result.faulted_metrics.attack_rate, 0.0);
@@ -1094,6 +1142,7 @@ mod tests {
             seed: 42,
             tick_count: 100,
             custom_map: None,
+            rhcr_override: None,
         };
         let result = run_single_experiment(&config);
         let ft = result.faulted_metrics.fault_tolerance;
@@ -1131,6 +1180,7 @@ mod tests {
             seed,
             tick_count,
             custom_map: None,
+            rhcr_override: None,
         };
         let experiment_result = run_single_experiment(&config);
 
@@ -1195,6 +1245,7 @@ mod tests {
             seed,
             tick_count,
             custom_map: None,
+            rhcr_override: None,
         };
         let experiment_result = run_single_experiment(&config);
 
@@ -1250,6 +1301,7 @@ mod tests {
             seed,
             tick_count,
             custom_map: None,
+            rhcr_override: None,
         };
         let experiment_result = run_single_experiment(&config);
 
@@ -1308,6 +1360,7 @@ mod tests {
             seed,
             tick_count,
             custom_map: None,
+            rhcr_override: None,
         };
         let experiment_result = run_single_experiment(&config);
 
@@ -1355,6 +1408,7 @@ mod tests {
             agent_counts: vec![5],
             seeds: vec![1, 2],
             tick_count: 30,
+            rhcr_overrides: vec![None],
         };
         let result = run_matrix(&matrix, None);
         assert_eq!(result.runs.len(), 2);
@@ -1389,6 +1443,7 @@ mod tests {
             agent_counts: vec![10],
             seeds: vec![42],
             tick_count: 100,
+            rhcr_overrides: vec![None],
         };
         let cached_result = run_matrix(&matrix, None);
         assert_eq!(cached_result.runs.len(), 2);
@@ -1403,6 +1458,7 @@ mod tests {
             seed: 42,
             tick_count: 100,
             custom_map: None,
+            rhcr_override: None,
         };
         let config_burst = ExperimentConfig { scenario: Some(burst), ..config_none.clone() };
 
@@ -1454,6 +1510,7 @@ mod tests {
             seed: 42,
             tick_count: 100,
             custom_map: None,
+            rhcr_override: None,
         };
 
         let result = run_single_experiment(&config);

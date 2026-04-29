@@ -54,6 +54,7 @@ fn run_custom(
         seed,
         tick_count: TICK_COUNT,
         custom_map: Some((grid, zones)),
+        rhcr_override: None,
     };
     run_single_experiment(&config)
 }
@@ -277,6 +278,7 @@ fn mr5_more_ticks_more_tasks() {
             seed: 42,
             tick_count: 100,
             custom_map: Some((grid.clone(), zones.clone())),
+            rhcr_override: None,
         };
         let r_long = ExperimentConfig {
             solver_name: solver.to_string(),
@@ -287,6 +289,7 @@ fn mr5_more_ticks_more_tasks() {
             seed: 42,
             tick_count: 200,
             custom_map: Some((grid.clone(), zones.clone())),
+            rhcr_override: None,
         };
 
         let result_short = run_single_experiment(&r_short);

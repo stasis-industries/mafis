@@ -74,7 +74,7 @@ pub fn scorecard_panel(ui: &mut egui::Ui, scorecard: &ResilienceScorecard) {
 ///
 /// ⚠ NOT a research-grade metric. The implicit weights are hand-picked for
 /// at-a-glance UI feedback and have no theoretical derivation. Do not cite
-/// in papers — the PAAMS 2026 paper reports the 4 primary metrics directly.
+/// in research output — report the 4 primary metrics directly instead.
 fn composite_score(sc: &ResilienceScorecard) -> usize {
     let mut score = 0.0_f32;
     score += sc.fault_tolerance.min(1.0);

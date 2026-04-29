@@ -113,25 +113,18 @@ pub fn drive_simulation(
         && sim.runner.tick >= max
     {
         next_state.set(SimState::Finished);
-        return;
     }
 
-    // In lifelong mode, all_at_goal never triggers finish (agents get new goals).
-    if result.all_at_goal && !sim.runner.agents.is_empty() {
-        // Only finish in non-lifelong mode (legacy, rarely used)
-        // For now, lifelong is always enabled so this is a no-op.
-    }
+    // In lifelong mode, agents always get new goals; no finish trigger here.
 }
 
 // ---------------------------------------------------------------------------
 // sync_runner_to_ecs — transitional bridge to existing ECS consumers
 // ---------------------------------------------------------------------------
 
-/// Writes runner state to ECS components so existing render, bridge,
-/// and analysis systems continue working without modification.
-///
-/// This system is temporary — will be removed once all consumers read
-/// directly from `LiveSim`.
+/// Bridges `SimulationRunner` state to ECS components so render, bridge,
+/// and analysis systems can read agent positions, heat, dead/latency status,
+/// and per-tick counters without depending on `LiveSim` directly.
 pub fn sync_runner_to_ecs(
     sim: Res<LiveSim>,
     registry: Res<AgentRegistry>,

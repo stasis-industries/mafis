@@ -1,9 +1,9 @@
 #!/bin/sh
-# reproduce.sh — Full reproduction pipeline for MAFIS paper results.
+# reproduce.sh — Full reproduction pipeline for MAFIS experiment results.
 # Usage: sh scripts/reproduce.sh
 #
-# Runs: type check, test suite, calibration, Paper 1 experiments, Paper 1 analysis.
-# Paper 2 (Braess) instructions are printed at the end.
+# Runs: type check, test suite, calibration, experiments, analysis.
+# Braess analysis instructions are printed at the end.
 #
 # Expected total time: ~1-2 hours on 8+ cores.
 
@@ -39,27 +39,26 @@ echo "[OK] Calibration passed"
 echo ""
 
 # ---------------------------------------------------------------------------
-# Step 4: Paper 1 — full experiment matrix (~1-2 hours)
-#   solver_resilience  — 6 solvers × 7 scenarios × 30 seeds   (1,260 configs)
-#   scale_sensitivity  — 4 densities × 7 scenarios × 30 seeds   (840 configs)
-#   scheduler_effect   — 2 schedulers × 7 scenarios × 30 seeds  (420 configs)
-#   topology_effect    — 5 topologies × 7 scenarios × 30 seeds  (1,050 configs)
-#   Total              — 3,570 configs × 2 runs (baseline+fault) = 7,140 simulations
+# Step 4: Full experiment matrix (~1-2 hours)
+#   solver_resilience  — 3 solvers × 6 scenarios × 30 seeds (540 configs)
+#   scale_sensitivity  — 4 densities × 6 scenarios × 30 seeds (720 configs)
+#   scheduler_effect   — 2 schedulers × 6 scenarios × 30 seeds (360 configs)
+#   topology_effect    — multiple topologies × 6 scenarios × 30 seeds
 # ---------------------------------------------------------------------------
-echo "-- Step 4/5: Paper 1 experiments (~1-2 hours) --"
-cargo test --release full_paper_matrix -- --ignored --nocapture
-echo "[OK] Paper 1 experiments complete"
+echo "-- Step 4/5: Full experiment matrix (~1-2 hours) --"
+cargo test --release full_legacy_matrix -- --ignored --nocapture
+echo "[OK] Experiments complete"
 echo ""
 
 # ---------------------------------------------------------------------------
-# Step 5: Statistical analysis (Paper 1)
+# Step 5: Statistical analysis
 # ---------------------------------------------------------------------------
-echo "-- Step 5/5: Statistical analysis (Paper 1) --"
+echo "-- Step 5/5: Statistical analysis --"
 python3 analysis/solver_resilience_analysis.py
 python3 analysis/scale_sensitivity_analysis.py
 python3 analysis/scheduler_effect_analysis.py
 python3 analysis/topology_effect_analysis.py
-echo "[OK] Paper 1 analysis complete"
+echo "[OK] Analysis complete"
 echo ""
 
 echo "==========================================================="
@@ -69,10 +68,10 @@ ls -la results/*.csv results/*.json 2>/dev/null | head -40
 echo ""
 
 # ---------------------------------------------------------------------------
-# Optional: Paper 2 — Braess experiment (separate, ~2-4 additional hours)
+# Optional: Braess paradox experiment (separate, ~2-4 additional hours)
 # ---------------------------------------------------------------------------
-echo "Optional — Paper 2 (Braess paradox analysis):"
-echo "  # Main 6-scenario experiment (7 solvers × 4 densities × 6 scenarios × 50 seeds):"
+echo "Optional — Braess paradox analysis:"
+echo "  # Main 6-scenario experiment (3 solvers × 4 densities × 6 scenarios × 50 seeds):"
 echo "  cargo test --release braess_resilience -- --ignored --nocapture"
 echo ""
 echo "  # Category 3 complement (permanent zone outage):"

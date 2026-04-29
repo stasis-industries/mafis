@@ -13,9 +13,6 @@ use self::config::FaultConfig;
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub enum FaultSet {
     Schedule,
-    Heat,
-    FaultCheck,
-    Replan,
 }
 
 pub struct FaultPlugin;
@@ -28,17 +25,10 @@ impl Plugin for FaultPlugin {
             .init_resource::<scenario::FaultList>()
             .init_resource::<manual::ManualFaultLog>()
             .init_resource::<manual::RewindRequest>()
+            .init_resource::<manual::PendingManualFaults>()
             .add_message::<breakdown::FaultEvent>()
             .add_message::<manual::ManualFaultCommand>()
-            .configure_sets(
-                FixedUpdate,
-                (
-                    FaultSet::Schedule.after(CoreSet::Tick),
-                    FaultSet::Heat.after(FaultSet::Schedule),
-                    FaultSet::FaultCheck.after(FaultSet::Heat),
-                    FaultSet::Replan.after(FaultSet::FaultCheck).before(CoreSet::PostTick),
-                ),
-            );
+            .configure_sets(FixedUpdate, FaultSet::Schedule.after(CoreSet::Tick));
 
         // Old fault ECS systems removed — SimulationRunner handles faults
         // internally via its tick() method. Only manual fault processing
@@ -52,10 +42,19 @@ impl Plugin for FaultPlugin {
             use crate::core::state::SimState;
             app.add_systems(
                 FixedUpdate,
-                manual::replay_manual_faults
-                    .in_set(FaultSet::Schedule)
-                    .run_if(in_state(SimState::Running))
-                    .run_if(|log: Res<manual::ManualFaultLog>| log.replay_from.is_some()),
+                (
+                    manual::replay_manual_faults
+                        .in_set(FaultSet::Schedule)
+                        .run_if(in_state(SimState::Running))
+                        .run_if(|log: Res<manual::ManualFaultLog>| log.replay_from.is_some()),
+                    // Drains buffered manual fault triggers (collected in `Update`)
+                    // and emits `FaultEvent`s in `FixedUpdate` so the `propagate_cascade`
+                    // reader picks them up on the same schedule it reads scheduled faults.
+                    manual::drain_pending_manual_faults
+                        .in_set(FaultSet::Schedule)
+                        .after(manual::replay_manual_faults)
+                        .run_if(in_state(SimState::Running)),
+                ),
             );
             app.add_systems(
                 Update,

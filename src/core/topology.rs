@@ -352,12 +352,12 @@ impl TopologyRegistry {
         }
 
         // Validate connectivity: all pickup/delivery cells must be reachable
-        if let Err(unreachable) = validate_connectivity(&grid, &zones) {
+        if let Err(_unreachable) = validate_connectivity(&grid, &zones) {
             #[cfg(not(target_arch = "wasm32"))]
             eprintln!(
                 "Topology validation failed: {} zone cells are unreachable: {:?}",
-                unreachable.len(),
-                &unreachable[..unreachable.len().min(5)],
+                _unreachable.len(),
+                &_unreachable[.._unreachable.len().min(5)],
             );
             return None;
         }

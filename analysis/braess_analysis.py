@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Braess Paradox Analysis for MAFIS Paper 2.
+Braess Paradox Analysis for MAFIS.
 
 RQ5: Does fault type interact with fleet density and solver architecture?
 

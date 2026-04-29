@@ -68,6 +68,9 @@ pub struct ExperimentGuiState {
 
     // Full-page stage
     pub stage: ExpStage,
+
+    /// Last import error message — shown as a colored label, cleared on next import.
+    pub import_error: Option<String>,
 }
 
 /// Columns available for sorting.
@@ -106,6 +109,7 @@ impl Default for ExperimentGuiState {
             chart_metric: MetricColumn::FaultTolerance,
             show_drill_down: false,
             stage: ExpStage::Config,
+            import_error: None,
         }
     }
 }
@@ -148,6 +152,7 @@ impl ExperimentGuiState {
             agent_counts,
             seeds,
             tick_count: self.tick_count,
+            rhcr_overrides: vec![None],
         })
     }
 
