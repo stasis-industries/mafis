@@ -168,8 +168,6 @@ pub fn compute_baseline_self_metrics(
     }
 }
 
-use crate::constants::CRITICAL_TIME_THRESHOLD as CRITICAL_THRESHOLD;
-
 /// Compute differential metrics from a paired baseline + faulted run.
 pub fn compute_run_metrics(
     baseline: &BaselineRecord,
@@ -272,12 +270,12 @@ pub fn compute_run_metrics(
     );
 
     // ── Critical Time ──────────────────────────────────────────────
-    // Use first_fault_idx (direct from fault events) instead of first_gap_tick
-    // (which is based on cumulative task deficit — can lag behind actual fault onset).
-    let critical_time = compute_critical_time(
+    // Shared compute with the live observatory scorecard — see
+    // `crate::analysis::ct` for the rolling-mean threshold formula.
+    let critical_time = crate::analysis::ct::critical_time(
         &baseline.throughput_series,
         &faulted_analysis.throughput_series,
-        first_fault_idx.map(|i| i as u64 + 1), // convert 0-indexed to 1-indexed tick
+        first_fault_idx,
     );
 
     // ── Survival rate (final) ──────────────────────────────────────
@@ -403,35 +401,6 @@ fn compute_throughput_recovery(
     }
 
     f64::NAN // never recovered
-}
-
-/// Compute fraction of ticks where faulted throughput < threshold × baseline throughput,
-/// counted from the first fault tick onward.
-fn compute_critical_time(
-    baseline_tp: &[f64],
-    faulted_tp: &[f64],
-    first_fault_tick: Option<u64>,
-) -> f64 {
-    let start = match first_fault_tick {
-        Some(t) if t > 0 => (t - 1) as usize, // convert 1-indexed tick to 0-indexed
-        Some(_) => return 0.0,                // tick 0 edge case
-        None => return f64::NAN,              // no fault impact → metric undefined
-    };
-
-    let len = baseline_tp.len().min(faulted_tp.len());
-    if start >= len {
-        return 0.0;
-    }
-
-    let ticks_after_fault = len - start;
-    let ticks_below = (start..len)
-        .filter(|&i| {
-            let threshold = baseline_tp[i] * CRITICAL_THRESHOLD;
-            faulted_tp[i] < threshold
-        })
-        .count();
-
-    if ticks_after_fault > 0 { ticks_below as f64 / ticks_after_fault as f64 } else { 0.0 }
 }
 
 /// Integral of Time-weighted Absolute Error of throughput ratio post-fault.
@@ -593,22 +562,24 @@ fn rolling_average(series: &[f64], window: usize) -> Vec<f64> {
 mod tests {
     use super::*;
 
+    use crate::analysis::ct::critical_time as ct_fn;
+
     #[test]
     fn critical_time_no_fault() {
         // No fault impact → metric is undefined (NaN), not zero
-        assert!(compute_critical_time(&[1.0; 10], &[1.0; 10], None).is_nan());
+        assert!(ct_fn(&[1.0; 10], &[1.0; 10], None).is_nan());
     }
 
     #[test]
     fn critical_time_all_below() {
-        // Baseline all 2.0, faulted all 0.0 after tick 3
+        // Baseline all 2.0, faulted all 0.0 after index 2
         let bl = vec![2.0; 10];
         let mut faulted = vec![2.0; 10];
         for i in 2..10 {
             faulted[i] = 0.0;
         }
-        let ct = compute_critical_time(&bl, &faulted, Some(3));
-        // 8 ticks after fault, all below 50% threshold
+        let ct = ct_fn(&bl, &faulted, Some(2));
+        // 8 ticks after fault, all below 50% × rolling-mean baseline (2.0).
         assert!((ct - 1.0).abs() < 1e-10);
     }
 
@@ -621,7 +592,7 @@ mod tests {
         for i in 2..6 {
             faulted[i] = 0.0;
         }
-        let ct = compute_critical_time(&bl, &faulted, Some(3));
+        let ct = ct_fn(&bl, &faulted, Some(2));
         // 8 ticks after fault, 4 below
         assert!((ct - 0.5).abs() < 1e-10);
     }
@@ -645,17 +616,15 @@ mod tests {
 
     #[test]
     fn critical_time_known_fraction() {
-        // 20 ticks baseline=4.0, faulted drops at tick 10
+        // 20 ticks baseline=4.0, faulted drops at index 9
         let bl = vec![4.0; 20];
         let mut faulted = vec![4.0; 20];
-        // Ticks at 0-indexed 9..14: below 50% threshold (faulted=1.0, threshold=2.0)
+        // Indices 9..14: below 50% threshold (faulted=1.0, threshold=2.0)
         for i in 9..14 {
             faulted[i] = 1.0;
         }
-        // Ticks 14-19: above threshold (faulted=4.0, stays at default)
-        // first_gap_tick = Some(10) is 1-indexed, converts to start=9 internally
         // CT = 5 below / (20-9=11 total post-fault) = 5/11
-        let ct = compute_critical_time(&bl, &faulted, Some(10));
+        let ct = ct_fn(&bl, &faulted, Some(9));
         let expected = 5.0 / 11.0;
         assert!((ct - expected).abs() < 1e-10, "CT should be {expected:.4}, got {ct:.4}");
     }

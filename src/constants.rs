@@ -276,6 +276,14 @@ pub const TICK_SNAPSHOT_INTERVAL: u64 = 3;
 /// NOT a derived constant from a specific performability paper
 pub const CRITICAL_TIME_THRESHOLD: f64 = 0.5;
 
+/// Rolling-mean window (ticks) applied to the baseline throughput series
+/// before the CT threshold check. Smooths the sparse per-tick task-completion
+/// signal at low agent counts (where most ticks have zero completions and a
+/// raw per-tick threshold collapses to zero). Matches the spec in
+/// `RELIABILITY.md` and is used by both the experiment runner and the live
+/// scorecard via `crate::analysis::ct`.
+pub const CT_BASELINE_WINDOW: usize = 10;
+
 /// How often to recompute scorecard metrics (ticks).
 pub const SCORECARD_RECOMPUTE_INTERVAL: u64 = 50;
 

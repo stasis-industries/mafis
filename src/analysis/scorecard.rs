@@ -132,7 +132,24 @@ pub fn update_resilience_scorecard(
         }
 
         // --- Critical Time: ticks below threshold (operational SLA heuristic) ---
-        let critical_threshold = baseline_avg_tp * constants::CRITICAL_TIME_THRESHOLD;
+        // Uses the shared compute in `crate::analysis::ct`: threshold is
+        // `CRITICAL_TIME_THRESHOLD × rolling-mean(baseline_tp, CT_BASELINE_WINDOW)`
+        // evaluated at the current tick. Rolling-mean smoothing keeps the
+        // metric non-degenerate at low agent counts where per-tick baseline
+        // task completions are sparse.
+        let smoothed_baseline = baseline_store
+            .record
+            .as_ref()
+            .map(|r| {
+                let end_idx = (tick.saturating_sub(1)) as usize;
+                super::ct::rolling_mean_at(
+                    &r.throughput_series,
+                    constants::CT_BASELINE_WINDOW,
+                    end_idx,
+                )
+            })
+            .unwrap_or(0.0);
+        let critical_threshold = smoothed_baseline * constants::CRITICAL_TIME_THRESHOLD;
         if live_tp < critical_threshold {
             state.ticks_below_critical += 1;
         }

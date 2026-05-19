@@ -11,7 +11,7 @@ Legend: green — audited, stable, claim-safe · yellow — known limitation, mu
 | Metric | Status | Notes |
 |---|---|---|
 | Fault Tolerance (FT) | yellow | Ratio $P_{\text{fault}}/P_{\text{baseline}}$. Mathematically unstable when baseline near zero — runs require a baseline-validity preprocessing step; overloaded cells excluded from default-density aggregates. The queue kick-back fix (commit `2ee0313`) removed a baseline-deflation source. |
-| Critical Time (CT) | green | Threshold $=0.5 \times P_{\text{baseline}}$, rolling window $W{=}10$. |
+| Critical Time (CT) | green | Threshold $=$`CRITICAL_TIME_THRESHOLD` $\times$ rolling-mean$(P_{\text{baseline}}, W{=}10)$; denominator = ticks since first fault. Shared compute in `src/analysis/ct.rs` used by both the experiment runner (`crate::experiment::metrics`) and the live observatory scorecard (`crate::analysis::scorecard`). Rolling-mean smoothing prevents the per-tick threshold collapse seen at low agent counts where baseline task completions are sparse. |
 | ITAE | yellow | Correct integration. Unbounded if baseline has near-zero ticks; downstream consumers must clamp or filter degenerate baselines. |
 | Rapidity | green | Degradation-observed gate inside `compute_rapidity`. Smoothing window $W{=}20$. |
 | Attack Rate (AR) | green | Denominator = `actual_agents` (post-grid-clamp). MAX_CASCADE_DEPTH=200 and ADG_LOOKAHEAD=3 declared in `src/constants.rs`. Saturates at 1.00 on Intermittent by design (repeated waves), not a measurement artefact. |
