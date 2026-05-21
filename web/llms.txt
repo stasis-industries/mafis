@@ -10,7 +10,7 @@ warehouse grid topologies. It supports 3 lifelong MAPF solvers: PIBT, RHCR-PBS,
 and Token Passing. Fault injection includes heat accumulation, Weibull wear
 modeling, agent failures, and cascading disruptions. Analysis tools include
 Action Dependency Graphs (ADG), cascade BFS, density/traffic heatmaps, and six
-primary differential metrics: Fault Tolerance, Critical Time, ITAE, Attack Rate,
+primary differential metrics: Fault Tolerance, Critical Time, TWTE, Attack Rate,
 Cascade Depth, and Rapidity.
 
 Built with Rust + Bevy 0.18, compiled to WebAssembly. Deterministic replay via
@@ -34,7 +34,7 @@ seeded randomness ensures reproducible experiments for research.
 
 - Action Dependency Graph (ADG) construction and real-time analysis
 - Cascade failure propagation via bounded BFS (max depth 10)
-- Six primary differential metrics: Fault Tolerance, Critical Time, ITAE, Attack Rate, Cascade Depth, Rapidity
+- Six primary differential metrics: Fault Tolerance, Critical Time, TWTE, Attack Rate, Cascade Depth, Rapidity
 - Density and traffic heatmaps with configurable visualization
 - Live observatory scorecard (fault tolerance, critical time, NRR, fleet utilization, composite score)
 - Baseline comparison engine: every metric is a deviation from a fault-free paired run

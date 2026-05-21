@@ -89,7 +89,7 @@ pip install pandas matplotlib numpy scipy
 | Script | Purpose |
 |--------|---------|
 | `structural_cascade_scaling.py` | Structural cascade R² and slopes across aisle widths |
-| `mitigation_delta.py` | Mitigation Δ (FT, CT, ITAE) by solver and aisle width |
+| `mitigation_delta.py` | Mitigation Δ (FT, CT, TWTE) by solver and aisle width |
 | `ft_baseline_audit.py` | Baseline-validity flags — identifies overloaded cells |
 | `delta_diff.py` | Pre/post-fix drift table (compares CSV pairs) |
 

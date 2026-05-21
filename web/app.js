@@ -4683,7 +4683,7 @@ const EXPERIMENT_METRICS = [
     // Primary differential metrics
     { key: 'fault_tolerance', label: 'FT', decimals: 3 },
     { key: 'critical_time', label: 'CT', decimals: 3 },
-    { key: 'itae', label: 'ITAE', decimals: 0 },
+    { key: 'itae', label: 'TWTE', decimals: 0 },
     { key: 'attack_rate', label: 'AR', decimals: 3 },
     { key: 'cascade_depth', label: 'Casc. Depth', decimals: 2 },
     { key: 'rapidity', label: 'Rapidity', decimals: 1 },

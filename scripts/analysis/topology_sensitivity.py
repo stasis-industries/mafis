@@ -23,7 +23,7 @@ OUT_DIR = RESULTS / "phase1_metaanalysis" / "topology_sensitivity"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 METRICS = ["ft_mean", "critical_time_mean", "itae_mean", "attack_rate_mean", "cascade_depth_mean"]
-LABELS = ["FT", "CT", "ITAE", "AR", "CascDepth"]
+LABELS = ["FT", "CT", "TWTE", "AR", "CascDepth"]
 CI_LO = {"ft_mean": "ft_ci95_lo"}
 
 SOLVERS = ["pibt", "rhcr_pbs", "token_passing"]

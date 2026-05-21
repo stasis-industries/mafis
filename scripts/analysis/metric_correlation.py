@@ -35,7 +35,7 @@ METRICS = [
     "attack_rate_mean",
     "cascade_depth_mean",
 ]
-LABELS = ["FT", "CT", "ITAE", "AR", "CascDepth"]
+LABELS = ["FT", "CT", "TWTE", "AR", "CascDepth"]
 
 PERMANENT = {"burst_20pct", "burst_50pct", "wear_medium", "wear_high"}
 RECOVERABLE = {"zone_50t", "intermittent_80s80m15r"}

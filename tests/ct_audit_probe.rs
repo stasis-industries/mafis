@@ -38,7 +38,7 @@ fn ct_probe_pibt_warehouse_medium_burst20_random_10a_seed456() {
     eprintln!("  survival_rate ={:.4}", f.survival_rate);
     eprintln!("  fault_tolerance={:.4}", f.fault_tolerance);
     eprintln!("  critical_time ={:.4}  (observatory reported 0.858)", f.critical_time);
-    eprintln!("  itae          ={:.2}", f.itae);
+    eprintln!("  twte          ={:.2}", f.itae);
     eprintln!("  rapidity      ={:.4}", f.rapidity);
     eprintln!("  attack_rate   ={:.4}", f.attack_rate);
     // Sanity bounds — not the actual parity check, just guards.

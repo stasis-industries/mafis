@@ -1121,7 +1121,7 @@
                                 <select class="exp-toolbar-select" id="exp-chart-metric">
                                     <option value="fault_tolerance" selected>Fault Tolerance</option>
                                     <option value="critical_time">Critical Time</option>
-                                    <option value="itae">ITAE</option>
+                                    <option value="itae">TWTE</option>
                                     <option value="attack_rate">Attack Rate</option>
                                     <option value="cascade_depth">Cascade Depth</option>
                                     <option value="rapidity">Rapidity</option>
@@ -1417,10 +1417,10 @@
                         <td>Fraction of post-fault ticks where throughput falls below 50% of baseline. Lower = better.</td>
                     </tr>
                     <tr>
-                        <td>ITAE</td>
+                        <td>TWTE</td>
                         <td><span class="formula">&Sigma;&thinsp;(t &minus; t<sub>f</sub>)&thinsp;&middot;&thinsp;|1 &minus; R(t)|</span></td>
                         <td>0&thinsp;&ndash;&thinsp;&infin;</td>
-                        <td>Integral of Time-weighted Absolute Error of the throughput ratio post-fault (Ogata 2010). Penalizes sustained degradation more heavily than early transients. Lower = better. N/A when no fault occurs.</td>
+                        <td>Time-weighted Throughput Error: time-weighted absolute error of the throughput ratio post-fault (Ogata 2010). Penalizes sustained degradation more heavily than early transients. Lower = better. N/A when no fault occurs.</td>
                     </tr>
                     <tr>
                         <td>Attack Rate (AR)</td>
