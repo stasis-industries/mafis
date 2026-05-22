@@ -1,0 +1,144 @@
+{
+  "per_cell": [
+    {
+      "cell": "SD-w1 n=60",
+      "topology": "warehouse_single_dock",
+      "num_agents": 60,
+      "n": 141,
+      "r": -0.10443556181370138,
+      "p": 0.21778556499731497,
+      "by_override": {
+        "default": {
+          "ft_mean": 1.0792263157894737,
+          "ft_std": 0.9057436612139789,
+          "partial_rate_mean": 0.5580075,
+          "partial_rate_std": 0.2127122305351311,
+          "n": 40
+        },
+        "h20n1": {
+          "ft_mean": 0.992137837837838,
+          "ft_std": 0.5861292364844649,
+          "partial_rate_mean": 0.6630525,
+          "partial_rate_std": 0.2655541897351601,
+          "n": 40
+        },
+        "h20n6": {
+          "ft_mean": 1.0125924999999998,
+          "ft_std": 0.7466283129071757,
+          "partial_rate_mean": 0.528495,
+          "partial_rate_std": 0.20655056616871176,
+          "n": 40
+        },
+        "h5n1": {
+          "ft_mean": 1.25,
+          "ft_std": 0.5951190357119042,
+          "partial_rate_mean": 0.2311575,
+          "partial_rate_std": 0.355252744905399,
+          "n": 40
+        },
+        "h5n6": {
+          "ft_mean": 1.25,
+          "ft_std": 0.5951190357119042,
+          "partial_rate_mean": 0.2311575,
+          "partial_rate_std": 0.355252744905399,
+          "n": 40
+        }
+      }
+    },
+    {
+      "cell": "SD-w2 n=108",
+      "topology": "warehouse_single_dock_w2",
+      "num_agents": 108,
+      "n": 191,
+      "r": 0.0486392611562712,
+      "p": 0.5040116629810357,
+      "by_override": {
+        "default": {
+          "ft_mean": 1.2813684210526315,
+          "ft_std": 2.577193550934004,
+          "partial_rate_mean": 0.803665,
+          "partial_rate_std": 0.1158442401432155,
+          "n": 40
+        },
+        "h20n1": {
+          "ft_mean": 0.721665,
+          "ft_std": 0.3642267682963317,
+          "partial_rate_mean": 0.8696625000000001,
+          "partial_rate_std": 0.10376910188688276,
+          "n": 40
+        },
+        "h20n6": {
+          "ft_mean": 0.7928075,
+          "ft_std": 0.6063395961338361,
+          "partial_rate_mean": 0.8080074999999999,
+          "partial_rate_std": 0.090504711274168,
+          "n": 40
+        },
+        "h5n1": {
+          "ft_mean": 0.8044135135135135,
+          "ft_std": 0.8727921230683112,
+          "partial_rate_mean": 0.82767,
+          "partial_rate_std": 0.13562149666986556,
+          "n": 40
+        },
+        "h5n6": {
+          "ft_mean": 0.9870194444444444,
+          "ft_std": 1.1381853973557945,
+          "partial_rate_mean": 0.7769975,
+          "partial_rate_std": 0.11317987156258429,
+          "n": 40
+        }
+      }
+    },
+    {
+      "cell": "SD-w3 n=151",
+      "topology": "warehouse_single_dock_w3",
+      "num_agents": 151,
+      "n": 186,
+      "r": 0.06281285153874086,
+      "p": 0.3943697594144913,
+      "by_override": {
+        "default": {
+          "ft_mean": 0.8504157894736842,
+          "ft_std": 0.5170099395386828,
+          "partial_rate_mean": 0.907175,
+          "partial_rate_std": 0.06580154993888043,
+          "n": 40
+        },
+        "h20n1": {
+          "ft_mean": 1.5846783783783784,
+          "ft_std": 2.592122409461141,
+          "partial_rate_mean": 0.9333375,
+          "partial_rate_std": 0.11846473171478678,
+          "n": 40
+        },
+        "h20n6": {
+          "ft_mean": 0.9747450000000001,
+          "ft_std": 0.7254152515310428,
+          "partial_rate_mean": 0.9116674999999999,
+          "partial_rate_std": 0.04590431177725672,
+          "n": 40
+        },
+        "h5n1": {
+          "ft_mean": 0.7873424242424242,
+          "ft_std": 0.4782363432644359,
+          "partial_rate_mean": 0.8998275,
+          "partial_rate_std": 0.06825337405954977,
+          "n": 40
+        },
+        "h5n6": {
+          "ft_mean": 0.7239684210526316,
+          "ft_std": 0.421601523860818,
+          "partial_rate_mean": 0.8758324999999999,
+          "partial_rate_std": 0.0921349160895071,
+          "n": 40
+        }
+      }
+    }
+  ],
+  "pooled": {
+    "r": -0.029256936169625915,
+    "p": 0.5064278319361014,
+    "n": 518
+  }
+}
