@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
-"""Phase 1.C — Topology sensitivity quantification.
+"""Topology + density sensitivity for the PAAMS 2026 supplementary.
 
-Compare Single-Dock vs Dual-Dock results cell-by-cell. Detect:
-- rank flips between solvers across topologies
-- metric shift magnitude vs CI width (shift / noise ratio)
+Produces:
+  1. One cross-topology heatmap at n=40 (the only shared density).
+  2. Five trajectory plots — one per metric, six subplots each (one per
+     scenario), showing the metric as a function of fleet density with both
+     topologies overlaid and 95% error bars.
 
-Decision signal:
-- flip count > 0 with shift/noise > 1 per metric → topology-sensitivity is real
-- flip count = 0 or shifts < noise → rankings are topology-stable at this density
+Plus a JSON dump of the per-cell numbers so the supplementary doc can
+reference structured values.
 """
 
 import json
+import math
 from pathlib import Path
 from itertools import combinations
 
@@ -19,12 +21,14 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 RESULTS = Path("results")
-OUT_DIR = RESULTS / "phase1_metaanalysis" / "topology_sensitivity"
+OUT_DIR = Path("docs/supplementary/topology_density_sensitivity/figures")
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 METRICS = ["ft_mean", "critical_time_mean", "itae_mean", "attack_rate_mean", "cascade_depth_mean"]
+STD_COLS = ["ft_std", "critical_time_std", "itae_std", "attack_rate_std", "cascade_depth_std"]
+N_COLS = ["ft_n", "ct_n", "itae_n", "attack_rate_n", "cascade_depth_n"]
 LABELS = ["FT", "CT", "TWTE", "AR", "CascDepth"]
-CI_LO = {"ft_mean": "ft_ci95_lo"}
+Y_LABELS = ["Fault Tolerance", "Critical Time", "TWTE (tick-weighted error)", "Attack Rate", "Cascade Depth"]
 
 SOLVERS = ["pibt", "rhcr_pbs", "token_passing"]
 SCENARIOS = [
@@ -33,24 +37,82 @@ SCENARIOS = [
     "zone_50t", "intermittent_80s80m15r",
 ]
 
+SD_DENSITIES = [20, 40, 60]
+DD_DENSITIES = [40, 80, 120]
+
+# Per-metric absolute caps for heatmap colour. A cell at the cap saturates the
+# colour bar. Below the cap, colour intensity is proportional to the raw value.
+# Caps are operator-defined thresholds for "this much change is genuinely big",
+# not statistical percentiles — they decouple the visual signal from the
+# column-max trap (a small column max should not read as deep red).
+MAGNITUDE_CAPS = {
+    "FT":         0.5,    # 50-pp FT swing is operationally large
+    "CT":         0.5,
+    "TWTE":   20000.0,    # 20k tick-weighted error is large
+    "AR":         0.5,
+    "CascDepth":  5.0,    # 5 BFS levels is structurally large at n<=120
+}
+
+# Approx t-critical for 95% CI, n=30. Good enough for plotting error bars
+# without re-importing scipy.
+T_CRIT_95 = 2.045
+
 
 def load():
-    sd = pd.read_csv(RESULTS / "warehouse_single_dock_experiment_summary.csv")
-    dd = pd.read_csv(RESULTS / "warehouse_dual_dock_experiment_summary.csv")
+    sd = pd.read_csv(RESULTS / "warehouse_single_dock_summary.csv")
+    dd = pd.read_csv(RESULTS / "warehouse_dual_dock_summary.csv")
     return sd, dd
 
 
-def match_cells_at_density(sd, dd, n):
-    sd_n = sd[sd["num_agents"] == n].copy()
-    dd_n = dd[dd["num_agents"] == n].copy()
-    keys = ["solver", "scenario"]
-    merged = sd_n.merge(dd_n, on=keys, suffixes=("_SD", "_DD"))
-    return merged, sd_n, dd_n
+# ── Cross-topology heatmap (kept from prior version) ──────────────────
+
+
+def render_cross_heatmap(matrix, title, outfile):
+    """Per-column normalised colour, raw values annotated. TWTE lives on a
+    different scale than the other metrics so this is the only fair way to
+    display them on one chart.
+    """
+    fig, ax = plt.subplots(figsize=(8, 4.5))
+    caps = np.array([MAGNITUDE_CAPS[label] for label in LABELS])
+    norm = np.clip(matrix / caps, 0.0, 1.0)
+    im = ax.imshow(norm, cmap="YlOrRd", aspect="auto", vmin=0, vmax=1)
+    ax.set_xticks(range(len(LABELS)))
+    ax.set_xticklabels(LABELS, fontsize=9)
+    ax.set_yticks(range(len(SCENARIOS)))
+    ax.set_yticklabels(SCENARIOS, fontsize=8)
+    for i in range(len(SCENARIOS)):
+        for j in range(len(LABELS)):
+            raw = matrix[i, j]
+            n = norm[i, j]
+            color = "white" if n > 0.6 else "black"
+            label = f"{raw:,.0f}" if abs(raw) >= 100 else f"{raw:.2f}"
+            # Mark saturated cells (value at or above the cap) with an asterisk
+            # so readers know the colour is clipped, not exaggerated.
+            if abs(raw) >= caps[j]:
+                label = f"{label}*"
+            ax.text(j, i, label, ha="center", va="center", fontsize=8, color=color)
+    cbar = plt.colorbar(im, ax=ax, shrink=0.85)
+    cbar.set_label("Magnitude relative to per-metric cap (1.0 = cap reached or exceeded)", fontsize=8)
+    ax.set_title(title, fontsize=10)
+    fig.tight_layout()
+    fig.savefig(outfile, dpi=150)
+    plt.close(fig)
+    print(f"  wrote {outfile}")
+
+
+def cross_topology_matrix(sd, dd, n):
+    sd_n = sd[sd["num_agents"] == n]
+    dd_n = dd[dd["num_agents"] == n]
+    merged = sd_n.merge(dd_n, on=["solver", "scenario"], suffixes=("_SD", "_DD"))
+    heat = np.zeros((len(SCENARIOS), len(METRICS)))
+    for i, scen in enumerate(SCENARIOS):
+        sub = merged[merged["scenario"] == scen]
+        for j, m in enumerate(METRICS):
+            heat[i, j] = np.nanmean(np.abs(sub[f"{m}_DD"] - sub[f"{m}_SD"]))
+    return heat
 
 
 def rank_flips(sd_sub, dd_sub, metric):
-    """For each scenario, compare solver ranking under SD vs DD.
-    A flip = any pair (a,b) where rank_SD(a) < rank_SD(b) but rank_DD(a) > rank_DD(b)."""
     flips = []
     for scen in SCENARIOS:
         sd_vals = {s: sd_sub.loc[(sd_sub["solver"] == s) & (sd_sub["scenario"] == scen), metric].iloc[0]
@@ -66,83 +128,127 @@ def rank_flips(sd_sub, dd_sub, metric):
     return flips
 
 
+# ── Trajectory plots (metric vs density, one figure per metric) ───────
+
+
+def aggregate_trajectory(df, densities, metric_col, std_col, n_col):
+    """Average across solvers for each (scenario, density). Return three
+    arrays of shape (scenarios, densities): mean, ci_half_width, n.
+    Missing cells are NaN.
+    """
+    n_sc = len(SCENARIOS)
+    n_d = len(densities)
+    mean = np.full((n_sc, n_d), np.nan)
+    err = np.full((n_sc, n_d), np.nan)
+    n_used = np.full((n_sc, n_d), np.nan)
+    for i, scen in enumerate(SCENARIOS):
+        for j, dens in enumerate(densities):
+            sub = df[(df["scenario"] == scen) & (df["num_agents"] == dens)]
+            if sub.empty:
+                continue
+            # Average solver means
+            mean[i, j] = float(np.nanmean(sub[metric_col]))
+            # Aggregate variance: each solver contributes its own std (across
+            # seeds). Combine as pooled sample size for the t-CI half-width.
+            std_vals = sub[std_col].to_numpy(dtype=float)
+            n_vals = sub[n_col].to_numpy(dtype=float) if n_col in sub.columns else None
+            if n_vals is None or np.all(np.isnan(n_vals)):
+                # Fall back to a fixed 30-seed assumption when n column missing.
+                n_vals = np.full_like(std_vals, 30.0)
+            pooled_n = float(np.nansum(n_vals))
+            n_used[i, j] = pooled_n
+            if pooled_n > 1 and not np.all(np.isnan(std_vals)):
+                # Conservative half-width: average std across solvers, divide by
+                # sqrt of the total seed count, scale by t-critical.
+                std_mean = float(np.nanmean(std_vals))
+                err[i, j] = T_CRIT_95 * std_mean / math.sqrt(pooled_n)
+    return mean, err, n_used
+
+
+def render_trajectory(metric_label, y_label, sd_data, dd_data, outfile):
+    """Six subplots in a 2x3 grid (one per scenario). Each subplot shows the
+    metric on the y-axis and fleet density on the x-axis, with one line per
+    topology (Single-Dock blue, Dual-Dock orange). Error bars are 95% Welch
+    confidence half-widths derived from the per-solver std times the
+    n=30-seeds-per-solver-aggregated t-critical.
+    """
+    sd_mean, sd_err, _ = sd_data
+    dd_mean, dd_err, _ = dd_data
+    fig, axes = plt.subplots(2, 3, figsize=(11, 6), sharex=False)
+    axes = axes.flatten()
+    for i, scen in enumerate(SCENARIOS):
+        ax = axes[i]
+        ax.errorbar(SD_DENSITIES, sd_mean[i], yerr=sd_err[i], marker="o", color="#1f77b4",
+                    label="Single-Dock", capsize=3, linewidth=1.5)
+        ax.errorbar(DD_DENSITIES, dd_mean[i], yerr=dd_err[i], marker="s", color="#ff7f0e",
+                    label="Dual-Dock", capsize=3, linewidth=1.5)
+        ax.set_title(scen, fontsize=9)
+        ax.set_xlabel("Fleet density (agents)", fontsize=8)
+        ax.set_ylabel(y_label, fontsize=8)
+        ax.grid(True, alpha=0.3)
+        ax.tick_params(labelsize=7)
+        if i == 0:
+            ax.legend(fontsize=7, loc="best")
+    fig.suptitle(f"{y_label} vs density, by scenario", fontsize=11, y=1.00)
+    fig.tight_layout()
+    fig.savefig(outfile, dpi=150)
+    plt.close(fig)
+    print(f"  wrote {outfile}")
+
+
 def main():
     sd, dd = load()
 
-    # Only n=40 appears in BOTH matrices — use it for matched-density comparison.
-    # This isolates topology-effect from density-effect.
-    merged, sd40, dd40 = match_cells_at_density(sd, dd, 40)
-
-    print(f"SD n=40 cells: {len(sd40)}")
-    print(f"DD n=40 cells: {len(dd40)}")
-    deltas = {}
-    for m, label in zip(METRICS, LABELS):
-        d_col = f"{m}_SD"
-        e_col = f"{m}_DD"
-        merged[f"delta_{label}"] = merged[e_col] - merged[d_col]
-        deltas[label] = {
-            "mean_abs": float(np.nanmean(np.abs(merged[f"delta_{label}"]))),
-            "max_abs": float(np.nanmax(np.abs(merged[f"delta_{label}"]))),
-            "median_abs": float(np.nanmedian(np.abs(merged[f"delta_{label}"]))),
-        }
-    print("\n=== |Δ| between SD and DD at matched density ===")
-    for label, stats in deltas.items():
-        print(f"  {label:12s}  mean|Δ|={stats['mean_abs']:.3f}  med|Δ|={stats['median_abs']:.3f}  max|Δ|={stats['max_abs']:.3f}")
-
-    # ── Shift/noise ratio for FT (uses CI width as noise proxy)
-    # CI width on FT = ft_ci95_hi - ft_ci95_lo
-    merged["ft_ci_width_SD"] = merged["ft_ci95_hi_SD"] - merged["ft_ci95_lo_SD"]
-    merged["ft_ci_width_DD"] = merged["ft_ci95_hi_DD"] - merged["ft_ci95_lo_DD"]
-    merged["ft_ci_width_avg"] = (merged["ft_ci_width_SD"] + merged["ft_ci_width_DD"]) / 2.0
-    merged["ft_shift_over_noise"] = np.abs(merged["delta_FT"]) / merged["ft_ci_width_avg"].replace(0, np.nan)
-    print("\n=== FT shift/noise ratio (|Δ_FT| / avg CI width) ===")
-    print(f"  mean: {merged['ft_shift_over_noise'].mean():.3f}")
-    print(f"  median: {merged['ft_shift_over_noise'].median():.3f}")
-    print(f"  cells where shift > noise: {(merged['ft_shift_over_noise'] > 1).sum()} / {len(merged)}")
-
-    # ── Rank flips per metric (matched density n=40)
-    print("\n=== Rank flips per metric (Single-Dock n=40 vs Dual-Dock n=40) ===")
-    all_flips = {}
+    # ── 1. Cross-topology heatmap at n=40 ──────────────────────────────
+    print("=== Cross-topology delta at n=40 (only shared density) ===")
+    cross = cross_topology_matrix(sd, dd, 40)
+    render_cross_heatmap(
+        cross,
+        "|Δ| Single-Dock n=40 ↔ Dual-Dock n=40 (only shared density)",
+        OUT_DIR / "cross_topology_delta_n40.png",
+    )
+    sd40 = sd[sd["num_agents"] == 40]
+    dd40 = dd[dd["num_agents"] == 40]
+    flips_per_metric = {}
     for m, label in zip(METRICS, LABELS):
         flips = rank_flips(sd40, dd40, m)
-        all_flips[label] = [
+        flips_per_metric[label] = [
             dict(scenario=f[0], solver_a=f[1], solver_b=f[2], sd_a=f[3], sd_b=f[4], dd_a=f[5], dd_b=f[6])
             for f in flips
         ]
-        print(f"  {label:12s}  flips = {len(flips)}")
-        for f in flips[:3]:
-            scen, a, b, sa, sb, da, db = f
-            print(f"    {scen} / {a} vs {b}: SD ({sa:.3f} vs {sb:.3f}) → DD ({da:.3f} vs {db:.3f})")
 
+    # ── 2. Trajectory plots, one per metric ────────────────────────────
+    print("=== Trajectory plots (metric vs density per scenario) ===")
+    trajectories = {}
+    for label, m, std_c, n_c, y_lab in zip(LABELS, METRICS, STD_COLS, N_COLS, Y_LABELS):
+        sd_traj = aggregate_trajectory(sd, SD_DENSITIES, m, std_c, n_c)
+        dd_traj = aggregate_trajectory(dd, DD_DENSITIES, m, std_c, n_c)
+        outfile = OUT_DIR / f"traj_{label}.png"
+        render_trajectory(label, y_lab, sd_traj, dd_traj, outfile)
+        trajectories[label] = {
+            "scenarios": SCENARIOS,
+            "sd_densities": SD_DENSITIES,
+            "dd_densities": DD_DENSITIES,
+            "sd_mean": sd_traj[0].tolist(),
+            "sd_ci95_half": sd_traj[1].tolist(),
+            "dd_mean": dd_traj[0].tolist(),
+            "dd_ci95_half": dd_traj[1].tolist(),
+        }
+
+    # ── JSON dump ──────────────────────────────────────────────────────
+    out = {
+        "cross_topology_n40": {
+            "matrix": cross.tolist(),
+            "scenarios": SCENARIOS,
+            "metrics": LABELS,
+            "rank_flips_per_metric": {k: len(v) for k, v in flips_per_metric.items()},
+            "rank_flips_detail": flips_per_metric,
+        },
+        "trajectories": trajectories,
+    }
     with open(OUT_DIR / "topology_sensitivity.json", "w") as f:
-        json.dump({"deltas": deltas, "flips_per_metric": {k: len(v) for k, v in all_flips.items()},
-                   "flips_detail": all_flips}, f, indent=2)
-
-    # ── Heatmap of |Δ| per (scenario, metric)
-    fig, ax = plt.subplots(figsize=(8, 4.5))
-    heat = np.zeros((len(SCENARIOS), len(METRICS)))
-    for i, scen in enumerate(SCENARIOS):
-        sub = merged[merged["scenario"] == scen]
-        for j, m in enumerate(METRICS):
-            heat[i, j] = np.nanmean(np.abs(sub[f"delta_{LABELS[j]}"]))
-
-    im = ax.imshow(heat, cmap="YlOrRd", aspect="auto")
-    ax.set_xticks(range(len(METRICS)))
-    ax.set_xticklabels(LABELS, fontsize=9)
-    ax.set_yticks(range(len(SCENARIOS)))
-    ax.set_yticklabels(SCENARIOS, fontsize=8)
-    for i in range(len(SCENARIOS)):
-        for j in range(len(METRICS)):
-            v = heat[i, j]
-            color = "white" if v > heat.max() * 0.6 else "black"
-            ax.text(j, i, f"{v:.2f}", ha="center", va="center", fontsize=8, color=color)
-    plt.colorbar(im, ax=ax, shrink=0.85)
-    ax.set_title("|Δ| per (scenario, metric): Single-Dock n=40 ↔ Dual-Dock n=40", fontsize=10)
-    fig.tight_layout()
-    fig.savefig(OUT_DIR / "delta_heatmap.png", dpi=150)
-    plt.close(fig)
-    print(f"\nWrote {OUT_DIR}/delta_heatmap.png")
-    print(f"Done. Outputs in {OUT_DIR}")
+        json.dump(out, f, indent=2)
+    print(f"\nWrote {OUT_DIR}/topology_sensitivity.json")
 
 
 if __name__ == "__main__":

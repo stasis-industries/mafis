@@ -54,10 +54,10 @@ echo ""
 # Step 5: Statistical analysis
 # ---------------------------------------------------------------------------
 echo "-- Step 5/5: Statistical analysis --"
-python3 analysis/solver_resilience_analysis.py
-python3 analysis/scale_sensitivity_analysis.py
-python3 analysis/scheduler_effect_analysis.py
-python3 analysis/topology_effect_analysis.py
+python3 scripts/analysis/paper_figures.py
+python3 scripts/analysis/tail_metrics.py
+python3 scripts/analysis/fdr_pairwise.py
+python3 scripts/analysis/scheduler_effect_analysis.py
 echo "[OK] Analysis complete"
 echo ""
 
@@ -78,7 +78,7 @@ echo "  # Category 3 complement (permanent zone outage):"
 echo "  cargo test --release run_braess_perm_zone -- --ignored --nocapture"
 echo ""
 echo "  # Analysis (reads both CSVs if present):"
-echo "  python3 analysis/braess_analysis.py"
+echo "  python3 scripts/analysis/archive/braess_analysis.py"
 echo ""
 echo "Optional — Cross-topology validation (480 runs):"
 echo "  cargo test --release run_cross_topology -- --ignored --nocapture"

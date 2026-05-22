@@ -10,7 +10,7 @@ import os
 import sys
 from collections import defaultdict
 
-RESULTS_DIR = os.path.join(os.path.dirname(__file__), "..", "results")
+RESULTS_DIR = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "results"))
 
 
 # ---------------------------------------------------------------------------

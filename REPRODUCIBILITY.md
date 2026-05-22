@@ -46,14 +46,15 @@ Output files (written to `results/`, see `OUTPUT_DIR` constant in `tests/experim
 
 | File | Contents |
 |------|----------|
-| `results/warehouse_single_dock_experiment_runs.csv` | Per-run metrics, Single-Dock |
-| `results/warehouse_single_dock_experiment_summary.csv` | Aggregated stats, Single-Dock |
-| `results/warehouse_dual_dock_experiment_runs.csv` | Per-run metrics, Dual-Dock |
-| `results/warehouse_dual_dock_experiment_summary.csv` | Aggregated stats, Dual-Dock |
-| `results/scheduler_effect_experiment_runs.csv` | Per-run metrics, Scheduler Effect |
-| `results/scheduler_effect_experiment_summary.csv` | Aggregated stats, Scheduler Effect |
+| `results/warehouse_single_dock_runs.csv` | Per-run metrics, Single-Dock |
+| `results/warehouse_single_dock_summary.csv` | Aggregated stats, Single-Dock |
+| `results/warehouse_dual_dock_runs.csv` | Per-run metrics, Dual-Dock |
+| `results/warehouse_dual_dock_summary.csv` | Aggregated stats, Dual-Dock |
+| `results/scheduler_effect_runs.csv` | Per-run metrics, Scheduler Effect (supplementary only) |
+| `results/scheduler_effect_summary.csv` | Aggregated stats, Scheduler Effect (supplementary only) |
 | `results/all_runs.csv` | All runs combined (both rows per paired run) |
-| `results/*.json` | Structured output per sub-experiment |
+| `results/tails.csv` | Post-hoc CVaR + Top-Event Probability tails (produced by `scripts/analysis/tail_metrics.py`) |
+| `results/fdr_adjusted_pvalues.csv` | Benjamini–Hochberg adjusted p-values across all pairwise solver tests |
 
 ---
 
@@ -88,10 +89,19 @@ pip install pandas matplotlib numpy scipy
 
 | Script | Purpose |
 |--------|---------|
+| `paper_figures.py` | Paper figure pipeline (FT/AR heatmaps, SVG/PDF exports) |
+| `tail_metrics.py` | CVaR α=0.8 + Top-Event Probability → `tails.csv` |
+| `fdr_pairwise.py` | Welch's t + Benjamini–Hochberg → `fdr_adjusted_pvalues.csv` |
+| `metric_correlation.py` | Cross-metric correlation matrix (Pearson + Spearman) |
+| `topology_sensitivity.py` | Topology rank-flip table and shift/noise figures |
+| `speed_robustness.py` | Solver step time vs FT scatter |
 | `structural_cascade_scaling.py` | Structural cascade R² and slopes across aisle widths |
 | `mitigation_delta.py` | Mitigation Δ (FT, CT, TWTE) by solver and aisle width |
 | `ft_baseline_audit.py` | Baseline-validity flags — identifies overloaded cells |
 | `delta_diff.py` | Pre/post-fix drift table (compares CSV pairs) |
+| `scheduler_effect_analysis.py` | Scheduler effect comparison (supplementary only) |
+
+See `scripts/analysis/README.md` for the full index, including the `archive/` subdir and the `figures/` subdir that regenerates paper figures.
 
 Run each with:
 ```bash
