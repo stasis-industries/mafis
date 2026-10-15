@@ -107,11 +107,20 @@ pub struct QueueState {
     /// and `is_full()` aware of pending assignments so policies see correct
     /// availability when multiple agents are assigned in the same tick.
     pub(super) reserved: usize,
+    /// A dead robot (or obstacle) sits on this lane or its delivery cell.
+    /// A blocked lane reports no free slots, so no policy ever joins it.
+    pub blocked: bool,
 }
 
 impl QueueState {
     pub fn new(line_index: usize, capacity: usize) -> Self {
-        Self { line_index, slots: vec![None; capacity], delivery_occupied_by: None, reserved: 0 }
+        Self {
+            line_index,
+            slots: vec![None; capacity],
+            delivery_occupied_by: None,
+            reserved: 0,
+            blocked: false,
+        }
     }
 
     /// Number of agents currently in the queue (not counting delivery).
@@ -119,8 +128,11 @@ impl QueueState {
         self.slots.iter().filter(|s| s.is_some()).count()
     }
 
-    /// Number of empty slots.
+    /// Number of empty slots (zero for a blocked lane).
     pub fn free_slots(&self) -> usize {
+        if self.blocked {
+            return 0;
+        }
         self.slots.iter().filter(|s| s.is_none()).count()
     }
 
@@ -204,6 +216,8 @@ impl Default for ActiveQueuePolicy {
 /// fault rerouting, and new joins.
 pub struct QueueManager {
     pub queues: Vec<QueueState>,
+    /// Agents ejected from blocked queue lanes since the last reset (diagnostic).
+    pub reroutes: u64,
 }
 
 impl QueueManager {
@@ -214,12 +228,12 @@ impl QueueManager {
             .enumerate()
             .map(|(i, line)| QueueState::new(i, line.capacity()))
             .collect();
-        Self { queues }
+        Self { queues, reroutes: 0 }
     }
 
     /// Create an empty queue manager (no queue lines in topology).
     pub fn empty() -> Self {
-        Self { queues: Vec::new() }
+        Self { queues: Vec::new(), reroutes: 0 }
     }
 
     /// Whether this manager has any queue lines.
@@ -234,6 +248,7 @@ impl QueueManager {
             .enumerate()
             .map(|(i, line)| QueueState::new(i, line.capacity()))
             .collect();
+        self.reroutes = 0;
     }
 
     /// Clear all occupants without changing topology structure.
@@ -631,36 +646,44 @@ impl QueueManager {
         }
     }
 
-    /// Handle fault rerouting: agents in TravelToQueue/Queuing whose queue has a dead
-    /// agent blocking them get reassigned to another queue.
+    /// Handle fault rerouting: a lane is blocked when its delivery cell or any
+    /// of its cells is no longer walkable (a robot died there). Every agent
+    /// bound for a blocked lane — queued, travelling to it, or delivering at it —
+    /// is reassigned to another queue, or held in Loading if none is free.
     ///
-    /// Uses `reserved` to prevent reassigning agents back to the blocked queue
-    /// (which looks empty after slot clearing) and to ensure displaced agents
-    /// assigned in the same pass get different goal cells.
+    /// Blocked lanes keep `blocked = true` (no free slots), so neither this pass
+    /// nor later joins send agents back to them. `reserved` keeps displaced
+    /// agents assigned in the same pass on different goal cells.
     pub fn reroute_blocked_agents(
         &mut self,
         agents: &mut [SimAgent],
         queue_lines: &[QueueLine],
         policy: &dyn DeliveryQueuePolicy,
+        grid: &GridMap,
         changed: &mut Vec<usize>,
     ) {
-        // Pass 1: collect agents from blocked queues and mark blocked queues as
-        // artificially full so the policy won't reassign agents back to them.
+        // Pass 1: mark blocked lanes and collect every agent bound for one.
         let mut reroute_agents: Vec<usize> = Vec::new();
         for (qi, state) in self.queues.iter_mut().enumerate() {
             let line = &queue_lines[qi];
-            let delivery_blocked = state.delivery_occupied_by.is_none()
-                && !agents.iter().any(|a| a.alive && a.pos == line.delivery_cell);
-            if !delivery_blocked {
+            state.blocked = !grid.is_walkable(line.delivery_cell)
+                || line.cells.iter().any(|&c| !grid.is_walkable(c));
+            if !state.blocked {
                 continue;
             }
-            for slot in &mut state.slots {
-                if let Some(agent_idx) = slot.take() {
+            state.slots.iter_mut().for_each(|slot| *slot = None);
+            state.delivery_occupied_by = None;
+            for (agent_idx, agent) in agents.iter().enumerate() {
+                let bound_here = match &agent.task_leg {
+                    TaskLeg::TravelToQueue { line_index, .. }
+                    | TaskLeg::Queuing { line_index, .. } => *line_index == qi,
+                    TaskLeg::TravelLoaded { to, .. } => *to == line.delivery_cell,
+                    _ => false,
+                };
+                if agent.alive && bound_here {
                     reroute_agents.push(agent_idx);
                 }
             }
-            // Mark blocked queue as full so policy skips it in Pass 2
-            state.reserved = state.slots.len();
         }
 
         // Pass 2: reroute collected agents with reservation tracking
@@ -668,15 +691,16 @@ impl QueueManager {
             if !agents[agent_idx].alive {
                 continue;
             }
+            self.reroutes += 1;
             let decision = policy.choose_queue(agents[agent_idx].pos, queue_lines, &self.queues);
             match decision {
                 QueueDecision::JoinQueue { line_index } => {
                     let new_line = &queue_lines[line_index];
                     let new_state = &self.queues[line_index];
                     let from = match &agents[agent_idx].task_leg {
-                        TaskLeg::TravelToQueue { from, .. } | TaskLeg::Queuing { from, .. } => {
-                            *from
-                        }
+                        TaskLeg::TravelToQueue { from, .. }
+                        | TaskLeg::Queuing { from, .. }
+                        | TaskLeg::TravelLoaded { from, .. } => *from,
                         _ => agents[agent_idx].pos,
                     };
                     let agent = &mut agents[agent_idx];
@@ -691,9 +715,9 @@ impl QueueManager {
                 }
                 QueueDecision::Hold => {
                     let from = match &agents[agent_idx].task_leg {
-                        TaskLeg::TravelToQueue { from, .. } | TaskLeg::Queuing { from, .. } => {
-                            *from
-                        }
+                        TaskLeg::TravelToQueue { from, .. }
+                        | TaskLeg::Queuing { from, .. }
+                        | TaskLeg::TravelLoaded { from, .. } => *from,
                         _ => agents[agent_idx].pos,
                     };
                     let agent = &mut agents[agent_idx];
@@ -1163,7 +1187,7 @@ mod tests {
     fn reroute_excludes_blocked_queue() {
         use super::super::runner::SimAgent;
 
-        let grid = test_grid();
+        let mut grid = test_grid();
         // Two queues at different rows
         let lines = vec![
             QueueLine::compute(IVec2::new(8, 1), Direction::West, &grid).unwrap(),
@@ -1172,22 +1196,17 @@ mod tests {
         let mut mgr = QueueManager::new(&lines);
 
         let pickup = IVec2::new(3, 2);
-        // Agent 0 in queue 0 slot 0, agent 1 at queue 1's delivery cell (healthy queue)
-        let mut agents =
-            vec![SimAgent::new(lines[0].cells[0]), SimAgent::new(lines[1].delivery_cell)];
+        let mut agents = vec![SimAgent::new(lines[0].cells[0])];
         agents[0].task_leg =
             TaskLeg::Queuing { from: pickup, to: lines[0].delivery_cell, line_index: 0 };
         mgr.queues[0].slots[0] = Some(0);
-        // Agent 1 is delivering at queue 1 — marks queue 1 as NOT blocked
-        agents[1].task_leg = TaskLeg::TravelLoaded { from: pickup, to: lines[1].delivery_cell };
-        mgr.queues[1].delivery_occupied_by = Some(1);
 
-        // Queue 0's delivery cell is blocked (no alive agent there, delivery_occupied_by is None)
-        // Queue 1's delivery cell is NOT blocked (agent 1 is there)
+        // A robot died on queue 0's delivery cell.
+        grid.set_obstacle(lines[0].delivery_cell);
 
         let policy = ClosestQueuePolicy;
         let mut changed = Vec::new();
-        mgr.reroute_blocked_agents(&mut agents, &lines, &policy, &mut changed);
+        mgr.reroute_blocked_agents(&mut agents, &lines, &policy, &grid, &mut changed);
 
         // Agent should be rerouted to queue 1, NOT back to queue 0
         match &agents[0].task_leg {
@@ -1199,5 +1218,31 @@ mod tests {
             }
             other => panic!("Expected TravelToQueue, got {:?}", other),
         }
+        assert!(mgr.queues[0].is_full(), "blocked lane must stay closed to joins");
+        assert_eq!(mgr.reroutes, 1);
+    }
+
+    #[test]
+    fn idle_delivery_cell_does_not_eject_queued_agents() {
+        use super::super::runner::SimAgent;
+
+        let grid = test_grid();
+        let lines = vec![QueueLine::compute(IVec2::new(8, 1), Direction::West, &grid).unwrap()];
+        let mut mgr = QueueManager::new(&lines);
+        let mut agents = vec![SimAgent::new(lines[0].cells[0])];
+        agents[0].task_leg = TaskLeg::Queuing {
+            from: IVec2::new(3, 2),
+            to: lines[0].delivery_cell,
+            line_index: 0,
+        };
+        mgr.queues[0].slots[0] = Some(0);
+
+        // Nobody is at the delivery cell: it is idle, not blocked.
+        let mut changed = Vec::new();
+        mgr.reroute_blocked_agents(&mut agents, &lines, &ClosestQueuePolicy, &grid, &mut changed);
+
+        assert!(matches!(agents[0].task_leg, TaskLeg::Queuing { line_index: 0, .. }));
+        assert_eq!(mgr.queues[0].slots[0], Some(0));
+        assert_eq!(mgr.reroutes, 0);
     }
 }

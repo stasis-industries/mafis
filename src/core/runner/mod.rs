@@ -261,6 +261,11 @@ impl SimulationRunner {
         self.solver.as_ref()
     }
 
+    /// Agents ejected from blocked delivery-queue lanes so far.
+    pub fn queue_reroutes(&self) -> u64 {
+        self.queue_manager.reroutes
+    }
+
     pub fn solver_mut(&mut self) -> &mut dyn LifelongSolver {
         self.solver.as_mut()
     }
@@ -841,6 +846,7 @@ impl SimulationRunner {
             &mut self.agents,
             &self.zones.queue_lines,
             queue_policy,
+            &self.grid,
             &mut reroute_changed,
         );
 
@@ -898,7 +904,7 @@ impl SimulationRunner {
                 .delivery_cells
                 .iter()
                 .copied()
-                .filter(|c| !used_goals.contains(c) && *c != agent.pos)
+                .filter(|&c| !used_goals.contains(&c) && c != agent.pos && self.grid.is_walkable(c))
                 .min_by_key(|c| (c.x - agent.pos.x).abs() + (c.y - agent.pos.y).abs());
 
             if let Some(delivery_cell) = delivery {
