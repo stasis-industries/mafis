@@ -3,6 +3,7 @@
 use std::collections::VecDeque;
 
 use bevy::math::IVec2;
+use smallvec::SmallVec;
 
 use crate::core::action::Action;
 use crate::core::task::TaskLeg;
@@ -94,6 +95,45 @@ pub struct FaultRecord {
     /// evidence. This captures obstacle-creation cascade impact that the ADG-based
     /// BFS misses (because it runs post-replan).
     pub paths_invalidated: u32,
+}
+
+// ---------------------------------------------------------------------------
+// FaultSnapshot — agent state at the instant a group of faults is applied
+// ---------------------------------------------------------------------------
+
+/// Agent state captured when a group of simultaneous faults is applied —
+/// before any victim is removed or any plan is cleared — so cascade analysis
+/// sees the moves the victims' neighbours were about to execute.
+#[derive(Clone, Debug, Default)]
+pub struct FaultSnapshot {
+    /// Agents faulted at this instant (multi-source cascade BFS roots).
+    pub sources: Vec<usize>,
+    /// Per agent: cells occupied at plan steps `0..=lookahead` (step 0 = current
+    /// position). Empty for agents already dead.
+    pub cells: Vec<SmallVec<[IVec2; 4]>>,
+}
+
+impl FaultSnapshot {
+    /// Capture every agent's next `lookahead` planned cells; `sources` is
+    /// filled by the caller once the victims are known.
+    pub fn capture(agents: &[SimAgent], lookahead: usize) -> Self {
+        let cells = agents
+            .iter()
+            .map(|a| {
+                if !a.alive {
+                    return SmallVec::new();
+                }
+                let mut pos = a.pos;
+                std::iter::once(pos)
+                    .chain(a.planned_path.iter().take(lookahead).map(|action| {
+                        pos = action.apply(pos);
+                        pos
+                    }))
+                    .collect()
+            })
+            .collect();
+        Self { sources: Vec::new(), cells }
+    }
 }
 
 // ---------------------------------------------------------------------------

@@ -18,7 +18,8 @@ pub fn write_runs_csv<W: Write>(writer: &mut W, runs: &[RunResult]) -> std::io::
          structural_cascade_avg,structural_cascade_max,mitigation_delta_avg,\
          itae,rapidity,attack_rate,fleet_utilization,\
          pbs_partial_rate,\
-         solver_step_avg_us,solver_step_max_us,wall_time_ms"
+         solver_step_avg_us,solver_step_max_us,wall_time_ms,\
+         attack_rate_total"
     )?;
 
     for run in runs {
@@ -53,7 +54,8 @@ fn write_run_row<W: Write>(
          {},{},{},\
          {},{},{},{},\
          {},\
-         {},{},{}",
+         {},{},{},\
+         {}",
         config.solver_name,
         config.topology_name,
         config.scenario_label(),
@@ -87,6 +89,7 @@ fn write_run_row<W: Write>(
         csv_f64(m.solver_step_time_avg_us, 1),
         csv_f64(m.solver_step_time_max_us, 1),
         m.wall_time_ms,
+        csv_f64(m.attack_rate_total, 4),
     )
 }
 
@@ -348,7 +351,7 @@ fn write_metrics_json<W: Write>(
          \"itae\":{},\"rapidity\":{},\"attack_rate\":{},\
          \"fleet_utilization\":{},\
          \"solver_step_avg_us\":{},\"solver_step_max_us\":{},\
-         \"wall_time_ms\":{}}}",
+         \"wall_time_ms\":{},\"attack_rate_total\":{}}}",
         json_f64(m.avg_throughput, 4),
         m.total_tasks,
         json_f64(m.unassigned_ratio, 4),
@@ -374,6 +377,7 @@ fn write_metrics_json<W: Write>(
         json_f64(m.solver_step_time_avg_us, 1),
         json_f64(m.solver_step_time_max_us, 1),
         m.wall_time_ms,
+        json_f64(m.attack_rate_total, 4),
     )?;
     Ok(())
 }

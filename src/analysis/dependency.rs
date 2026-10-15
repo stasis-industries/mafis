@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use crate::constants;
 use crate::core::agent::{AgentIndex, LogicalAgent};
 use crate::core::live_sim::LiveSim;
-use crate::core::runner::SimAgent;
+use crate::core::runner::FaultSnapshot;
 use crate::core::state::SimulationConfig;
 use crate::fault::breakdown::Dead;
 
@@ -257,33 +257,34 @@ impl IndexedDependencyGraph {
     }
 }
 
-/// Build an index-based ADG from SimAgent positions and planned paths.
-/// Mirrors the logic of the ECS `build_adg` system but uses agent indices
-/// instead of Bevy entities.
-pub fn build_adg_from_agents(agents: &[SimAgent], lookahead: usize) -> IndexedDependencyGraph {
-    let mut dependents: HashMap<usize, Vec<usize>> = HashMap::with_capacity(agents.len());
-    let mut occupation: HashMap<IVec2, usize> = HashMap::with_capacity(agents.len());
-
-    // Build occupation map: pos → agent index (alive only)
-    for (i, agent) in agents.iter().enumerate() {
-        if agent.alive {
-            occupation.insert(agent.pos, i);
+/// Time-indexed ADG over a fault-instant snapshot (Hönig et al. 2019, type-2
+/// dependencies): edge A→B when B's planned cell at step k is a cell A occupies
+/// at an earlier step k' < k — A must vacate it before B can enter.
+///
+/// The lookahead baked into the snapshot is common to every solver (see
+/// `constants::ADG_LOOKAHEAD`), so the graph does not grow with how far ahead
+/// a solver happens to plan.
+pub fn build_adg_from_snapshot(snapshot: &FaultSnapshot) -> IndexedDependencyGraph {
+    let n = snapshot.cells.len();
+    let mut dependents: HashMap<usize, Vec<usize>> = HashMap::with_capacity(n);
+    // cell → (agent, earliest step it occupies the cell)
+    let mut occupation: HashMap<IVec2, Vec<(usize, usize)>> = HashMap::with_capacity(n);
+    for (a, cells) in snapshot.cells.iter().enumerate() {
+        for (step, &cell) in cells.iter().enumerate() {
+            let occ = occupation.entry(cell).or_default();
+            if !occ.iter().any(|&(o, _)| o == a) {
+                occ.push((a, step));
+            }
         }
     }
 
-    // For each alive agent B, walk planned_path and find dependencies
-    let mut seen = HashSet::with_capacity(agents.len());
-    for (idx_b, agent_b) in agents.iter().enumerate() {
-        if !agent_b.alive {
-            continue;
-        }
+    let mut seen = HashSet::with_capacity(n);
+    for (b, cells) in snapshot.cells.iter().enumerate() {
         seen.clear();
-        let mut pos = agent_b.pos;
-        for action in agent_b.planned_path.iter().take(lookahead) {
-            pos = action.apply(pos);
-            if let Some(&idx_a) = occupation.get(&pos) {
-                if idx_a != idx_b && seen.insert(idx_a) {
-                    dependents.entry(idx_a).or_default().push(idx_b);
+        for (k, cell) in cells.iter().enumerate().skip(1) {
+            for &(a, k_a) in occupation.get(cell).map_or(&[][..], |v| v.as_slice()) {
+                if a != b && k_a < k && seen.insert(a) {
+                    dependents.entry(a).or_default().push(b);
                 }
             }
         }
@@ -490,45 +491,44 @@ mod tests {
 
     // ── IndexedDependencyGraph (headless) ─────────────────────────────
 
+    fn snapshot(cells: Vec<Vec<IVec2>>) -> FaultSnapshot {
+        FaultSnapshot { sources: vec![], cells: cells.into_iter().map(Into::into).collect() }
+    }
+
     #[test]
     fn test_indexed_adg_empty() {
-        let agents: Vec<SimAgent> = vec![];
-        let adg = build_adg_from_agents(&agents, 3);
+        let adg = build_adg_from_snapshot(&snapshot(vec![]));
         assert!(adg.dependents.is_empty());
     }
 
     #[test]
     fn test_indexed_adg_linear_chain() {
-        use crate::core::action::Action;
-        use std::collections::VecDeque;
-        // Agent A at (0,0), no plan. Agent B at (1,0), plans to move West to (0,0).
-        let mut agent_a = SimAgent::new(IVec2::new(0, 0));
-        agent_a.alive = true;
-        let mut agent_b = SimAgent::new(IVec2::new(1, 0));
-        agent_b.alive = true;
-        agent_b.planned_path =
-            VecDeque::from(vec![Action::Move(crate::core::action::Direction::West)]);
-
-        let adg = build_adg_from_agents(&[agent_a, agent_b], 3);
-        // B depends on A (B's path crosses A's position)
+        // A at (0,0) stays. B at (1,0) plans to move West into A's cell.
+        let v = IVec2::new;
+        let adg = build_adg_from_snapshot(&snapshot(vec![vec![v(0, 0)], vec![v(1, 0), v(0, 0)]]));
         assert_eq!(adg.direct_dependents(0), &[1]); // A's dependents = [B]
-        assert!(adg.direct_dependents(1).is_empty()); // B has no dependents
+        assert!(adg.direct_dependents(1).is_empty());
     }
 
     #[test]
     fn test_indexed_adg_dead_excluded() {
-        use crate::core::action::Action;
-        use std::collections::VecDeque;
-        // Dead agent's position should not appear in occupation map
-        let mut agent_a = SimAgent::new(IVec2::new(0, 0));
-        agent_a.alive = false; // dead
-        let mut agent_b = SimAgent::new(IVec2::new(1, 0));
-        agent_b.alive = true;
-        agent_b.planned_path =
-            VecDeque::from(vec![Action::Move(crate::core::action::Direction::West)]);
-
-        let adg = build_adg_from_agents(&[agent_a, agent_b], 3);
-        // A is dead, so no occupation → no edge
+        // Dead agents carry no cells, so they occupy nothing.
+        let v = IVec2::new;
+        let adg = build_adg_from_snapshot(&snapshot(vec![vec![], vec![v(1, 0), v(0, 0)]]));
         assert!(adg.dependents.is_empty());
+    }
+
+    #[test]
+    fn test_indexed_adg_is_time_indexed() {
+        // A at (0,0) moves to (0,1) at step 1. B reaches (0,1) at step 2 →
+        // B depends on A (A is there first). C enters (0,1) at step 1, the
+        // same step A does — a conflict, not a precedence, so no A→C edge.
+        let v = IVec2::new;
+        let adg = build_adg_from_snapshot(&snapshot(vec![
+            vec![v(0, 0), v(0, 1)],
+            vec![v(2, 1), v(1, 1), v(0, 1)],
+            vec![v(0, 2), v(0, 1)],
+        ]));
+        assert_eq!(adg.direct_dependents(0), &[1]);
     }
 }

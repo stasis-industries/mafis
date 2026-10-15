@@ -42,12 +42,12 @@ pub struct RunMetrics {
     pub mtbf: Option<f64>,
     pub recovery_tick: Option<u64>,
 
-    // ── Cascade (ADG-based, solver-coupled) ────────────────────────
-    /// Average cascade spread per fault event (agents affected via ADG BFS).
-    /// Solver-coupled: depends on per-solver planning lookahead.
+    // ── Cascade (ADG on the fault-instant snapshot, common lookahead) ──
+    /// Average agents involved per fault event: the agents faulted at that
+    /// instant plus those reached by multi-source ADG BFS.
     pub cascade_spread_avg: f64,
-    /// Average cascade depth per fault event (max BFS depth).
-    /// Solver-coupled: depends on per-solver planning lookahead.
+    /// Average cascade depth per fault event (max BFS depth from the nearest
+    /// faulted agent). Lookahead is `ADG_LOOKAHEAD` for every solver.
     pub cascade_depth_avg: f64,
 
     // ── Structural cascade (solver-independent) ────────────────────
@@ -73,8 +73,9 @@ pub struct RunMetrics {
     /// holds for `≥ RAPIDITY_DWELL` consecutive ticks. Bruneau 2003.
     /// NaN if never recovers within the simulation horizon.
     pub rapidity: f64,
-    /// Attack Rate — fraction of initial fleet ever materially affected by
-    /// any fault cascade. Wallinga & Lipsitch 2007. Range [0, 1].
+    /// Secondary Attack Rate — among agents never directly faulted, the
+    /// fraction reached by any fault's cascade (ADG BFS on the fault-instant
+    /// snapshot). Range [0, 1]; NaN when every agent was directly faulted.
     pub attack_rate: f64,
 
     // ── Fleet utilization ─────────────────────────────────────────
@@ -97,6 +98,11 @@ pub struct RunMetrics {
     pub solver_step_time_avg_us: f64,
     pub solver_step_time_max_us: f64,
     pub wall_time_ms: u64,
+    /// Pre-rebuild Attack Rate: fraction of the initial fleet directly faulted
+    /// or reached by a cascade. Kept for comparability with older runs; on
+    /// permanent faults it largely echoes the kill fraction (`attack_rate` is
+    /// the secondary rate that excludes directly faulted agents).
+    pub attack_rate_total: f64,
 }
 
 /// Compute metrics for a baseline run (no faults, self-comparison).
@@ -165,6 +171,7 @@ pub fn compute_baseline_self_metrics(
         solver_step_time_avg_us,
         solver_step_time_max_us,
         wall_time_ms,
+        attack_rate_total: 0.0,
     }
 }
 
@@ -368,6 +375,7 @@ pub fn compute_run_metrics(
         solver_step_time_avg_us,
         solver_step_time_max_us,
         wall_time_ms,
+        attack_rate_total: 0.0,
     }
 }
 
