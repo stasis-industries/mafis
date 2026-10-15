@@ -1230,11 +1230,8 @@ mod tests {
         let lines = vec![QueueLine::compute(IVec2::new(8, 1), Direction::West, &grid).unwrap()];
         let mut mgr = QueueManager::new(&lines);
         let mut agents = vec![SimAgent::new(lines[0].cells[0])];
-        agents[0].task_leg = TaskLeg::Queuing {
-            from: IVec2::new(3, 2),
-            to: lines[0].delivery_cell,
-            line_index: 0,
-        };
+        agents[0].task_leg =
+            TaskLeg::Queuing { from: IVec2::new(3, 2), to: lines[0].delivery_cell, line_index: 0 };
         mgr.queues[0].slots[0] = Some(0);
 
         // Nobody is at the delivery cell: it is idle, not blocked.

@@ -651,7 +651,15 @@ mod tests {
             .collect();
 
         let mut shuffle_rng = test_rng();
-        let result = recycle_goals_core(&agents, &scheduler, &zones, &GridMap::new(8, 8), &mut rng, &mut shuffle_rng, 1);
+        let result = recycle_goals_core(
+            &agents,
+            &scheduler,
+            &zones,
+            &GridMap::new(8, 8),
+            &mut rng,
+            &mut shuffle_rng,
+            1,
+        );
 
         // All 4 agents should be assigned (zones.pickup_cells has 16 cells)
         let assigned: Vec<_> = result
@@ -795,7 +803,15 @@ mod tests {
         let mut all_pickups: HashSet<IVec2> = HashSet::new();
         let mut shuffle_rng = test_rng();
         for tick in 1..=50 {
-            let result = recycle_goals_core(&agents, &scheduler, &zones, &GridMap::new(8, 8), &mut rng, &mut shuffle_rng, tick);
+            let result = recycle_goals_core(
+                &agents,
+                &scheduler,
+                &zones,
+                &GridMap::new(8, 8),
+                &mut rng,
+                &mut shuffle_rng,
+                tick,
+            );
             for update in &result.updates {
                 if let TaskLeg::TravelEmpty(cell) = &update.task_leg {
                     all_pickups.insert(*cell);

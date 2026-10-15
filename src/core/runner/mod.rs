@@ -782,7 +782,10 @@ impl SimulationRunner {
             }
             let idx = col.idx(a.pos);
             if col.target_count[idx] > 0 {
-                return Some(format!("agents {} and {i} both at {:?}", col.target_agent[idx], a.pos));
+                return Some(format!(
+                    "agents {} and {i} both at {:?}",
+                    col.target_agent[idx], a.pos
+                ));
             }
             col.target_count[idx] = 1;
             col.target_agent[idx] = i as u32;

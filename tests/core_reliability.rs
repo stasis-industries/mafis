@@ -124,8 +124,7 @@ fn burst_equals_direct_kill_of_the_same_agents() {
             initialized: true,
         };
         let mut burst = runner_with(solver(name, n), n, 42, no_faults(), schedule);
-        let mut direct =
-            runner_with(solver(name, n), n, 42, no_faults(), FaultSchedule::default());
+        let mut direct = runner_with(solver(name, n), n, 42, no_faults(), FaultSchedule::default());
 
         for _ in 1..burst_tick {
             tick(&mut burst);
@@ -207,7 +206,8 @@ fn wear_deaths_happen_at_the_same_tick_under_every_solver() {
         ..Default::default()
     };
     let deaths_under = |name: &str| -> Vec<(usize, u64)> {
-        let mut runner = runner_with(solver(name, n), n, 42, wear.clone(), FaultSchedule::default());
+        let mut runner =
+            runner_with(solver(name, n), n, 42, wear.clone(), FaultSchedule::default());
         let mut deaths = Vec::new();
         for _ in 0..300 {
             tick(&mut runner);
