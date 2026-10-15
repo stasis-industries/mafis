@@ -4683,7 +4683,7 @@ const EXPERIMENT_METRICS = [
     // Primary differential metrics
     { key: 'fault_tolerance', label: 'FT', decimals: 3 },
     { key: 'critical_time', label: 'CT', decimals: 3 },
-    { key: 'itae', label: 'TWTE', decimals: 0 },
+    { key: 'itae', label: 'TWTE', decimals: 3 },
     { key: 'attack_rate', label: 'AR', decimals: 3 },
     { key: 'cascade_depth', label: 'Casc. Depth', decimals: 2 },
     { key: 'rapidity', label: 'Rapidity', decimals: 1 },
@@ -4939,7 +4939,7 @@ function metricZoneClass(key, val) {
         case 'critical_time': case 'attack_rate':
             return val <= 0.2 ? 'zone-good' : val <= 0.5 ? 'zone-fair' : 'zone-poor';
         case 'itae':
-            return val <= 15000 ? 'zone-good' : val <= 30000 ? 'zone-fair' : 'zone-poor';
+            return val <= 0.1 ? 'zone-good' : val <= 0.3 ? 'zone-fair' : 'zone-poor';
         case 'cascade_depth':
             return val <= 0.1 ? 'zone-good' : val <= 0.5 ? 'zone-fair' : 'zone-poor';
         case 'rapidity':
@@ -4957,7 +4957,7 @@ function metricZoneHex(key, val) {
         case 'critical_time': case 'attack_rate':
             return val <= 0.2 ? '#78b478' : val <= 0.5 ? '#c8aa64' : '#b45050';
         case 'itae':
-            return val <= 15000 ? '#78b478' : val <= 30000 ? '#c8aa64' : '#b45050';
+            return val <= 0.1 ? '#78b478' : val <= 0.3 ? '#c8aa64' : '#b45050';
         case 'cascade_depth':
             return val <= 0.1 ? '#78b478' : val <= 0.5 ? '#c8aa64' : '#b45050';
         case 'rapidity':

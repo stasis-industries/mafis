@@ -276,13 +276,16 @@ pub const TICK_SNAPSHOT_INTERVAL: u64 = 3;
 /// NOT a derived constant from a specific performability paper
 pub const CRITICAL_TIME_THRESHOLD: f64 = 0.5;
 
-/// Rolling-mean window (ticks) applied to the baseline throughput series
-/// before the CT threshold check. Smooths the sparse per-tick task-completion
-/// signal at low agent counts (where most ticks have zero completions and a
-/// raw per-tick threshold collapses to zero). Matches the spec in
-/// `RELIABILITY.md` and is used by both the experiment runner and the live
-/// scorecard via `crate::analysis::ct`.
-pub const CT_BASELINE_WINDOW: usize = 10;
+/// Window W (ticks) of the post-fault throughput ratio
+/// `R_w(t) = Σ P_f / Σ P_b` over `[max(t_f, t−W+1), t]` that CT and Rapidity
+/// are computed on (`crate::analysis::ct::ratio_at`). Per-tick task
+/// completions are sparse integers (39–76% of baseline ticks are 0 at the
+/// tested densities), so a per-tick ratio is mostly 0/0 or 0/1 noise.
+/// Measured noise floor (PIBT, SD n=40, two independent fault-free runs): CT
+/// ≈ 0.05 at W=20 vs 0.09–0.19 under Zone/Burst-20/Intermittent; Rapidity is
+/// NOT separable from that null at W=20–100 (every null pair "degrades" and
+/// "recovers"). Smoothed functionality curves follow Cimellaro et al. 2010.
+pub const RATIO_WINDOW: usize = 20;
 
 /// How often to recompute scorecard metrics (ticks).
 pub const SCORECARD_RECOMPUTE_INTERVAL: u64 = 50;
@@ -292,8 +295,8 @@ pub const THROUGHPUT_MA_WINDOW: usize = 10;
 
 // ── Rapidity (Bruneau 2003, Cimellaro 2010) ─────────────────────────
 
-/// Threshold for Rapidity: R(t) = smoothed_faulted / smoothed_baseline must
-/// meet or exceed this fraction to count as recovered.
+/// Threshold for Rapidity: the windowed ratio `R_w(t)` (see `RATIO_WINDOW`)
+/// must meet or exceed this fraction to count as recovered.
 /// Bruneau et al. 2003, EERI Spectra 19(4).
 pub const RAPIDITY_THRESHOLD: f64 = 0.9;
 
@@ -301,8 +304,14 @@ pub const RAPIDITY_THRESHOLD: f64 = 0.9;
 /// confirmation. Guards against oscillatory crossings.
 pub const RAPIDITY_DWELL: usize = 5;
 
-/// Rolling-average window for Rapidity throughput smoothing.
-/// Derived from SNR analysis: W=20 keeps per-tick throughput variance
-/// below 5% at the smallest tested fleet size (N=20).
-/// Following Cimellaro et al. 2010 (smoothed functionality curves).
-pub const RAPIDITY_SMOOTH_WINDOW: usize = 20;
+/// Baseline validity: a fault-free baseline that completes no task for this
+/// many consecutive ticks after its first completion is flagged
+/// `baseline_gridlocked` and excluded from summary aggregates
+/// (`crate::experiment::metrics::baseline_gridlocked`).
+/// Calibrated on 300 closest-scheduler baselines (30 seeds per cell): the
+/// longest healthy gap is 32 ticks (PIBT SD n=20; every PIBT cell on SD
+/// n=20/40/60 and DD n=40/80, RHCR SD n=20), so 100 is >3× that. It flags
+/// RHCR-PBS SD n=60 in 20/30 seeds, RHCR SD n=40 1/30, TP SD n=40 1/30, PIBT 0.
+/// shortcut: absolute window calibrated for n ≥ 20; fleets small enough that
+/// healthy gaps approach 100 ticks need a throughput-relative window.
+pub const GRIDLOCK_WINDOW: usize = 100;

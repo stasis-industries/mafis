@@ -18,7 +18,8 @@ pub fn write_runs_csv<W: Write>(writer: &mut W, runs: &[RunResult]) -> std::io::
          structural_cascade_avg,structural_cascade_max,mitigation_delta_avg,\
          itae,rapidity,attack_rate,fleet_utilization,\
          pbs_partial_rate,\
-         solver_step_avg_us,solver_step_max_us,wall_time_ms"
+         solver_step_avg_us,solver_step_max_us,wall_time_ms,\
+         twte_undefined_ticks,rapidity_recovered,baseline_gridlocked"
     )?;
 
     for run in runs {
@@ -53,6 +54,7 @@ fn write_run_row<W: Write>(
          {},{},{},\
          {},{},{},{},\
          {},\
+         {},{},{},\
          {},{},{}",
         config.solver_name,
         config.topology_name,
@@ -87,6 +89,9 @@ fn write_run_row<W: Write>(
         csv_f64(m.solver_step_time_avg_us, 1),
         csv_f64(m.solver_step_time_max_us, 1),
         m.wall_time_ms,
+        m.twte_undefined_ticks,
+        m.rapidity_recovered.map_or("".to_string(), |v| v.to_string()),
+        m.baseline_gridlocked,
     )
 }
 
@@ -98,6 +103,9 @@ pub fn write_summary_csv<W: Write>(
     // Per-metric `n` columns expose when NaN filtering reduced sample size.
     // ft_n < num_seeds means some runs had baseline throughput = 0.
     // ct_n < num_seeds means some runs had no fault impact (critical_time undefined).
+    // Runs whose baseline gridlocked are excluded from every metric aggregate
+    // (count in baseline_gridlocked_n). Rapidity is summarised over recovered
+    // runs only; censored runs (degraded, never recovered) are counted, not dropped.
     writeln!(
         writer,
         "solver,topology,scenario,scheduler,num_agents,num_seeds,\
@@ -112,9 +120,11 @@ pub fn write_summary_csv<W: Write>(
          cascade_depth_mean,cascade_depth_std,cascade_spread_mean,cascade_spread_std,\
          structural_cascade_mean,structural_cascade_std,\
          structural_cascade_max_mean,mitigation_delta_mean,mitigation_delta_std,\
-         itae_mean,itae_std,rapidity_mean,rapidity_std,attack_rate_mean,attack_rate_std,\
+         itae_mean,itae_std,rapidity_recovered_mean,rapidity_recovered_std,\
+         attack_rate_mean,attack_rate_std,\
          fleet_utilization_mean,fleet_utilization_std,\
-         solver_step_us_mean,wall_time_ms_mean"
+         solver_step_us_mean,wall_time_ms_mean,\
+         baseline_gridlocked_n,rapidity_recovered_n,rapidity_censored_n"
     )?;
 
     for s in summaries {
@@ -134,7 +144,8 @@ pub fn write_summary_csv<W: Write>(
              {:.2},{:.2},{:.2},\
              {:.4},{:.4},{:.2},{:.2},{:.4},{:.4},\
              {:.4},{:.4},\
-             {:.1},{:.0}",
+             {:.1},{:.0},\
+             {},{},{}",
             s.solver_name,
             s.topology_name,
             s.scenario_label,
@@ -181,6 +192,9 @@ pub fn write_summary_csv<W: Write>(
             s.fleet_utilization.std,
             s.solver_step_us.mean,
             s.wall_time_ms.mean,
+            s.num_baseline_gridlocked,
+            s.rapidity.n,
+            s.rapidity_censored,
         )?;
     }
 
@@ -348,7 +362,8 @@ fn write_metrics_json<W: Write>(
          \"itae\":{},\"rapidity\":{},\"attack_rate\":{},\
          \"fleet_utilization\":{},\
          \"solver_step_avg_us\":{},\"solver_step_max_us\":{},\
-         \"wall_time_ms\":{}}}",
+         \"wall_time_ms\":{},\
+         \"twte_undefined_ticks\":{},\"rapidity_recovered\":{},\"baseline_gridlocked\":{}}}",
         json_f64(m.avg_throughput, 4),
         m.total_tasks,
         json_f64(m.unassigned_ratio, 4),
@@ -374,6 +389,9 @@ fn write_metrics_json<W: Write>(
         json_f64(m.solver_step_time_avg_us, 1),
         json_f64(m.solver_step_time_max_us, 1),
         m.wall_time_ms,
+        m.twte_undefined_ticks,
+        m.rapidity_recovered.map_or("null".to_string(), |v| v.to_string()),
+        m.baseline_gridlocked,
     )?;
     Ok(())
 }
@@ -431,7 +449,11 @@ fn write_summary_json<W: Write>(writer: &mut W, s: &ConfigSummary) -> std::io::R
     write_stat_json(writer, "solver_step_us", &s.solver_step_us)?;
     write!(writer, ",")?;
     write_stat_json(writer, "wall_time_ms", &s.wall_time_ms)?;
-    write!(writer, "}}")?;
+    write!(
+        writer,
+        ",\"num_baseline_gridlocked\":{},\"rapidity_censored\":{}}}",
+        s.num_baseline_gridlocked, s.rapidity_censored
+    )?;
     Ok(())
 }
 
@@ -506,6 +528,12 @@ pub fn parse_summaries_from_json(json: &str) -> Result<Vec<ConfigSummary>, Strin
             fleet_utilization: parse_stat(s, "fleet_utilization"),
             solver_step_us: parse_stat(s, "solver_step_us"),
             wall_time_ms: parse_stat(s, "wall_time_ms"),
+            num_baseline_gridlocked: s
+                .get("num_baseline_gridlocked")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0) as usize,
+            rapidity_censored: s.get("rapidity_censored").and_then(|v| v.as_u64()).unwrap_or(0)
+                as usize,
         });
     }
 
@@ -913,6 +941,43 @@ mod tests {
         assert!(lines[0].starts_with("solver,"));
         assert!(lines[1].contains("true")); // is_baseline
         assert!(lines[2].contains("false"));
+    }
+
+    #[test]
+    fn csv_header_and_rows_have_same_width() {
+        let run = dummy_run();
+        let mut buf = Vec::new();
+        write_runs_csv(&mut buf, std::slice::from_ref(&run)).unwrap();
+        let runs_csv = String::from_utf8(buf).unwrap();
+        let mut buf = Vec::new();
+        write_summary_csv(&mut buf, &crate::experiment::runner::compute_summaries(&[run])).unwrap();
+        let summary_csv = String::from_utf8(buf).unwrap();
+        for csv in [runs_csv, summary_csv] {
+            let widths: Vec<usize> = csv.lines().map(|l| l.split(',').count()).collect();
+            assert!(widths.iter().all(|&w| w == widths[0]), "ragged CSV: {widths:?}");
+        }
+    }
+
+    #[test]
+    fn summaries_exclude_gridlocked_and_count_censored_rapidity() {
+        let base = dummy_run();
+        let mut gridlocked = base.clone();
+        gridlocked.faulted_metrics.baseline_gridlocked = true;
+        let mut recovered = base.clone();
+        recovered.faulted_metrics.rapidity = 30.0;
+        recovered.faulted_metrics.rapidity_recovered = Some(true);
+        let mut censored = base;
+        censored.faulted_metrics.rapidity = 80.0;
+        censored.faulted_metrics.rapidity_recovered = Some(false);
+
+        let s =
+            &crate::experiment::runner::compute_summaries(&[gridlocked, recovered, censored])[0];
+        assert_eq!(s.num_seeds, 3);
+        assert_eq!(s.num_baseline_gridlocked, 1);
+        assert_eq!(s.fault_tolerance.n, 2);
+        assert_eq!(s.rapidity.n, 1, "Rapidity aggregates recovered runs only");
+        assert_eq!(s.rapidity.mean, 30.0);
+        assert_eq!(s.rapidity_censored, 1);
     }
 
     #[test]

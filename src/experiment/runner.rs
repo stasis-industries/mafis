@@ -60,11 +60,16 @@ pub struct ConfigSummary {
     /// solver localizes; positive = solver propagates beyond topology.
     pub mitigation_delta: StatSummary,
     pub itae: StatSummary,
+    /// Rapidity over runs that recovered (`rapidity.n` = recovered count).
     pub rapidity: StatSummary,
     pub attack_rate: StatSummary,
     pub fleet_utilization: StatSummary,
     pub solver_step_us: StatSummary,
     pub wall_time_ms: StatSummary,
+    /// Seeds whose baseline gridlocked; excluded from every aggregate above.
+    pub num_baseline_gridlocked: usize,
+    /// Runs that degraded and never recovered (right-censored Rapidity).
+    pub rapidity_censored: usize,
 }
 
 /// Full matrix result — all runs + statistical summaries.
@@ -746,9 +751,13 @@ pub fn compute_summaries(runs: &[RunResult]) -> Vec<ConfigSummary> {
 
     groups
         .into_values()
-        .map(|group| {
-            let first = &group[0].config;
-            let n = group.len();
+        .map(|all| {
+            let first = &all[0].config;
+            let n = all.len();
+            // A gridlocked baseline makes every differential metric measure the
+            // deadlock, not the fault: drop those seeds from the aggregates.
+            let group: Vec<&RunResult> =
+                all.iter().copied().filter(|r| !r.faulted_metrics.baseline_gridlocked).collect();
 
             // Extract faulted metrics for each seed
             let throughputs: Vec<f64> =
@@ -780,7 +789,15 @@ pub fn compute_summaries(runs: &[RunResult]) -> Vec<ConfigSummary> {
             let mitigation_deltas: Vec<f64> =
                 group.iter().map(|r| r.faulted_metrics.mitigation_delta_avg).collect();
             let itaes: Vec<f64> = group.iter().map(|r| r.faulted_metrics.itae).collect();
-            let rapidities: Vec<f64> = group.iter().map(|r| r.faulted_metrics.rapidity).collect();
+            let rapidities: Vec<f64> = group
+                .iter()
+                .filter(|r| r.faulted_metrics.rapidity_recovered == Some(true))
+                .map(|r| r.faulted_metrics.rapidity)
+                .collect();
+            let rapidity_censored = group
+                .iter()
+                .filter(|r| r.faulted_metrics.rapidity_recovered == Some(false))
+                .count();
             let attack_rates: Vec<f64> =
                 group.iter().map(|r| r.faulted_metrics.attack_rate).collect();
             let fleet_utils: Vec<f64> =
@@ -819,6 +836,8 @@ pub fn compute_summaries(runs: &[RunResult]) -> Vec<ConfigSummary> {
                 fleet_utilization: compute_stat_summary(&fleet_utils).unwrap_or_default(),
                 solver_step_us: compute_stat_summary(&solver_us).unwrap_or_default(),
                 wall_time_ms: compute_stat_summary(&wall_times).unwrap_or_default(),
+                num_baseline_gridlocked: n - group.len(),
+                rapidity_censored,
             }
         })
         .collect()

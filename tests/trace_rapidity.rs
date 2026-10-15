@@ -16,7 +16,7 @@ use std::fs::{self, File};
 use std::io::Write;
 
 const TICK_COUNT: u64 = 500;
-const SMOOTH_WINDOW: usize = 20; // RAPIDITY_SMOOTH_WINDOW
+const SMOOTH_WINDOW: usize = 20; // old trailing window; production: RATIO_WINDOW, post-fault
 const RAPIDITY_THRESHOLD: f64 = 0.9;
 const RAPIDITY_DWELL: usize = 5;
 
