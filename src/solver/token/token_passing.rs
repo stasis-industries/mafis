@@ -2,15 +2,14 @@
 //!
 //! REFERENCE: docs/papers_codes/pibt/pibt2/src/tp.cpp (Okumura et al., pibt2)
 //!            docs/papers_codes/pibt/pibt2/include/tp.hpp
-//! Paper: Ma, Tovey, Sharon, Kumar, Koenig — "Lifelong Multi-Agent Path Finding
-//! for Online Pickup and Delivery Tasks", AAMAS 2017.
+//! Paper: Ma, Li, Kumar, Koenig — "Lifelong Multi-Agent Path Finding for Online
+//! Pickup and Delivery Tasks", AAMAS 2017 (Algorithm 1, TP).
 //!
-//! Audited 2026-04-07 against the canonical pibt2 reference (~320 lines C++).
+//! Ported 2026-10-15 against pibt2 `tp.cpp`: task selection, endpoint rule,
+//! parking and `checkAstarFin`. The deviations below come from MAFIS's task
+//! model (queues, loading dwell), not from the planner.
 //!
 //! ## Structural mapping (MAFIS ↔ pibt2)
-//!
-//! The MAFIS implementation is **semantically equivalent** to pibt2's canonical
-//! algorithm but expressed in different but isomorphic data structures. Specifically:
 //!
 //! | pibt2 (absolute time)              | MAFIS (relative time)                  |
 //! |------------------------------------|----------------------------------------|
@@ -20,39 +19,48 @@
 //! | `TOKEN[i].size()-1 == current_t`   | `paths[i].len() <= 1` (no future plan) |
 //! | `CONFLICT_TABLE[t][cell] != NIL`   | `MasterConstraintIndex::is_vertex_blocked(cell, t)` |
 //! | endpoint blocking via `token_endpoints[v]` + `TOKEN[k].size()-1 < t` | `MasterConstraintIndex::add_path` extends final-cell vertex constraints to `max_time` |
-//! | `checkAstarFin: g + current_t > max_constraint_time` | vertex constraints on goal cell at all blocked times naturally force A* to delay arrival |
+//! | `checkAstarFin: g + current_t > max_constraint_time` | `ArriveAfter` blocks the goal cell up to the last time another token path uses it |
+//! | task selection (tp.cpp:64-96) | `core::task::TokenPassingTaskSelection`, used via `LifelongSolver::task_scheduler` |
+//! | `updatePath2` parking (tp.cpp:99-123, 206-248) | `free_parking` + `drain_goal_overrides` |
 //!
-//! ## Adaptations to MAFIS architecture
+//! ## Algorithm TP in MAFIS
 //!
-//! MAFIS separates task scheduling from path planning. Where pibt2 picks tasks
-//! inside the solver loop (`tp.cpp` lines 64-103), MAFIS receives `agent.goal:
-//! Option<IVec2>` already set by the `TaskScheduler` trait (see
-//! `src/core/task/`). Therefore the pibt2 task assignment phase is omitted —
-//! MAFIS only ports the **path planning portion** of TP (`tp.cpp` lines 250-317
-//! `updatePath` + the conflict-table A* hooks).
+//! - **Task selection** (Alg. 1 l. 7-12): TP replaces the configured scheduler.
+//!   Agents take tasks in index order; a task is skipped if its pickup is the
+//!   end of another agent's path; the nearest pickup wins.
+//! - **No eligible task** (l. 13-16): a free agent stays put, unless it stands
+//!   on a delivery endpoint; then it moves to the nearest free parking cell
+//!   (non-task endpoint, `ZoneType::Parking`).
+//! - **Paths** (`updatePath`): spacetime A* against every other token path;
+//!   the agent may only finish at its goal after the last time another path
+//!   passes through it, and never where another path ends.
 //!
-//! Position synchronization (`step()` lines 187-196) is a MAFIS-specific addition
-//! that handles fault-induced divergence: if an agent's actual position differs
-//! from its expected token position, the token is reset to `[actual_pos]` and
-//! the agent is replanned next tick. pibt2 has no fault handling because it's
-//! a finite-task experiment.
+//! ## Deviations from Ma et al. 2017 / pibt2 (MAFIS task model)
 //!
-//! ## Tracked deviations from the canonical algorithm
-//!
-//! 1. **Relative vs absolute time** — semantically equivalent (see mapping table
-//!    above). Relative time gives bounded memory for lifelong operation; absolute
-//!    time would grow `TOKEN[i]` indefinitely.
-//!
-//! 2. **No `updatePath2` (closest non-conflicting endpoint selection)** — pibt2
-//!    line 206-248 handles the case where an agent has no task and its current
-//!    cell is a delivery location, by moving to the closest free endpoint.
-//!    MAFIS's task scheduler handles idle-state task generation differently
-//!    (the `TaskLeg::Free` state machine), so this branch isn't applicable.
-//!
-//! 3. **Planning order: pibt2 line 52 iterates agents in vector order**. The
-//!    sequential planning order matters in TP because agent k's plan affects
-//!    agent k+1's constraints. MAFIS now matches this (was previously
-//!    "tasked-first" — fixed in 2026-04-07 audit).
+//! 1. **Relative vs absolute time** — semantically equivalent (see mapping
+//!    table). Relative time keeps memory bounded in lifelong runs.
+//! 2. **One leg per path, not pickup→delivery in one path** (`updatePath1`).
+//!    MAFIS agents dwell at the pickup (`Loading`) and the queue manager picks
+//!    the delivery queue only then, so the delivery is unknown at selection.
+//! 3. **Delivery side of the endpoint rule** — tasks have no delivery when
+//!    selected; docks are serialised by the shared queue manager instead
+//!    (one agent at a dock, up to 4 waiting). Queue cells are not endpoints.
+//! 4. **Task set** — one random candidate task per free agent per tick (the
+//!    closest scheduler's pool), not an accumulating MAPD task set.
+//! 5. **Distance for task choice** — Manhattan, pibt2 uses BFS distance.
+//!    Parking choice uses BFS distance as in pibt2.
+//! 6. **Spawn** — agents start on corridor cells, not on non-task endpoints.
+//! 7. **Planning failure** — A* is capped (`ASTAR_MAX_EXPANSIONS`,
+//!    `TOKEN_ASTAR_MAX_TIME`); on failure the agent waits and retries next
+//!    tick (pibt2 halts). No parking cell free → the agent stays (pibt2 halts:
+//!    "not well-formed").
+//! 8. **Faults** — token reset when an agent's position or goal drifts from
+//!    its token (latency, collisions, queue goal changes); dead agents are
+//!    obstacles, parking cells they block are skipped.
+//! 9. **Well-formedness** — `core::topology::check_well_formed`. Only SD-w3
+//!    satisfies Ma et al.'s condition 3; SD-w1, SD-w2 and DD do not (pickups
+//!    line their aisles), so TP's completeness guarantee does not transfer.
+//!    `max_agents` = number of parking cells (condition 2).
 
 use bevy::prelude::*;
 use smallvec::smallvec;
@@ -246,8 +254,13 @@ impl LifelongSolver for TokenPassingSolver {
             scalability: Scalability::Medium,
             description: "Token Passing — decentralized sequential planning. Each idle agent plans a collision-free path against all others' TOKEN paths.",
             source: "Ma et al., AAMAS 2017",
-            recommended_max_agents: Some(100),
+            // Instance-dependent: see `max_agents`.
+            recommended_max_agents: None,
         }
+    }
+
+    fn max_agents(&self, zones: &crate::core::topology::ZoneMap) -> Option<usize> {
+        Some(zones.parking_cells().len())
     }
 
     fn task_scheduler(&self) -> Option<&dyn crate::core::task::TaskScheduler> {
@@ -798,6 +811,20 @@ mod tests {
     #[test]
     fn tp_is_deterministic() {
         assert_eq!(run_tp(7, 4, 300), run_tp(7, 4, 300));
+    }
+
+    /// TP's fleet cap comes from the instance: Ma et al. well-formedness
+    /// condition 2 needs at least one non-task endpoint (parking) per agent.
+    #[test]
+    fn tp_max_agents_is_parking_count() {
+        use crate::core::topology::TopologyRegistry;
+        let registry = TopologyRegistry::load_from_dir(std::path::Path::new("topologies"));
+        let zones_of = |id: &str| TopologyRegistry::parse_entry(registry.find(id).unwrap()).unwrap().1;
+        let tp = TokenPassingSolver::new();
+        assert_eq!(tp.max_agents(&zones_of("warehouse_single_dock")), Some(60));
+        assert_eq!(tp.max_agents(&zones_of("warehouse_dual_dock")), Some(120));
+        let pibt = crate::solver::pibt::PibtLifelongSolver::new();
+        assert_eq!(pibt.max_agents(&zones_of("warehouse_single_dock")), None);
     }
 
     /// TP selects its own tasks (Ma et al. 2017 Alg. 1 lines 7-12) instead of
