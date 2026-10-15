@@ -502,6 +502,40 @@ impl QueueManager {
                 changed.push(agent_idx);
             }
         }
+
+        self.order_slots_by_lane_position(agents, queue_lines, changed);
+    }
+
+    /// Reassign occupied slots so that slot order equals the agents' physical
+    /// order along the lane. An arrival takes the front-most empty slot even
+    /// when it stands ahead of an agent compacted forward that has not moved
+    /// yet; without this the two must swap cells in a 1-wide lane.
+    fn order_slots_by_lane_position(
+        &mut self,
+        agents: &mut [SimAgent],
+        queue_lines: &[QueueLine],
+        changed: &mut Vec<usize>,
+    ) {
+        for (qi, state) in self.queues.iter_mut().enumerate() {
+            let line = &queue_lines[qi];
+            let slots: Vec<usize> = (0..state.slots.len()).filter(|&s| state.slots[s].is_some()).collect();
+            let mut occupants: Vec<usize> = slots.iter().filter_map(|&s| state.slots[s]).collect();
+            // Agents off the lane (or unknown indices) keep their relative order at the back.
+            occupants.sort_by_key(|&a| {
+                agents.get(a).and_then(|ag| line.cells.iter().position(|&c| c == ag.pos))
+                    .unwrap_or(usize::MAX)
+            });
+            for (&s, &a) in slots.iter().zip(&occupants) {
+                state.slots[s] = Some(a);
+                if let Some(agent) = agents.get_mut(a)
+                    && agent.goal != line.cells[s]
+                {
+                    agent.goal = line.cells[s];
+                    agent.planned_path.clear();
+                    changed.push(a);
+                }
+            }
+        }
     }
 
     /// Promote: if delivery cell is free and slot[0] is occupied, promote agent.
@@ -1107,6 +1141,41 @@ mod tests {
             assert_eq!(p, pickup, "Loading payload still carries pickup cell");
         }
         assert!(changed.contains(&0));
+    }
+
+    /// An agent arriving at the front cell while the agent compacted into
+    /// slot 0 still stands one cell back must not get slot 1: that would make
+    /// the two swap cells in a 1-wide lane, which no collision-free plan
+    /// allows (Token Passing deadlocks on it). Slots follow physical order.
+    #[test]
+    fn arrivals_keep_slot_order_equal_to_lane_order() {
+        use super::super::runner::SimAgent;
+
+        let grid = test_grid();
+        let lines = vec![QueueLine::compute(IVec2::new(8, 2), Direction::West, &grid).unwrap()];
+        let (front, second) = (lines[0].cells[0], lines[0].cells[1]);
+        let delivery = lines[0].delivery_cell;
+        let pickup = IVec2::new(3, 1);
+        let mut mgr = QueueManager::new(&lines);
+
+        // Agent 0 holds slot 0 but is still physically at cells[1].
+        let mut a0 = SimAgent::new(second);
+        a0.task_leg = TaskLeg::Queuing { from: pickup, to: delivery, line_index: 0 };
+        a0.goal = front;
+        mgr.queues[0].slots[0] = Some(0);
+        // Agent 1 arrives at the front cell.
+        let mut a1 = SimAgent::new(front);
+        a1.task_leg = TaskLeg::TravelToQueue { from: pickup, to: delivery, line_index: 0 };
+        a1.goal = front;
+        let mut agents = vec![a0, a1];
+
+        let mut changed = Vec::new();
+        mgr.process_arrivals(&mut agents, &lines, &mut changed);
+
+        assert_eq!(mgr.queues[0].slots[0], Some(1));
+        assert_eq!(mgr.queues[0].slots[1], Some(0));
+        assert_eq!(agents[1].goal, front);
+        assert_eq!(agents[0].goal, second);
     }
 
     /// Regression test for the 2026-04-20 stranding fix (Phase-1 audit).
