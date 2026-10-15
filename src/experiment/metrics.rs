@@ -65,13 +65,18 @@ pub struct RunMetrics {
     pub mitigation_delta_avg: f64,
 
     // ── Tier 1 Resilience Metrics ──────────────────────────────────
-    /// Integral of Time-weighted Absolute Error of throughput ratio post-fault.
-    /// `J_ITAE = Σ (t - t_fault) · |1 - R(t)|` where `R(t) = faulted_tp[t] / baseline_tp[t]`.
-    /// Ogata 2010. Unit: tick² · dimensionless. Lower = better. NaN if no fault.
+    /// TWTE — time-weighted mean absolute error of the cumulative post-fault
+    /// throughput ratio: `J = Σ (t−t_f)·|1 − R_c(t)| / Σ (t−t_f)`, see
+    /// `compute_twte`. Form adapted from ITAE (Ogata 2010). Dimensionless,
+    /// 0 = no deviation; normalised so it is comparable across post-fault
+    /// window lengths. NaN if no fault.
+    /// Field name kept as `itae` for backward compatibility with exports.
     pub itae: f64,
-    /// Rapidity — ticks from first fault until `R(t) ≥ RAPIDITY_THRESHOLD`
-    /// holds for `≥ RAPIDITY_DWELL` consecutive ticks. Bruneau 2003.
-    /// NaN if never recovers within the simulation horizon.
+    /// Rapidity — ticks from first fault until the windowed ratio `R_w`,
+    /// after first falling below `RAPIDITY_THRESHOLD`, holds at or above it for
+    /// `RAPIDITY_DWELL` consecutive ticks. Bruneau 2003. A run that never
+    /// recovers is right-censored at `T − t_f` (see `rapidity_recovered`).
+    /// NaN when there is no fault or `R_w` never fell below the threshold.
     pub rapidity: f64,
     /// Attack Rate — fraction of initial fleet ever materially affected by
     /// any fault cascade. Wallinga & Lipsitch 2007. Range [0, 1].
@@ -97,6 +102,17 @@ pub struct RunMetrics {
     pub solver_step_time_avg_us: f64,
     pub solver_step_time_max_us: f64,
     pub wall_time_ms: u64,
+
+    // ── Measurement validity ───────────────────────────────────────
+    /// Post-fault ticks before the baseline's first post-fault completion, where
+    /// the TWTE ratio is undefined; excluded from TWTE and reported here.
+    pub twte_undefined_ticks: usize,
+    /// `Some(true)` recovered, `Some(false)` degraded and right-censored at
+    /// the horizon, `None` when Rapidity is undefined (no fault, no degradation).
+    pub rapidity_recovered: Option<bool>,
+    /// The fault-free baseline stalled (see `baseline_gridlocked`). Metrics
+    /// against it measure the deadlock, not the fault; summaries exclude it.
+    pub baseline_gridlocked: bool,
 }
 
 /// Compute metrics for a baseline run (no faults, self-comparison).
@@ -165,6 +181,9 @@ pub fn compute_baseline_self_metrics(
         solver_step_time_avg_us,
         solver_step_time_max_us,
         wall_time_ms,
+        twte_undefined_ticks: 0,
+        rapidity_recovered: None,
+        baseline_gridlocked: baseline_gridlocked(&analysis.throughput_series),
     }
 }
 
@@ -311,21 +330,14 @@ pub fn compute_run_metrics(
         _ => 1.0,
     };
 
-    // ── Tier 1 resilience metrics (ITAE, Rapidity) ─────────────────
-    let itae = compute_itae(
+    // ── Tier 1 resilience metrics (TWTE, Rapidity) ─────────────────
+    // TWTE on the cumulative post-fault ratio, Rapidity on the windowed R_w.
+    let (itae, twte_undefined_ticks) = compute_twte(
         &baseline.throughput_series,
         &faulted_analysis.throughput_series,
         first_fault_idx,
     );
-    let smooth_w = crate::constants::RAPIDITY_SMOOTH_WINDOW;
-    let baseline_smooth = rolling_average(&baseline.throughput_series, smooth_w);
-    let faulted_smooth = rolling_average(&faulted_analysis.throughput_series, smooth_w);
-    // Gate on RAW series — smoothing dilutes the fault drop with pre-fault data
-    // (W-1 pre-fault ticks bound the smoothed ratio at start to (W-1)/W ≈ 0.95,
-    // tripping the threshold-0.9 gate even for severe sudden faults).
-    let rapidity = compute_rapidity_gated_on_raw(
-        &baseline_smooth,
-        &faulted_smooth,
+    let (rapidity, rapidity_recovered) = compute_rapidity(
         &baseline.throughput_series,
         &faulted_analysis.throughput_series,
         first_fault_idx,
@@ -368,7 +380,31 @@ pub fn compute_run_metrics(
         solver_step_time_avg_us,
         solver_step_time_max_us,
         wall_time_ms,
+        twte_undefined_ticks,
+        rapidity_recovered,
+        baseline_gridlocked: baseline_gridlocked(&baseline.throughput_series),
     }
+}
+
+/// Baseline validity: true when the fault-free baseline completes no task for
+/// `GRIDLOCK_WINDOW` consecutive ticks after its first completion, or never
+/// completes one in a run at least that long. Ticks before the first
+/// completion are warm-up (agents still travelling to their first pickup).
+/// A healthy baseline never stalls that long (see the constant), so a stall
+/// means the solver deadlocked on its own.
+pub fn baseline_gridlocked(baseline_tp: &[f64]) -> bool {
+    let window = crate::constants::GRIDLOCK_WINDOW;
+    let Some(first) = baseline_tp.iter().position(|&v| v > 0.0) else {
+        return baseline_tp.len() >= window;
+    };
+    let mut zero_run = 0_usize;
+    for &v in &baseline_tp[first..] {
+        zero_run = if v > 0.0 { 0 } else { zero_run + 1 };
+        if zero_run >= window {
+            return true;
+        }
+    }
+    false
 }
 
 /// Compute throughput recovery: number of ticks from fault onset until per-tick
@@ -403,159 +439,87 @@ fn compute_throughput_recovery(
     f64::NAN // never recovered
 }
 
-/// Integral of Time-weighted Absolute Error of throughput ratio post-fault.
-/// `J_ITAE = Σ (t - t_fault) · |1 - R(t)|`  where `R(t) = faulted_tp[t] / baseline_tp[t]`.
+/// TWTE — time-weighted mean absolute error of the cumulative post-fault ratio:
+/// `J = Σ_{t∈D} (t−t_f)·|1 − R_c(t)| / Σ_{t∈D} (t−t_f)` with
+/// `R_c(t) = Σ_{s=t_f..=t} P_f(s) / Σ_{s=t_f..=t} P_b(s)` (share of the baseline's
+/// post-fault work delivered so far), `D` = ticks where `R_c` is defined.
 ///
-/// Skips ticks where `baseline_tp[t] == 0` (ratio undefined).
-/// Returns NaN if `start` is None (no fault occurred), 0.0 if start is past
-/// the series end.
-fn compute_itae(baseline_tp: &[f64], faulted_tp: &[f64], start: Option<usize>) -> f64 {
-    let start = match start {
-        Some(s) => s,
-        None => return f64::NAN,
+/// Cumulative, not the 20-tick window `R_w`: post-fault trajectories diverge
+/// from the twin within a few ticks, and on `R_w` two independent fault-free
+/// runs score the same J (≈0.37 at SD n=40) as real faults, so the windowed
+/// form measures realization noise. On `R_c` that null scores ≈0.05.
+///
+/// Returns `(J, undefined_ticks)`: ticks before the baseline's first post-fault
+/// completion are excluded from both sums and counted, never silently skipped.
+/// `J` is NaN when there is no fault or no defined tick carries weight.
+fn compute_twte(baseline_tp: &[f64], faulted_tp: &[f64], start: Option<usize>) -> (f64, usize) {
+    let Some(start) = start else {
+        return (f64::NAN, 0);
     };
     let len = baseline_tp.len().min(faulted_tp.len());
-    if start >= len {
-        return 0.0;
-    }
-    let mut acc = 0.0_f64;
-    for i in start..len {
-        let b = baseline_tp[i];
-        if b == 0.0 {
+    let (mut cum_b, mut cum_f) = (0.0_f64, 0.0_f64);
+    let (mut weighted_err, mut weight) = (0.0_f64, 0.0_f64);
+    let mut undefined = 0_usize;
+    for t in start..len {
+        cum_b += baseline_tp[t];
+        cum_f += faulted_tp[t];
+        if cum_b <= 0.0 {
+            undefined += 1;
             continue;
         }
-        let r = faulted_tp[i] / b;
-        let t_weight = (i - start) as f64;
-        acc += t_weight * (1.0 - r).abs();
+        let k = (t - start) as f64;
+        weighted_err += k * (1.0 - cum_f / cum_b).abs();
+        weight += k;
     }
-    acc
+    let j = if weight > 0.0 { weighted_err / weight } else { f64::NAN };
+    (j, undefined)
 }
 
-/// Rapidity — ticks from first fault until `R(t) = faulted_tp[t] / baseline_tp[t]`
-/// meets or exceeds `threshold` for `≥ dwell` consecutive ticks. Returns the
-/// offset (relative to `start`) of the first tick of the confirming dwell window.
-/// NaN if never recovers within the horizon.
+/// Rapidity (Bruneau 2003) on the windowed ratio `R_w`, evaluated only at
+/// ticks whose window is full (`t ≥ t_f + RATIO_WINDOW − 1`) so a 1–2 tick
+/// window cannot fake a degradation or a recovery. Returns:
+/// - `(NaN, None)` — no fault, or `R_w` never fell below `threshold`
+///   (nothing to recover from);
+/// - `(t_rec − t_f, Some(true))` — after the first degraded tick, `R_w ≥ threshold`
+///   for `dwell` consecutive ticks; `t_rec` is the first tick of that dwell;
+/// - `(T − t_f, Some(false))` — degraded and never recovered: right-censored
+///   at the horizon.
 ///
-/// **Degradation-observed gate** (added 2026-04-17 after Phase 0 reliability audit):
-/// returns NaN if the ratio is already at or above `threshold` at `start`. This
-/// prevents the metric from spuriously reporting Rapidity = 0 when (a) the fault
-/// had no measurable fleet-level impact, or (b) the rolling-mean smoothing window
-/// still contains pre-fault data at `start`. A zero-or-near-zero Rapidity from a
-/// system that never visibly degraded is not a recovery measurement, so we return
-/// NaN. Rapidity is undefined in that case.
-/// Production variant of [`compute_rapidity`]: evaluates the degradation-observed
-/// gate on the RAW (unsmoothed) series and the dwell loop on the smoothed series.
+/// Resolution: recovery is detected with up to `RATIO_WINDOW` ticks of lag,
+/// and values below `RATIO_WINDOW − 1` cannot occur.
 ///
-/// Smoothing the gate input dilutes the fault drop with pre-fault baseline data
-/// (a window of W ticks at `start` contains W-1 pre-fault ticks, so the smoothed
-/// ratio is bounded below by (W-1)/W ≈ 0.95), which causes the gate to fire
-/// spuriously for sudden faults. Gating on the raw single-tick ratio at `start`
-/// avoids this dilution.
-fn compute_rapidity_gated_on_raw(
-    baseline_smooth: &[f64],
-    faulted_smooth: &[f64],
-    baseline_raw: &[f64],
-    faulted_raw: &[f64],
-    start: Option<usize>,
-    threshold: f64,
-    dwell: usize,
-) -> f64 {
-    let start = match start {
-        Some(s) => s,
-        None => return f64::NAN,
-    };
-    let len_raw = baseline_raw.len().min(faulted_raw.len());
-    if start >= len_raw {
-        return f64::NAN;
-    }
-    let b_raw = baseline_raw[start];
-    let r_raw = if b_raw == 0.0 { 0.0 } else { faulted_raw[start] / b_raw };
-    if r_raw >= threshold {
-        return f64::NAN;
-    }
-
-    let len = baseline_smooth.len().min(faulted_smooth.len());
-    if start >= len {
-        return f64::NAN;
-    }
-    let mut consec = 0_usize;
-    for i in start..len {
-        let b = baseline_smooth[i];
-        let r = if b == 0.0 { 0.0 } else { faulted_smooth[i] / b };
-        if r >= threshold {
-            consec += 1;
-            if consec >= dwell {
-                return (i + 1 - dwell - start) as f64;
-            }
-        } else {
-            consec = 0;
-        }
-    }
-    f64::NAN
-}
-
-#[cfg(test)]
+/// Caveat: at SD n=40, two independent fault-free runs also "degrade" and
+/// "recover" on `R_w` (90/90 pairs, median 46 ticks at W=20), so a per-run
+/// value is below the realization noise floor; compare against a null control
+/// before reading it as fault recovery.
 fn compute_rapidity(
     baseline_tp: &[f64],
     faulted_tp: &[f64],
     start: Option<usize>,
     threshold: f64,
     dwell: usize,
-) -> f64 {
-    let start = match start {
-        Some(s) => s,
-        None => return f64::NAN,
+) -> (f64, Option<bool>) {
+    let Some(start) = start else {
+        return (f64::NAN, None);
     };
-    let len = baseline_tp.len().min(faulted_tp.len());
-    if start >= len {
-        return f64::NAN;
-    }
-
-    // Degradation-observed gate: if the ratio is already ≥ threshold at `start`,
-    // the system never visibly degraded and Rapidity is undefined.
-    let b_start = baseline_tp[start];
-    let r_start = if b_start == 0.0 { 0.0 } else { faulted_tp[start] / b_start };
-    if r_start >= threshold {
-        return f64::NAN;
-    }
-
+    let ratios = crate::analysis::ct::windowed_ratio(baseline_tp, faulted_tp, start);
+    let full = crate::constants::RATIO_WINDOW - 1;
+    let Some(degraded) = (full..ratios.len()).find(|&k| ratios[k].is_some_and(|r| r < threshold))
+    else {
+        return (f64::NAN, None);
+    };
     let mut consec = 0_usize;
-    for i in start..len {
-        let b = baseline_tp[i];
-        let r = if b == 0.0 { 0.0 } else { faulted_tp[i] / b };
-        if r >= threshold {
+    for k in degraded + 1..ratios.len() {
+        if ratios[k].is_some_and(|r| r >= threshold) {
             consec += 1;
             if consec >= dwell {
-                // First tick of the confirming dwell window, relative to fault start.
-                return (i + 1 - dwell - start) as f64;
+                return ((k + 1 - dwell) as f64, Some(true));
             }
         } else {
             consec = 0;
         }
     }
-    f64::NAN
-}
-
-/// Compute rolling average of a time series with window W.
-/// Output[i] = mean(series[max(0, i+1-W)..=i]).
-/// Output length = input length.
-fn rolling_average(series: &[f64], window: usize) -> Vec<f64> {
-    if series.is_empty() || window == 0 {
-        return series.to_vec();
-    }
-    let w = window.min(series.len());
-    let mut out = Vec::with_capacity(series.len());
-    let mut sum = 0.0_f64;
-    for (i, &v) in series.iter().enumerate() {
-        sum += v;
-        if i >= w {
-            sum -= series[i - w];
-            out.push(sum / w as f64);
-        } else {
-            out.push(sum / (i + 1) as f64);
-        }
-    }
-    out
+    (ratios.len() as f64, Some(false))
 }
 
 #[cfg(test)]
@@ -579,7 +543,7 @@ mod tests {
             faulted[i] = 0.0;
         }
         let ct = ct_fn(&bl, &faulted, Some(2));
-        // 8 ticks after fault, all below 50% × rolling-mean baseline (2.0).
+        // 8 ticks after fault, windowed ratio R_w = 0 at every one.
         assert!((ct - 1.0).abs() < 1e-10);
     }
 
@@ -587,14 +551,13 @@ mod tests {
     fn critical_time_half_below() {
         let bl = vec![2.0; 10];
         let mut faulted = vec![2.0; 10];
-        // First 4 ticks after fault: below threshold
-        // Next 4 ticks: above threshold
+        // Faulted 0 for the first 4 post-fault ticks, back to 2.0 for the next 4.
         for i in 2..6 {
             faulted[i] = 0.0;
         }
         let ct = ct_fn(&bl, &faulted, Some(2));
-        // 8 ticks after fault, 4 below
-        assert!((ct - 0.5).abs() < 1e-10);
+        // R_w at k=0..7: 0, 0, 0, 0, 2/10, 4/12, 6/14, 8/16 → 7 of 8 below 0.5.
+        assert!((ct - 7.0 / 8.0).abs() < 1e-10, "got {ct}");
     }
 
     #[test]
@@ -619,13 +582,13 @@ mod tests {
         // 20 ticks baseline=4.0, faulted drops at index 9
         let bl = vec![4.0; 20];
         let mut faulted = vec![4.0; 20];
-        // Indices 9..14: below 50% threshold (faulted=1.0, threshold=2.0)
+        // Indices 9..14: faulted=1.0 against baseline=4.0
         for i in 9..14 {
             faulted[i] = 1.0;
         }
-        // CT = 5 below / (20-9=11 total post-fault) = 5/11
+        // R_w at k=0..10: 1/4 ×5, then 9/24, 13/28 (still < 0.5), 17/32, ... → 7 of 11.
         let ct = ct_fn(&bl, &faulted, Some(9));
-        let expected = 5.0 / 11.0;
+        let expected = 7.0 / 11.0;
         assert!((ct - expected).abs() < 1e-10, "CT should be {expected:.4}, got {ct:.4}");
     }
 
@@ -691,173 +654,180 @@ mod tests {
         assert!((recovery - 0.0).abs() < 1e-10, "recovery should be 0.0 with no faults");
     }
 
-    // ── compute_itae (Ogata 2010) ────────────────────────────────────
+    // ── compute_twte (form adapted from ITAE, Ogata 2010) ────────────
 
     #[test]
-    fn itae_zero_when_identical() {
-        let bl = vec![1.0; 10];
-        let ft = vec![1.0; 10];
-        assert_eq!(compute_itae(&bl, &ft, Some(3)), 0.0);
+    fn twte_zero_when_identical() {
+        let bl = vec![1.0; 50];
+        assert_eq!(compute_twte(&bl, &bl, Some(10)), (0.0, 0));
     }
 
     #[test]
-    fn itae_monotonic_in_deviation() {
-        let bl = vec![2.0; 10];
-        let small = {
-            let mut v = vec![2.0; 10];
-            for i in 3..10 {
-                v[i] = 1.5;
+    fn twte_half_when_throughput_halved() {
+        // R_c = 0.5 at every post-fault tick → time-weighted mean error 0.5,
+        // whatever the post-fault window length.
+        for len in [50, 400] {
+            let bl = vec![2.0; len];
+            let mut ft = vec![2.0; len];
+            for slot in ft.iter_mut().skip(10) {
+                *slot = 1.0;
             }
-            v
-        };
-        let big = {
-            let mut v = vec![2.0; 10];
-            for i in 3..10 {
-                v[i] = 0.5;
-            }
-            v
-        };
-        assert!(compute_itae(&bl, &big, Some(3)) > compute_itae(&bl, &small, Some(3)));
+            let (j, undefined) = compute_twte(&bl, &ft, Some(10));
+            assert!((j - 0.5).abs() < 1e-12, "len={len}: got {j}");
+            assert_eq!(undefined, 0);
+        }
     }
 
     #[test]
-    fn itae_nan_when_no_fault() {
-        let bl = vec![1.0; 5];
-        let ft = vec![1.0; 5];
-        assert!(compute_itae(&bl, &ft, None).is_nan());
+    fn twte_one_tick_spike_is_bounded() {
+        // One post-fault tick (k=10) completes 3 tasks instead of 1. A per-tick
+        // ratio scores that tick |1 − 3| = 2; on R_c the excess decays as
+        // 2/(k+1). Hand value: Σ_{k=10..99} 2k/(k+1) / Σ_{k=0..99} k ≈ 175.6/4950.
+        let bl = vec![1.0; 110];
+        let mut ft = bl.clone();
+        ft[20] = 3.0;
+        let (j, _) = compute_twte(&bl, &ft, Some(10));
+        assert!((j - 0.0355).abs() < 1e-3, "got {j}");
+    }
+
+    #[test]
+    fn twte_monotonic_in_deviation() {
+        let bl = vec![2.0; 40];
+        let mut small = vec![2.0; 40];
+        let mut big = vec![2.0; 40];
+        for i in 3..40 {
+            small[i] = 1.5;
+            big[i] = 0.5;
+        }
+        assert!(compute_twte(&bl, &big, Some(3)).0 > compute_twte(&bl, &small, Some(3)).0);
+    }
+
+    #[test]
+    fn twte_counts_undefined_ticks() {
+        // Baseline completes nothing in the first 3 post-fault ticks: R_c is
+        // undefined there, so those ticks are counted, not silently skipped.
+        let mut bl = vec![1.0; 30];
+        for slot in bl.iter_mut().skip(10).take(3) {
+            *slot = 0.0;
+        }
+        let ft = bl.clone();
+        assert_eq!(compute_twte(&bl, &ft, Some(10)), (0.0, 3));
+    }
+
+    #[test]
+    fn twte_nan_when_no_fault() {
+        assert!(compute_twte(&[1.0; 5], &[1.0; 5], None).0.is_nan());
     }
 
     // ── compute_rapidity (Bruneau 2003) ──────────────────────────────
 
     #[test]
     fn rapidity_nan_when_never_degraded() {
-        // Phase 0 fix (2026-04-17): if faulted throughput equals baseline at
-        // t_fault, the system never visibly degraded. Rapidity is undefined
-        // (NaN), not zero — zero would falsely claim "instant recovery".
-        let bl = vec![1.0; 20];
-        let ft = vec![1.0; 20];
-        let r = compute_rapidity(&bl, &ft, Some(3), 0.9, 5);
-        assert!(
-            r.is_nan(),
-            "Rapidity should be NaN when system never degraded (no degradation-observed gate triggered), got {r}"
-        );
+        // Never degraded → nothing to recover from: undefined, not 0.
+        let bl = vec![1.0; 100];
+        let (r, recovered) = compute_rapidity(&bl, &bl, Some(3), 0.9, 5);
+        assert!(r.is_nan() && recovered.is_none(), "got {r}, {recovered:?}");
     }
 
     #[test]
     fn rapidity_recovers_after_dip() {
-        // Sanity check that the gate does not block genuine dip-then-recover.
-        let bl = vec![1.0; 30];
-        let mut ft = vec![1.0; 30];
-        // Fault causes dip from tick 5 through tick 14; recover tick 15+.
-        for i in 5..15 {
-            ft[i] = 0.5;
+        // Faulted runs at half rate for 40 post-fault ticks (k = 0..39), then full.
+        // Full-window R_w (k ≥ 19) is 0.5 until k=40; at k R_w = (2 + 16)/20 = 0.9
+        // first when only 4 half-rate ticks remain in the window, i.e. k = 55.
+        // Dwell k = 55..59 → rapidity 55.
+        let bl = vec![1.0; 200];
+        let mut ft = vec![1.0; 200];
+        for slot in ft.iter_mut().skip(50).take(40) {
+            *slot = 0.5;
         }
-        // start=5 where degradation begins. r_start = 0.5 < 0.9, gate does not trip.
-        // Dwell of 5 consecutive ticks at threshold 0.9 is met at tick 19.
-        // (i=19, consec=5, return 19+1-5-5 = 10)
-        let r = compute_rapidity(&bl, &ft, Some(5), 0.9, 5);
-        assert!((r - 10.0).abs() < 1e-9, "got {r}");
+        assert_eq!(compute_rapidity(&bl, &ft, Some(50), 0.9, 5), (55.0, Some(true)));
     }
 
     #[test]
-    fn rapidity_nan_when_no_recovery() {
-        let bl = vec![1.0; 20];
-        let mut ft = vec![1.0; 20];
-        for i in 3..20 {
-            ft[i] = 0.3;
+    fn rapidity_censored_when_no_recovery() {
+        // Never recovers within 100 post-fault ticks: right-censored at T − t_f.
+        let bl = vec![1.0; 120];
+        let mut ft = vec![1.0; 120];
+        for slot in ft.iter_mut().skip(20) {
+            *slot = 0.3;
         }
-        assert!(compute_rapidity(&bl, &ft, Some(3), 0.9, 5).is_nan());
+        assert_eq!(compute_rapidity(&bl, &ft, Some(20), 0.9, 5), (100.0, Some(false)));
     }
 
     #[test]
     fn rapidity_requires_dwell() {
-        let bl = vec![1.0; 20];
-        let mut ft = vec![0.5; 20];
-        ft[5] = 1.0;
-        ft[6] = 1.0;
-        ft[7] = 1.0;
-        assert!(compute_rapidity(&bl, &ft, Some(3), 0.9, 5).is_nan());
+        // Half rate for k = 0..19, a 10-task burst at k = 20, then nothing.
+        // R_w at k = 20..23 is 0.975, 0.95, 0.925, 0.9 (4 ticks ≥ 0.9), then falls.
+        let bl = vec![1.0; 70];
+        let mut ft = vec![0.0; 70];
+        for slot in ft.iter_mut().skip(10).take(20) {
+            *slot = 0.5;
+        }
+        ft[30] = 10.0;
+        assert_eq!(compute_rapidity(&bl, &ft, Some(10), 0.9, 5), (60.0, Some(false)));
     }
 
     #[test]
-    fn rolling_average_basic() {
-        let s = vec![0.0, 0.0, 10.0, 0.0, 0.0];
-        let r = rolling_average(&s, 3);
-        assert!((r[0] - 0.0).abs() < 1e-9);
-        assert!((r[1] - 0.0).abs() < 1e-9);
-        assert!((r[2] - 10.0 / 3.0).abs() < 1e-9);
-        assert!((r[3] - 10.0 / 3.0).abs() < 1e-9);
-        assert!((r[4] - 10.0 / 3.0).abs() < 1e-9);
-    }
-
-    #[test]
-    fn rolling_average_window_1() {
-        let s = vec![1.0, 2.0, 3.0];
-        let r = rolling_average(&s, 1);
-        assert!((r[0] - 1.0).abs() < 1e-9);
-        assert!((r[1] - 2.0).abs() < 1e-9);
-        assert!((r[2] - 3.0).abs() < 1e-9);
-    }
-
-    #[test]
-    fn rapidity_smoothed_rejects_spike() {
+    fn rapidity_windowed_rejects_spike() {
+        // 5-tick spike back to baseline inside a 30% run: R_w peaks at 95/200.
         let bl = vec![10.0; 40];
         let mut ft = vec![3.0; 40];
-        ft[10] = 10.0;
-        ft[11] = 10.0;
-        ft[12] = 10.0;
-        ft[13] = 10.0;
-        ft[14] = 10.0;
-        let bl_s = rolling_average(&bl, 20);
-        let ft_s = rolling_average(&ft, 20);
-        assert!(
-            compute_rapidity(&bl_s, &ft_s, Some(5), 0.9, 5).is_nan(),
-            "5-tick spike in 3.0 baseline should not trigger recovery with W=20 smoothing"
-        );
+        for slot in ft.iter_mut().skip(10).take(5) {
+            *slot = 10.0;
+        }
+        assert_eq!(compute_rapidity(&bl, &ft, Some(5), 0.9, 5), (35.0, Some(false)));
     }
 
-    /// Regression: production path must NOT return NaN for sudden burst faults
-    /// where the raw single-tick ratio at `start` is below threshold but the
-    /// smoothed ratio at `start` is bounded above (W-1)/W ≈ 0.95 by pre-fault data.
+    /// Regression: sparse completions and one missed task at t_f. The previous
+    /// implementation gated on the raw tick (0/1 < 0.9) and then measured
+    /// recovery on a window still holding 19 identical pre-fault ticks, so it
+    /// returned Rapidity = 0. On the post-fault window the run never degrades.
     #[test]
-    fn rapidity_gated_on_raw_recovers_after_burst() {
-        // Pre-fault: identical baseline=faulted=10 for ticks [0..100].
-        // Fault at tick 100: faulted drops to 5 for 30 ticks, then recovers to 10.
-        let mut bl = vec![10.0; 200];
-        let mut ft = vec![10.0; 200];
-        for i in 100..200 {
-            bl[i] = 10.0;
-        }
-        for i in 100..130 {
-            ft[i] = 5.0;
-        }
-        for i in 130..200 {
-            ft[i] = 10.0;
-        }
-        let w = 20;
-        let bl_s = rolling_average(&bl, w);
-        let ft_s = rolling_average(&ft, w);
-
-        // Without raw-gate fix, the smoothed ratio at start=100 is
-        // (19*10 + 5) / (20*10) = 195/200 = 0.975 > 0.9 → NaN.
-        let bad = compute_rapidity(&bl_s, &ft_s, Some(100), 0.9, 5);
-        assert!(bad.is_nan(), "smoothed-only gate spuriously trips for burst");
-
-        // With the raw-gate fix: raw ratio at 100 is 5/10 = 0.5 < 0.9 → gate passes.
-        // Dwell loop on smoothed eventually finds R >= 0.9 for 5 consecutive ticks.
-        let r = compute_rapidity_gated_on_raw(&bl_s, &ft_s, &bl, &ft, Some(100), 0.9, 5);
-        assert!(!r.is_nan(), "raw-gated rapidity must recover, got NaN");
-        assert!(r > 0.0 && r < 100.0, "rapidity {r} out of expected [0, 100) range");
+    fn rapidity_single_missed_task_is_not_instant_recovery() {
+        let bl: Vec<f64> = (0..300).map(|i| if i % 2 == 0 { 1.0 } else { 0.0 }).collect();
+        let mut ft = bl.clone();
+        ft[100] = 0.0;
+        let (r, recovered) = compute_rapidity(&bl, &ft, Some(100), 0.9, 5);
+        assert!(r.is_nan() && recovered.is_none(), "got {r}, {recovered:?}");
     }
 
-    /// Verify the gate still fires when the system genuinely never degraded.
     #[test]
-    fn rapidity_gated_on_raw_nan_when_never_degraded() {
-        let bl = vec![10.0; 100];
-        let ft = vec![10.0; 100]; // identical → no degradation
-        let bl_s = rolling_average(&bl, 20);
-        let ft_s = rolling_average(&ft, 20);
-        let r = compute_rapidity_gated_on_raw(&bl_s, &ft_s, &bl, &ft, Some(50), 0.9, 5);
-        assert!(r.is_nan(), "no-degradation case must return NaN");
+    fn rapidity_undefined_without_a_full_window() {
+        let bl = vec![1.0; 30];
+        let mut ft = vec![1.0; 30];
+        for slot in ft.iter_mut().skip(20) {
+            *slot = 0.0;
+        }
+        let (r, recovered) = compute_rapidity(&bl, &ft, Some(20), 0.9, 5);
+        assert!(r.is_nan() && recovered.is_none());
+    }
+
+    // ── baseline_gridlocked ──────────────────────────────────────────
+
+    #[test]
+    fn gridlock_flags_stall_after_first_completion() {
+        let g = crate::constants::GRIDLOCK_WINDOW;
+        let mut tp = vec![0.0; 3 * g];
+        tp[5] = 1.0;
+        tp[10] = 1.0;
+        assert!(baseline_gridlocked(&tp));
+    }
+
+    #[test]
+    fn gridlock_ignores_warm_up_and_shorter_gaps() {
+        let g = crate::constants::GRIDLOCK_WINDOW;
+        let mut tp = vec![0.0; 3 * g];
+        // Warm-up longer than g, then a completion every g−1 ticks.
+        for i in (g + 5..3 * g).step_by(g - 1) {
+            tp[i] = 1.0;
+        }
+        assert!(!baseline_gridlocked(&tp));
+    }
+
+    #[test]
+    fn gridlock_when_baseline_never_completes() {
+        let g = crate::constants::GRIDLOCK_WINDOW;
+        assert!(baseline_gridlocked(&vec![0.0; g]));
+        assert!(!baseline_gridlocked(&vec![0.0; g - 1]));
     }
 }

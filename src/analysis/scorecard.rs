@@ -72,6 +72,10 @@ pub struct ScorecardState {
     prev_fault_count: usize,
     /// Initial fleet size captured on first fault tick.
     initial_fleet: usize,
+    /// Per-tick live and baseline throughput since the first fault, fed to the
+    /// shared windowed ratio (`super::ct::ratio_at`) for Critical Time.
+    post_fault_live_tp: Vec<f64>,
+    post_fault_baseline_tp: Vec<f64>,
 }
 
 impl ScorecardState {
@@ -110,7 +114,7 @@ pub fn update_resilience_scorecard(
         state.prev_fault_count = current_event_count;
     }
 
-    // --- Get baseline avg throughput for FT and Critical Time ---
+    // --- Get baseline avg throughput for FT ---
     let baseline_avg_tp = baseline_store.record.as_ref().map(|r| r.avg_throughput).unwrap_or(0.0);
 
     // --- Fault Tolerance: P_fault / P_nominal (classical reliability ratio) ---
@@ -132,25 +136,15 @@ pub fn update_resilience_scorecard(
         }
 
         // --- Critical Time: ticks below threshold (operational SLA heuristic) ---
-        // Uses the shared compute in `crate::analysis::ct`: threshold is
-        // `CRITICAL_TIME_THRESHOLD × rolling-mean(baseline_tp, CT_BASELINE_WINDOW)`
-        // evaluated at the current tick. Rolling-mean smoothing keeps the
-        // metric non-degenerate at low agent counts where per-tick baseline
-        // task completions are sparse.
-        let smoothed_baseline = baseline_store
-            .record
-            .as_ref()
-            .map(|r| {
-                let end_idx = (tick.saturating_sub(1)) as usize;
-                super::ct::rolling_mean_at(
-                    &r.throughput_series,
-                    constants::CT_BASELINE_WINDOW,
-                    end_idx,
-                )
-            })
-            .unwrap_or(0.0);
-        let critical_threshold = smoothed_baseline * constants::CRITICAL_TIME_THRESHOLD;
-        if live_tp < critical_threshold {
+        // Same windowed ratio as the experiment runner (`crate::analysis::ct`):
+        // live and baseline throughput summed over the same post-fault window,
+        // so a single zero-completion tick is not automatically critical.
+        state.post_fault_live_tp.push(live_tp);
+        state.post_fault_baseline_tp.push(bl_tp_at_tick);
+        let t = state.post_fault_live_tp.len() - 1;
+        let ratio =
+            super::ct::ratio_at(&state.post_fault_baseline_tp, &state.post_fault_live_tp, 0, t);
+        if ratio.is_some_and(|r| r < constants::CRITICAL_TIME_THRESHOLD) {
             state.ticks_below_critical += 1;
         }
         scorecard.critical_time =

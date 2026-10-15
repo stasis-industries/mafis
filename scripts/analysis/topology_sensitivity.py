@@ -168,7 +168,7 @@ def aggregate_trajectory(df, densities, metric_col, std_col, n_col):
 def render_trajectory(metric_label, y_label, sd_data, dd_data, outfile):
     """Six subplots in a 2x3 grid (one per scenario). Each subplot shows the
     metric on the y-axis and fleet density on the x-axis, with one line per
-    topology (Single-Dock blue, Dual-Dock orange). Error bars are 95% Welch
+    topology (Single-Dock blue, Dual-Dock orange). Error bars are 95% Student-t
     confidence half-widths derived from the per-solver std times the
     n=30-seeds-per-solver-aggregated t-critical.
     """

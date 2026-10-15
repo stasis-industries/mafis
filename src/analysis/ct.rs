@@ -1,40 +1,53 @@
-//! Critical Time (CT) — shared compute used by both the experiment runner
-//! (`crate::experiment::metrics`) and the live observatory scorecard
-//! (`crate::analysis::scorecard`).
+//! Windowed throughput ratio `R_w(t)` and Critical Time (CT) — shared compute
+//! used by both the experiment runner (`crate::experiment::metrics`) and the
+//! live observatory scorecard (`crate::analysis::scorecard`).
 //!
-//! Single source of truth for the CT formula. Prevents the experiment ↔
-//! observatory drift that produced 0.180 vs 0.858 for the same config.
+//! Single source of truth for the windowed ratio behind CT and Rapidity (TWTE
+//! uses the cumulative post-fault ratio, see `experiment::metrics::compute_twte`).
+//! Prevents the experiment ↔ observatory drift that produced 0.180 vs 0.858
+//! for the same config.
 //!
-//! Formula:
+//! Per-tick task completions are sparse integers (most ticks are 0), so a
+//! per-tick ratio `P_f(t) / P_b(t)` is mostly 0/0 or 0/1 noise. Instead:
 //! ```text
-//! smoothed_baseline[i] = mean(baseline_tp[max(0, i+1-W)..=i])   // W = CT_BASELINE_WINDOW
-//! threshold[i]         = smoothed_baseline[i] * CRITICAL_TIME_THRESHOLD
-//! ticks_below          = count i in [first_fault_idx, end) where faulted_tp[i] < threshold[i]
-//! CT                   = ticks_below / (end - first_fault_idx)
+//! R_w(t) = Σ_{s=a..=t} P_f(s) / Σ_{s=a..=t} P_b(s),   a = max(t_f, t + 1 − W),  W = RATIO_WINDOW
 //! ```
+//! Only post-fault ticks enter the window (it grows from 1 tick at `t_f` to W),
+//! so pre-fault ticks — identical in both runs — never dilute the fault effect.
+//! Faulted and baseline are summed over the same window. `R_w(t)` is undefined
+//! (`None`) when the baseline window sum is 0.
 //!
-//! The rolling mean smooths the sparse per-tick task-completion signal at
-//! low agent counts. Without smoothing, `baseline_tp[i]` is zero on most
-//! ticks for ≤10-agent runs, the threshold collapses to zero, and
-//! `faulted < 0` is never true → CT under-counts severely.
+//! ```text
+//! CT = |{ t ∈ [t_f, T) : R_w(t) < CRITICAL_TIME_THRESHOLD }| / (T − t_f)
+//! ```
+//! Undefined ticks are not critical: the baseline itself delivered nothing in
+//! the window, so there is no throughput to fall below.
 
-use crate::constants::{CRITICAL_TIME_THRESHOLD, CT_BASELINE_WINDOW};
+use crate::constants::{CRITICAL_TIME_THRESHOLD, RATIO_WINDOW};
 
-/// Mean of `series[max(0, end_idx+1-window)..=end_idx]`.
-/// Returns 0.0 if the series is empty or `end_idx` is past the end.
-pub fn rolling_mean_at(series: &[f64], window: usize, end_idx: usize) -> f64 {
-    if series.is_empty() || window == 0 {
-        return 0.0;
+/// `R_w(t)` for series index `t ≥ start` (see module docs). `None` when the
+/// baseline window sum is 0 or `t` is outside either series.
+pub fn ratio_at(baseline_tp: &[f64], faulted_tp: &[f64], start: usize, t: usize) -> Option<f64> {
+    if t < start || t >= baseline_tp.len().min(faulted_tp.len()) {
+        return None;
     }
-    let last = end_idx.min(series.len() - 1);
-    let w = window.min(last + 1);
-    let start = last + 1 - w;
-    let sum: f64 = series[start..=last].iter().sum();
-    sum / w as f64
+    let a = start.max((t + 1).saturating_sub(RATIO_WINDOW));
+    let b: f64 = baseline_tp[a..=t].iter().sum();
+    if b <= 0.0 {
+        return None;
+    }
+    let f: f64 = faulted_tp[a..=t].iter().sum();
+    Some(f / b)
 }
 
-/// Critical Time: fraction of post-fault ticks where faulted throughput
-/// falls below `CRITICAL_TIME_THRESHOLD` of the rolling-mean baseline.
+/// `R_w(t)` for every post-fault tick: element `k` is `R_w(start + k)`.
+pub fn windowed_ratio(baseline_tp: &[f64], faulted_tp: &[f64], start: usize) -> Vec<Option<f64>> {
+    let len = baseline_tp.len().min(faulted_tp.len());
+    (start..len).map(|t| ratio_at(baseline_tp, faulted_tp, start, t)).collect()
+}
+
+/// Critical Time: fraction of post-fault ticks where `R_w(t)` falls below
+/// `CRITICAL_TIME_THRESHOLD`.
 ///
 /// `first_fault_idx` is the 0-indexed series position of the first tick with
 /// fault events. Returns `NaN` if `None` (metric undefined when no fault).
@@ -53,17 +66,11 @@ pub fn critical_time(
         return 0.0;
     }
 
-    let mut ticks_below = 0_usize;
-    for i in start..len {
-        let smoothed = rolling_mean_at(baseline_tp, CT_BASELINE_WINDOW, i);
-        let threshold = smoothed * CRITICAL_TIME_THRESHOLD;
-        if faulted_tp[i] < threshold {
-            ticks_below += 1;
-        }
-    }
-
-    let ticks_after_fault = len - start;
-    ticks_below as f64 / ticks_after_fault as f64
+    let ticks_below = windowed_ratio(baseline_tp, faulted_tp, start)
+        .iter()
+        .filter(|r| r.is_some_and(|r| r < CRITICAL_TIME_THRESHOLD))
+        .count();
+    ticks_below as f64 / (len - start) as f64
 }
 
 #[cfg(test)]
@@ -79,7 +86,7 @@ mod tests {
 
     #[test]
     fn zero_when_identical_post_fault() {
-        // Faulted == baseline → never below threshold.
+        // Faulted == baseline → R_w = 1 → never below threshold.
         let bl = vec![1.0; 50];
         let ft = vec![1.0; 50];
         assert_eq!(critical_time(&bl, &ft, Some(20)), 0.0);
@@ -87,7 +94,7 @@ mod tests {
 
     #[test]
     fn one_when_faulted_zero_post_fault() {
-        // Baseline non-zero, faulted = 0 from fault onset → always below threshold.
+        // Baseline non-zero, faulted = 0 from fault onset → R_w = 0 every tick.
         let bl = vec![2.0; 50];
         let mut ft = vec![2.0; 50];
         for slot in ft.iter_mut().skip(20) {
@@ -98,25 +105,35 @@ mod tests {
     }
 
     #[test]
-    fn half_when_half_below() {
+    fn outage_then_recovery_counts_window_lag() {
+        // Baseline 2.0/tick; faulted 0 for 15 post-fault ticks (k = 0..14), then 2.0.
+        // k ≤ 19 (window still growing, k+1 ticks): R_w = (k−14)⁺/(k+1) < 0.5 → critical.
+        // k ≥ 20 (full 20-tick window): R_w = (k−14)/20 < 0.5 ↔ k ≤ 23 → critical.
+        // Critical: k = 0..=23 → 24 of 30 post-fault ticks.
         let bl = vec![2.0; 50];
         let mut ft = vec![2.0; 50];
-        // 15 ticks below (zero), 15 ticks at baseline. start=20, total post-fault=30.
         for slot in ft.iter_mut().skip(20).take(15) {
             *slot = 0.0;
         }
         let ct = critical_time(&bl, &ft, Some(20));
-        assert!((ct - 0.5).abs() < 1e-10, "expected 0.5, got {ct}");
+        assert!((ct - 24.0 / 30.0).abs() < 1e-10, "expected 0.8, got {ct}");
+    }
+
+    #[test]
+    fn single_zero_tick_is_not_critical() {
+        // One post-fault tick with zero completions while the baseline completed one:
+        // a per-tick ratio would call it critical (0 < 0.5); R_w at that tick is 5/6.
+        let bl = vec![1.0; 60];
+        let mut ft = vec![1.0; 60];
+        ft[25] = 0.0;
+        assert_eq!(critical_time(&bl, &ft, Some(20)), 0.0);
     }
 
     #[test]
     fn sparse_baseline_not_degenerate() {
-        // Low-agent case: baseline has a single completion every 10 ticks
-        // (avg ≈ 0.1/tick). Faulted produces no completions post-fault.
-        // Without rolling-mean: baseline_tp[i]=0 most ticks → threshold=0
-        //   → faulted (also 0) never strictly below → CT ≈ 0 (degenerate).
-        // With rolling-mean W=10: smoothed baseline ≈ 0.1, threshold ≈ 0.05
-        //   → faulted=0 falls below → CT should be near 1.0.
+        // Baseline completes one task every 10 ticks (indices 9, 19, ...).
+        // Faulted produces nothing from tick 50. Window ticks 50..=58 hold no
+        // baseline completion (undefined, not critical); from 59 on R_w = 0.
         let mut bl = vec![0.0; 100];
         for i in (9..100).step_by(10) {
             bl[i] = 1.0;
@@ -126,38 +143,43 @@ mod tests {
             *slot = 0.0;
         }
         let ct = critical_time(&bl, &ft, Some(50));
-        assert!(
-            ct > 0.5,
-            "rolling-mean smoothing should keep CT non-degenerate for sparse signals, got {ct}"
-        );
+        assert!((ct - 41.0 / 50.0).abs() < 1e-10, "expected 0.82, got {ct}");
     }
 
     #[test]
-    fn rolling_mean_basic() {
-        let s = vec![0.0, 0.0, 10.0, 0.0, 0.0];
-        // window=3, end_idx=2 → mean of [0.0, 0.0, 10.0] = 10/3
-        let m = rolling_mean_at(&s, 3, 2);
-        assert!((m - 10.0 / 3.0).abs() < 1e-10);
-        // window=3, end_idx=4 → mean of [10.0, 0.0, 0.0] = 10/3
-        let m = rolling_mean_at(&s, 3, 4);
-        assert!((m - 10.0 / 3.0).abs() < 1e-10);
-        // window=3, end_idx=0 → only 1 sample available → mean = 0.0
-        let m = rolling_mean_at(&s, 3, 0);
-        assert!((m - 0.0).abs() < 1e-10);
+    fn ratio_at_grows_from_fault_onset() {
+        let bl = [1.0, 1.0, 1.0, 1.0];
+        let ft = [9.0, 0.0, 1.0, 1.0];
+        // Pre-fault tick 0 (9 vs 1) must not enter the window.
+        assert_eq!(ratio_at(&bl, &ft, 1, 1), Some(0.0));
+        assert_eq!(ratio_at(&bl, &ft, 1, 2), Some(0.5));
+        assert_eq!(ratio_at(&bl, &ft, 1, 3), Some(2.0 / 3.0));
+        assert_eq!(ratio_at(&bl, &ft, 1, 0), None); // before fault onset
+        assert_eq!(ratio_at(&bl, &ft, 1, 9), None); // past the end
     }
 
     #[test]
-    fn rolling_mean_clamps_end_idx() {
-        let s = vec![1.0, 2.0, 3.0];
-        // end_idx past end → clamps to last index.
-        let m = rolling_mean_at(&s, 2, 99);
-        assert!((m - 2.5).abs() < 1e-10);
+    fn ratio_at_undefined_on_empty_baseline_window() {
+        let bl = [0.0, 0.0, 1.0];
+        let ft = [1.0, 1.0, 1.0];
+        assert_eq!(ratio_at(&bl, &ft, 0, 1), None);
+        assert_eq!(ratio_at(&bl, &ft, 0, 2), Some(3.0));
     }
 
     #[test]
-    fn rolling_mean_empty_series() {
-        let s: Vec<f64> = vec![];
-        assert_eq!(rolling_mean_at(&s, 5, 0), 0.0);
+    fn ratio_window_caps_at_ratio_window() {
+        // Faulted is 0 for the first 5 post-fault ticks, then matches the baseline.
+        // Once the window has slid past them (k ≥ W + 4), R_w is exactly 1.
+        let start = 10;
+        let len = start + RATIO_WINDOW + 5;
+        let bl = vec![1.0; len];
+        let mut ft = vec![1.0; len];
+        for slot in ft.iter_mut().skip(start).take(5) {
+            *slot = 0.0;
+        }
+        let last = start + RATIO_WINDOW + 4;
+        assert_eq!(ratio_at(&bl, &ft, start, last), Some(1.0));
+        assert!(ratio_at(&bl, &ft, start, last - 1).unwrap() < 1.0);
     }
 
     #[test]
