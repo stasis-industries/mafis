@@ -661,7 +661,8 @@ pub fn spacetime_astar_sequential<C: ConstraintChecker>(
     // reached more sub-goals, then closer to the next one, then sooner.
     let mut best_partial_st: usize = start_st;
     let mut best_partial_gid: usize = 0;
-    let mut best_partial_h: u64 = h;
+    // MAX so the first holdable node wins even if it is farther than the start.
+    let mut best_partial_h: u64 = u64::MAX;
     let mut best_partial_time: u64 = 0;
 
     while let Some(current) = open.pop() {
@@ -708,7 +709,12 @@ pub fn spacetime_astar_sequential<C: ConstraintChecker>(
 
         // Update best-partial tracker BEFORE the max_expansions check so
         // exhaustion on huge instances still gets a meaningful fallback.
-        if current.goal_id < n_goals {
+        // The agent holds the partial path's last cell to the horizon, so only
+        // cells free for the rest of the window qualify; otherwise the path
+        // conflicts with a higher-priority agent that PBS can never resolve.
+        if current.goal_id < n_goals
+            && (current.time + 1..=max_time).all(|t| !ci.is_vertex_blocked(current.pos, t))
+        {
             let cur_h = heuristic(current.pos, current.goal_id);
             let better = current.goal_id > best_partial_gid
                 || (current.goal_id == best_partial_gid && cur_h < best_partial_h)
@@ -1627,6 +1633,65 @@ mod tests {
             if t + 1 == 2 {
                 assert_ne!(pos, IVec2::new(2, 0), "constraint violated at t=2");
             }
+        }
+    }
+
+    #[test]
+    fn sequential_astar_partial_path_ends_on_holdable_cell() {
+        // Goal out of reach in 5 steps; (3,0) is taken from t=3 and (2,0) at
+        // t=4. Stopping at (2,0) (closest) would be hit at t=4 while holding.
+        let grid = GridMap::new(10, 1);
+        let goal = IVec2::new(9, 0);
+        let dm = DistanceMap::compute(&grid, goal);
+        let goals: Vec<(IVec2, &DistanceMap)> = vec![(goal, &dm)];
+        let mut ci = ConstraintIndex::new();
+        for t in 3..=5 {
+            ci.add_vertex(IVec2::new(3, 0), t);
+        }
+        ci.add_vertex(IVec2::new(2, 0), 4);
+
+        let mut stg = SeqGoalGrid::new();
+        let path =
+            spacetime_astar_sequential(&grid, IVec2::ZERO, &goals, &ci, 5, &mut stg, u64::MAX)
+                .unwrap();
+
+        // Follow the path, then hold its last cell until the horizon.
+        let mut pos = IVec2::ZERO;
+        for t in 1..=5u64 {
+            if let Some(a) = path.get(t as usize - 1) {
+                pos = a.apply(pos);
+            }
+            assert!(!ci.is_vertex_blocked(pos, t), "at blocked {pos} at t={t}");
+        }
+    }
+
+    #[test]
+    fn sequential_astar_steps_aside_when_start_cannot_be_held() {
+        // Way east is closed; someone crosses the start cell at t=3. Every
+        // holdable cell is farther from the goal than the start, so the
+        // agent must still step aside rather than stay.
+        let grid = GridMap::new(10, 2);
+        let start = IVec2::new(2, 0);
+        let goal = IVec2::new(9, 0);
+        let dm = DistanceMap::compute(&grid, goal);
+        let goals: Vec<(IVec2, &DistanceMap)> = vec![(goal, &dm)];
+        let mut ci = ConstraintIndex::new();
+        for t in 1..=5 {
+            ci.add_vertex(IVec2::new(3, 0), t);
+            ci.add_vertex(IVec2::new(3, 1), t);
+        }
+        ci.add_vertex(start, 3);
+
+        let mut stg = SeqGoalGrid::new();
+        let path =
+            spacetime_astar_sequential(&grid, start, &goals, &ci, 5, &mut stg, u64::MAX).unwrap();
+
+        let mut pos = start;
+        for t in 1..=5u64 {
+            if let Some(a) = path.get(t as usize - 1) {
+                pos = a.apply(pos);
+            }
+            assert!(!ci.is_vertex_blocked(pos, t), "at blocked {pos} at t={t}");
         }
     }
 
