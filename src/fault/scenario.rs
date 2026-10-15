@@ -232,10 +232,7 @@ impl FaultScenario {
         match self.scenario_type {
             FaultScenarioType::BurstFailure => {
                 let at_tick = self.burst_at_tick.min(total_ticks);
-                let count = ((num_agents as f32 * self.burst_kill_percent / 100.0).round()
-                    as usize)
-                    .max(1)
-                    .min(num_agents);
+                let count = burst_kill_count(num_agents, self.burst_kill_percent);
                 events.push(ScheduledEvent {
                     tick: at_tick,
                     action: ScheduledAction::KillRandomAgents(count),
@@ -260,6 +257,15 @@ impl FaultScenario {
 
         FaultSchedule { events, initialized: true }
     }
+}
+
+/// Agents a burst of `percent`% kills: at least one for any positive percent,
+/// none for 0% (a zero-magnitude burst must leave the run untouched).
+fn burst_kill_count(num_agents: usize, percent: f32) -> usize {
+    if percent <= 0.0 {
+        return 0;
+    }
+    ((num_agents as f32 * percent / 100.0).round() as usize).max(1).min(num_agents)
 }
 
 // ---------------------------------------------------------------------------
@@ -366,9 +372,7 @@ impl FaultList {
             *burst_by_tick.entry(tick).or_insert(0.0) += item.burst_kill_percent;
         }
         for (tick, pct) in &burst_by_tick {
-            let clamped = pct.min(100.0);
-            let count =
-                ((num_agents as f32 * clamped / 100.0).round() as usize).max(1).min(num_agents);
+            let count = burst_kill_count(num_agents, pct.min(100.0));
             events.push(ScheduledEvent {
                 tick: *tick,
                 action: ScheduledAction::KillRandomAgents(count),

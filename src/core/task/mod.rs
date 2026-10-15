@@ -326,6 +326,7 @@ impl Plugin for TaskPlugin {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::grid::GridMap;
     use crate::core::topology::ZoneType;
     use rand::SeedableRng;
     use std::collections::HashMap;
@@ -649,7 +650,8 @@ mod tests {
             })
             .collect();
 
-        let result = recycle_goals_core(&agents, &scheduler, &zones, &mut rng, 1);
+        let mut shuffle_rng = test_rng();
+        let result = recycle_goals_core(&agents, &scheduler, &zones, &GridMap::new(8, 8), &mut rng, &mut shuffle_rng, 1);
 
         // All 4 agents should be assigned (zones.pickup_cells has 16 cells)
         let assigned: Vec<_> = result
@@ -791,8 +793,9 @@ mod tests {
 
         // Run 50 rounds and collect unique pickup cells assigned
         let mut all_pickups: HashSet<IVec2> = HashSet::new();
+        let mut shuffle_rng = test_rng();
         for tick in 1..=50 {
-            let result = recycle_goals_core(&agents, &scheduler, &zones, &mut rng, tick);
+            let result = recycle_goals_core(&agents, &scheduler, &zones, &GridMap::new(8, 8), &mut rng, &mut shuffle_rng, tick);
             for update in &result.updates {
                 if let TaskLeg::TravelEmpty(cell) = &update.task_leg {
                     all_pickups.insert(*cell);

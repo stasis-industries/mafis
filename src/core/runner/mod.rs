@@ -22,7 +22,7 @@ use rand::Rng;
 use super::action::Action;
 use super::grid::GridMap;
 use super::queue::{DeliveryQueuePolicy, QueueManager};
-use super::seed::SeededRng;
+use super::seed::{SeededRng, keyed_rng};
 use super::task::{TaskAgentSnapshot, TaskLeg, TaskScheduler, recycle_goals_core};
 use super::topology::ZoneMap;
 use crate::constants::THROUGHPUT_WINDOW_SIZE;
@@ -39,11 +39,17 @@ use crate::solver::lifelong::{
 
 /// XOR salt used to derive the fault RNG seed from the main seed.
 ///
-/// By using a dedicated RNG stream for fault detection (Weibull + intermittent),
-/// the task/solver RNG stream is identical between baseline and faulted runs.
-/// This makes baseline comparison valid: same seed → same task assignments,
-/// same solver decisions; only fault outcomes differ.
+/// Every random purpose has its own stream so a fault only perturbs the
+/// decisions it directly touches: `rng` draws task demand only, `fault_rng`
+/// draws fault decisions (Weibull, intermittent, zone strip, burst victims),
+/// and shuffles and the solver use per-tick keyed streams (`keyed_rng`).
 pub const FAULT_RNG_SALT: u64 = 0x9e37_79b9_7f4a_7c15;
+/// Salt for the per-tick free-agent shuffle in task recycling.
+const RECYCLE_SHUFFLE_SALT: u64 = 0x2545_f491_4f6c_dd1d;
+/// Salt for the per-tick fairness shuffle of queue joins.
+const QUEUE_SHUFFLE_SALT: u64 = 0x5851_f42d_4c95_7f2d;
+/// Salt for the per-tick stream handed to the solver.
+const SOLVER_RNG_SALT: u64 = 0xd1b5_4a32_d192_ed03;
 
 pub struct SimulationRunner {
     // ── Map (owned — faults can mutate grid) ──────────────────────────
@@ -74,7 +80,10 @@ pub struct SimulationRunner {
     command_queue: Vec<SimCommand>,
 
     // ── State ─────────────────────────────────────────────────────────
+    /// Task-demand stream: consumed only by pickup-task creation.
     rng: SeededRng,
+    /// Solver stream, re-keyed to the current tick before every `step()`.
+    solver_rng: SeededRng,
     /// Separate RNG stream for fault detection (Weibull + intermittent).
     ///
     /// Seeded with `rng.seed() ^ FAULT_RNG_SALT` so it is independent of the
@@ -129,6 +138,7 @@ impl SimulationRunner {
         fault_schedule: FaultSchedule,
     ) -> Self {
         let mut fault_rng = SeededRng::new(rng.seed() ^ FAULT_RNG_SALT);
+        let solver_rng = SeededRng::new(rng.seed() ^ SOLVER_RNG_SALT);
         let queue_manager = QueueManager::new(&zones.queue_lines);
         let weibull_failure_ticks = if fault_config.weibull_enabled {
             Self::sample_weibull_ticks(
@@ -152,6 +162,7 @@ impl SimulationRunner {
             weibull_failure_ticks,
             command_queue: Vec::new(),
             rng,
+            solver_rng,
             fault_rng,
             tick: 0,
             tasks_completed: 0,
@@ -476,7 +487,8 @@ impl SimulationRunner {
                         if self.available_agents_buf.is_empty() {
                             break;
                         }
-                        let idx = self.rng.rng.random_range(0..self.available_agents_buf.len());
+                        let idx =
+                            self.fault_rng.rng.random_range(0..self.available_agents_buf.len());
                         let agent_idx = self.available_agents_buf.swap_remove(idx);
                         let pos = self.agents[agent_idx].pos;
                         let invalidated = count_paths_through_cell(&self.agents, pos, agent_idx);
@@ -777,8 +789,16 @@ impl SimulationRunner {
             frozen: a.latency_remaining > 0,
         }));
 
-        let recycle =
-            recycle_goals_core(&task_input, scheduler, &self.zones, &mut self.rng.rng, self.tick);
+        let mut shuffle_rng = keyed_rng(self.rng.seed(), RECYCLE_SHUFFLE_SALT, self.tick);
+        let recycle = recycle_goals_core(
+            &task_input,
+            scheduler,
+            &self.zones,
+            &self.grid,
+            &mut self.rng.rng,
+            &mut shuffle_rng,
+            self.tick,
+        );
 
         // Put scratch buffer back
         self.task_snapshots_buf = task_input;
@@ -830,7 +850,7 @@ impl SimulationRunner {
             &self.zones.queue_lines,
             queue_policy,
             just_loaded,
-            &mut self.rng.rng,
+            &mut keyed_rng(self.rng.seed(), QUEUE_SHUFFLE_SALT, self.tick),
         );
     }
 
@@ -912,7 +932,9 @@ impl SimulationRunner {
         let ctx =
             SolverContext { grid: &self.grid, zones: &self.zones, tick: self.tick, num_agents: n };
 
-        match self.solver.step(&ctx, &agent_states, &mut self.dist_cache, &mut self.rng) {
+        self.solver_rng.rng.set_stream(self.tick);
+        self.solver_rng.rng.set_word_pos(0);
+        match self.solver.step(&ctx, &agent_states, &mut self.dist_cache, &mut self.solver_rng) {
             StepResult::Replan(plans) => {
                 for (idx, actions) in plans {
                     if *idx < n {
