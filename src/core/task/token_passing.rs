@@ -6,7 +6,9 @@
 //! random pool as `ClosestFirstScheduler`; assignment follows TP:
 //! - agents request the token in agent-index order (`tp.cpp:52`);
 //! - a task is eligible only if no other agent's path ends at its pickup
-//!   (`tp.cpp:69-73`) — path ends are the goals of all alive agents;
+//!   (`tp.cpp:69-73`) — path ends are taken as the goal and current cell of
+//!   every alive agent (a slight superset: it also skips a pickup an agent is
+//!   only passing over);
 //! - among eligible tasks the agent takes the one with the nearest pickup
 //!   (`tp.cpp:79-84`; Manhattan distance here, pibt2 uses BFS distance).
 
@@ -101,6 +103,24 @@ mod tests {
         let b = IVec2::new(9, 0);
         let z = zones(&[a, b]);
         let agents = [agent(a, TaskLeg::Loading(a)), agent(IVec2::new(1, 0), TaskLeg::Free)];
+        for seed in 0..50 {
+            let mut rng = ChaCha8Rng::seed_from_u64(seed);
+            let r = recycle_goals_core(&agents, &TokenPassingTaskSelection, &z, &mut rng, 1);
+            assert_eq!(pickup_of(&r.updates[1].task_leg), Some(b), "seed {seed}");
+        }
+    }
+
+    /// An agent whose plan failed rests where it stands, so its path ends at
+    /// its current cell even though its goal is elsewhere. Its cell must not
+    /// be handed out as a pickup (otherwise TP deadlocks in a cycle).
+    #[test]
+    fn pickup_under_an_agent_resting_off_goal_is_not_assigned() {
+        let a = IVec2::new(0, 0);
+        let b = IVec2::new(9, 0);
+        let z = zones(&[a, b]);
+        let mut stuck = agent(a, TaskLeg::TravelEmpty(IVec2::new(5, 5)));
+        stuck.goal = IVec2::new(5, 5);
+        let agents = [stuck, agent(IVec2::new(1, 0), TaskLeg::Free)];
         for seed in 0..50 {
             let mut rng = ChaCha8Rng::seed_from_u64(seed);
             let r = recycle_goals_core(&agents, &TokenPassingTaskSelection, &z, &mut rng, 1);

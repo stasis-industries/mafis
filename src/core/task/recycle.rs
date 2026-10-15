@@ -105,7 +105,10 @@ pub fn recycle_goals_core(
 
     // The scheduler generates random task candidates and assigns them.
     // used_goals is updated in-place so subsequent passes see occupied cells.
-    let path_ends: HashSet<IVec2> = agents.iter().filter(|a| a.alive).map(|a| a.goal).collect();
+    // A path ends at the agent's goal, or at its current cell when its plan
+    // failed and it rests in place — so take both.
+    let path_ends: HashSet<IVec2> =
+        agents.iter().filter(|a| a.alive).flat_map(|a| [a.goal, a.pos]).collect();
     let pickup_assignments: HashMap<usize, IVec2> = scheduler
         .assign_pickups_with_path_ends(&free_agents, zones, &mut used_goals, &path_ends, rng)
         .into_iter()

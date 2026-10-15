@@ -98,6 +98,10 @@ pub struct TokenPassingSolver {
     replanned_set: std::collections::HashSet<usize>,
     /// Free agents sent to a parking endpoint this step (applied by the runner).
     goal_overrides: Vec<(usize, IVec2)>,
+    /// Agents that were free and at their goal at the previous step. Such an
+    /// agent has since asked for a task (MAFIS assigns one tick after an agent
+    /// turns Free), so if it is still free now it got none.
+    free_last_step: std::collections::HashSet<usize>,
 }
 
 /// pibt2 `checkAstarFin` (tp.cpp:270-272): the goal cell may only be entered
@@ -138,6 +142,7 @@ impl TokenPassingSolver {
             stg: SpacetimeGrid::new(),
             replanned_set: std::collections::HashSet::new(),
             goal_overrides: Vec::new(),
+            free_last_step: std::collections::HashSet::new(),
         }
     }
 
@@ -279,6 +284,7 @@ impl LifelongSolver for TokenPassingSolver {
         self.last_agent_indices.clear();
         self.replanned_set.clear();
         self.goal_overrides.clear();
+        self.free_last_step.clear();
         self.initialized = false;
     }
 
@@ -437,6 +443,7 @@ impl LifelongSolver for TokenPassingSolver {
             let parking = if token_idle
                 && a.task_leg == TaskLeg::Free
                 && a.goal == Some(a.pos)
+                && self.free_last_step.contains(&a.index)
                 && ctx.zones.delivery_cells.contains(&a.pos)
             {
                 self.free_parking(local, a.pos, ctx)
@@ -519,6 +526,14 @@ impl LifelongSolver for TokenPassingSolver {
                 self.plan_buffer.push((a.index, smallvec![Action::Wait]));
             }
         }
+
+        self.free_last_step.clear();
+        self.free_last_step.extend(
+            agents
+                .iter()
+                .filter(|a| a.task_leg == TaskLeg::Free && a.goal == Some(a.pos))
+                .map(|a| a.index),
+        );
 
         StepResult::Replan(&self.plan_buffer)
     }
@@ -683,6 +698,9 @@ mod tests {
     /// pibt2 tp.cpp:99-123 (`updatePath2`): a free agent with no task that
     /// stands on a delivery endpoint moves to the nearest parking endpoint
     /// that is not the end of another token path. A free agent elsewhere stays.
+    /// The rule fires only once the agent has asked for a task and got none:
+    /// on the tick it turns Free (MAFIS's 1-tick dwell before assignment) it
+    /// has not asked yet, so it must not be sent away.
     #[test]
     fn tp_free_agent_on_delivery_moves_to_free_parking() {
         let grid = GridMap::new(5, 3);
@@ -695,6 +713,9 @@ mod tests {
         let agents =
             vec![tp_agent(0, dock, dock, TaskLeg::Free), tp_agent(1, rest, rest, TaskLeg::Free)];
         let ctx = SolverContext { grid: &grid, zones: &zones, tick: 0, num_agents: 2 };
+        let _ = solver.step(&ctx, &agents, &mut cache, &mut rng);
+        assert!(solver.drain_goal_overrides().is_empty(), "just turned Free: no request yet");
+        let ctx = SolverContext { grid: &grid, zones: &zones, tick: 1, num_agents: 2 };
         let _ = solver.step(&ctx, &agents, &mut cache, &mut rng);
         assert_eq!(solver.drain_goal_overrides(), vec![(0, IVec2::new(0, 2))]);
         assert_eq!(solver.token.paths[0].back(), Some(&IVec2::new(0, 2)));
@@ -712,8 +733,10 @@ mod tests {
         let mut rng = SeededRng::new(42);
         let dock = IVec2::new(4, 0);
         let agents = vec![tp_agent(0, dock, dock, TaskLeg::Free)];
-        let ctx = SolverContext { grid: &grid, zones: &zones, tick: 0, num_agents: 1 };
-        let _ = solver.step(&ctx, &agents, &mut cache, &mut rng);
+        for tick in 0..2 {
+            let ctx = SolverContext { grid: &grid, zones: &zones, tick, num_agents: 1 };
+            let _ = solver.step(&ctx, &agents, &mut cache, &mut rng);
+        }
         assert_eq!(solver.drain_goal_overrides(), vec![(0, IVec2::new(0, 2))]);
     }
 

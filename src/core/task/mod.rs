@@ -144,8 +144,9 @@ pub trait TaskScheduler: Send + Sync + 'static {
         assignments
     }
 
-    /// `assign_pickups_batch` plus `path_ends`: the goal of every alive agent,
-    /// including agents resting at it. Token Passing needs it to skip tasks
+    /// `assign_pickups_batch` plus `path_ends`: the goal and current cell of
+    /// every alive agent (a superset of where their paths end — an agent
+    /// whose plan failed rests in place). Token Passing needs it to skip tasks
     /// whose pickup is the end of another agent's path (Ma et al. 2017).
     /// Default: ignore `path_ends`.
     fn assign_pickups_with_path_ends(
