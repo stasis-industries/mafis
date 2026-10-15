@@ -67,8 +67,8 @@ use super::common::{MasterConstraintIndex, Token};
 use crate::solver::lifelong::{
     AgentPlan, AgentRestoreState, AgentState, LifelongSolver, SolverContext, StepResult,
 };
-use crate::solver::shared::astar::{SpacetimeGrid, spacetime_astar_fast};
-use crate::solver::shared::heuristics::DistanceMapCache;
+use crate::solver::shared::astar::{ConstraintChecker, SpacetimeGrid, spacetime_astar_fast};
+use crate::solver::shared::heuristics::{DistanceMap, DistanceMapCache};
 use crate::solver::shared::traits::{Optimality, Scalability, SolverInfo};
 
 use crate::constants::{ASTAR_MAX_EXPANSIONS, TOKEN_ASTAR_MAX_TIME, TOKEN_PATH_MAX_TIME};
@@ -88,6 +88,27 @@ pub struct TokenPassingSolver {
     stg: SpacetimeGrid,
     /// Reusable set tracking which agents were replanned this tick (avoids per-tick HashSet alloc).
     replanned_set: std::collections::HashSet<usize>,
+    /// Free agents sent to a parking endpoint this step (applied by the runner).
+    goal_overrides: Vec<(usize, IVec2)>,
+}
+
+/// pibt2 `checkAstarFin` (tp.cpp:270-272): the goal cell may only be entered
+/// after `after`, the last time another token path passes through it.
+struct ArriveAfter<'a> {
+    inner: &'a MasterConstraintIndex,
+    goal: IVec2,
+    after: Option<u64>,
+}
+
+impl ConstraintChecker for ArriveAfter<'_> {
+    fn is_vertex_blocked(&self, pos: IVec2, time: u64) -> bool {
+        (pos == self.goal && self.after.is_some_and(|a| time <= a))
+            || self.inner.is_vertex_blocked(pos, time)
+    }
+
+    fn is_edge_blocked(&self, from: IVec2, to: IVec2, time: u64) -> bool {
+        self.inner.is_edge_blocked(from, to, time)
+    }
 }
 
 impl Default for TokenPassingSolver {
@@ -108,6 +129,7 @@ impl TokenPassingSolver {
             master_ci: MasterConstraintIndex::new(),
             stg: SpacetimeGrid::new(),
             replanned_set: std::collections::HashSet::new(),
+            goal_overrides: Vec::new(),
         }
     }
 
@@ -145,7 +167,7 @@ impl TokenPassingSolver {
 
     fn plan_for_agent(
         &mut self,
-        _local: usize,
+        local: usize,
         start: IVec2,
         goal: IVec2,
         grid: &GridMap,
@@ -156,7 +178,17 @@ impl TokenPassingSolver {
         }
 
         // Master CI already has this agent's path removed by the caller.
-        // Use it directly as the constraint source.
+        // REFERENCE: pibt2 tp.cpp:255-264 — last time another path uses `goal`.
+        let after = self
+            .token
+            .paths
+            .iter()
+            .enumerate()
+            .filter(|&(j, _)| j != local)
+            .filter_map(|(_, path)| path.iter().rposition(|&p| p == goal))
+            .max()
+            .map(|t| t as u64);
+        let ci = ArriveAfter { inner: &self.master_ci, goal, after };
 
         let agent_pair = [(start, goal)];
         let maps = dist_cache.get_or_compute(grid, &agent_pair);
@@ -166,7 +198,7 @@ impl TokenPassingSolver {
             grid,
             start,
             goal,
-            &self.master_ci,
+            &ci,
             TOKEN_ASTAR_MAX_TIME,
             Some(dm),
             &mut self.stg,
@@ -184,6 +216,21 @@ impl TokenPassingSolver {
         }
 
         Some(positions)
+    }
+
+    /// pibt2 `updatePath2` (tp.cpp:206-248): nearest parking endpoint (BFS
+    /// distance) that is walkable and not the end of another token path.
+    /// `None` if every parking cell is taken (pibt2 halts: not well-formed).
+    fn free_parking(&self, local: usize, pos: IVec2, ctx: &SolverContext) -> Option<IVec2> {
+        let dm = DistanceMap::compute(ctx.grid, pos);
+        ctx.zones
+            .parking_cells()
+            .into_iter()
+            .filter(|&p| ctx.grid.is_walkable(p) && dm.get(p) != u64::MAX)
+            .filter(|&p| {
+                self.token.paths.iter().enumerate().all(|(j, path)| j == local || path.back() != Some(&p))
+            })
+            .min_by_key(|&p| dm.get(p))
     }
 }
 
@@ -214,7 +261,12 @@ impl LifelongSolver for TokenPassingSolver {
         self.reverse_map.clear();
         self.last_agent_indices.clear();
         self.replanned_set.clear();
+        self.goal_overrides.clear();
         self.initialized = false;
+    }
+
+    fn drain_goal_overrides(&mut self) -> Vec<(usize, IVec2)> {
+        std::mem::take(&mut self.goal_overrides)
     }
 
     /// Restore TP's per-agent token paths from the snapshot's restored
@@ -281,6 +333,7 @@ impl LifelongSolver for TokenPassingSolver {
 
         self.ensure_initialized(agents);
         self.plan_buffer.clear();
+        self.goal_overrides.clear();
 
         // Advance token: pop the front of every path, simulating that all agents
         // moved to their TOKEN[i][1] position. This is the relative-time
@@ -359,14 +412,27 @@ impl LifelongSolver for TokenPassingSolver {
             // i.e. agent needs replan iff its token doesn't extend past now.
             // Relative-time equivalent: `paths[local].len() <= 1` means
             // path[0]=current_pos with no future planned steps.
-            let needs_plan =
-                self.token.paths[local].len() <= 1 && a.goal.is_some() && a.pos != a.goal.unwrap();
+            let token_idle = self.token.paths[local].len() <= 1;
 
-            if !needs_plan {
+            // REFERENCE: pibt2 tp.cpp:99-123. A free agent that got no task
+            // stays put, unless it stands on a delivery endpoint: then it
+            // moves to a parking endpoint (`updatePath2`).
+            let parking = if token_idle
+                && a.task_leg == TaskLeg::Free
+                && a.goal == Some(a.pos)
+                && ctx.zones.delivery_cells.contains(&a.pos)
+            {
+                self.free_parking(local, a.pos, ctx)
+            } else {
+                None
+            };
+            let needs_plan = token_idle && a.goal.is_some_and(|g| g != a.pos);
+
+            if parking.is_none() && !needs_plan {
                 continue;
             }
 
-            let goal = a.goal.unwrap();
+            let goal = parking.or(a.goal).unwrap_or(a.pos);
 
             // Remove this agent's own token from the constraint index before
             // planning (so the agent doesn't constrain itself).
@@ -392,6 +458,9 @@ impl LifelongSolver for TokenPassingSolver {
             };
 
             if let Some(positions) = path {
+                if let Some(p) = parking {
+                    self.goal_overrides.push((a.index, p));
+                }
                 let actions: smallvec::SmallVec<[Action; 20]> = positions
                     .windows(2)
                     .map(|w| crate::solver::shared::heuristics::delta_to_action(w[0], w[1]))
@@ -556,6 +625,81 @@ mod tests {
                 panic!("vertex collision at tick {tick}: {:?}", positions);
             }
         }
+    }
+
+    fn tp_agent(index: usize, pos: IVec2, goal: IVec2, task_leg: TaskLeg) -> AgentState {
+        AgentState { index, pos, goal: Some(goal), has_plan: false, task_leg }
+    }
+
+    /// pibt2 tp.cpp:255-272 (`checkAstarFin`): an agent may only finish at its
+    /// goal after the last time another token path passes through that cell,
+    /// otherwise it would rest on that path.
+    #[test]
+    fn tp_arrives_after_other_paths_leave_goal() {
+        let grid = GridMap::new(5, 3);
+        let zones = test_zones();
+        let mut solver = TokenPassingSolver::new();
+        let mut cache = DistanceMapCache::default();
+        let mut rng = SeededRng::new(42);
+        let goal = IVec2::new(2, 1);
+        // Agent 0 plans first and crosses `goal` at t=2 on its way to (4,1).
+        let agents = vec![
+            tp_agent(0, IVec2::new(0, 1), IVec2::new(4, 1), TaskLeg::TravelEmpty(IVec2::new(4, 1))),
+            tp_agent(1, IVec2::new(2, 0), goal, TaskLeg::TravelEmpty(goal)),
+        ];
+        let ctx = SolverContext { grid: &grid, zones: &zones, tick: 0, num_agents: 2 };
+        let _ = solver.step(&ctx, &agents, &mut cache, &mut rng);
+        let crossing = solver.token.paths[0].iter().position(|&p| p == goal).unwrap();
+        let arrival = solver.token.paths[1].iter().position(|&p| p == goal).unwrap();
+        assert_eq!(solver.token.paths[1].back(), Some(&goal));
+        assert!(arrival > crossing, "arrived at t={arrival}, other path crosses at t={crossing}");
+    }
+
+    fn parking_zones() -> ZoneMap {
+        let mut zones = test_zones();
+        zones.delivery_cells = vec![IVec2::new(4, 0)];
+        zones.zone_type.insert(IVec2::new(0, 2), crate::core::topology::ZoneType::Parking);
+        zones.zone_type.insert(IVec2::new(4, 2), crate::core::topology::ZoneType::Parking);
+        zones
+    }
+
+    /// pibt2 tp.cpp:99-123 (`updatePath2`): a free agent with no task that
+    /// stands on a delivery endpoint moves to the nearest parking endpoint
+    /// that is not the end of another token path. A free agent elsewhere stays.
+    #[test]
+    fn tp_free_agent_on_delivery_moves_to_free_parking() {
+        let grid = GridMap::new(5, 3);
+        let zones = parking_zones();
+        let mut solver = TokenPassingSolver::new();
+        let mut cache = DistanceMapCache::default();
+        let mut rng = SeededRng::new(42);
+        let dock = IVec2::new(4, 0);
+        let rest = IVec2::new(4, 2); // nearest parking, but agent 1 rests there
+        let agents = vec![
+            tp_agent(0, dock, dock, TaskLeg::Free),
+            tp_agent(1, rest, rest, TaskLeg::Free),
+        ];
+        let ctx = SolverContext { grid: &grid, zones: &zones, tick: 0, num_agents: 2 };
+        let _ = solver.step(&ctx, &agents, &mut cache, &mut rng);
+        assert_eq!(solver.drain_goal_overrides(), vec![(0, IVec2::new(0, 2))]);
+        assert_eq!(solver.token.paths[0].back(), Some(&IVec2::new(0, 2)));
+        assert_eq!(solver.token.paths[1].iter().copied().collect::<Vec<_>>(), vec![rest]);
+    }
+
+    /// A parking cell blocked by a dead agent (now an obstacle) is skipped.
+    #[test]
+    fn tp_parking_skips_blocked_cells() {
+        let mut grid = GridMap::new(5, 3);
+        grid.set_obstacle(IVec2::new(4, 2));
+        let zones = parking_zones();
+        let mut solver = TokenPassingSolver::new();
+        let mut cache = DistanceMapCache::default();
+        let mut rng = SeededRng::new(42);
+        let dock = IVec2::new(4, 0);
+        let agents = vec![tp_agent(0, dock, dock, TaskLeg::Free)];
+        let ctx = SolverContext { grid: &grid, zones: &zones, tick: 0, num_agents: 1 };
+        let _ = solver.step(&ctx, &agents, &mut cache, &mut rng);
+        assert_eq!(solver.drain_goal_overrides(), vec![(0, IVec2::new(0, 2))]);
     }
 
     /// TP selects its own tasks (Ma et al. 2017 Alg. 1 lines 7-12) instead of
