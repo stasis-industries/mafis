@@ -911,6 +911,9 @@ fn parse_fault_list_json(json: &str) -> Option<crate::fault::scenario::FaultList
                 item.zone_latency_duration =
                     v.get("duration").and_then(|v| v.as_u64()).unwrap_or(50) as u32;
             }
+            FaultScenarioType::NullPerturb => {
+                item.burst_at_tick = v.get("at_tick").and_then(|v| v.as_u64()).unwrap_or(100);
+            }
             FaultScenarioType::IntermittentFault => {
                 item.intermittent_mtbf_ticks = v.get("mtbf").and_then(|v| v.as_u64()).unwrap_or(80);
                 item.intermittent_recovery_ticks =

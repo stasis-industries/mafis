@@ -510,6 +510,24 @@ impl SimulationRunner {
                         });
                     }
                 }
+                ScheduledAction::DelayRandomAgent { duration } => {
+                    self.available_agents_buf.clear();
+                    self.available_agents_buf.extend((0..n).filter(|&i| self.agents[i].alive));
+                    if !self.available_agents_buf.is_empty() {
+                        let pick =
+                            self.fault_rng.rng.random_range(0..self.available_agents_buf.len());
+                        let i = self.available_agents_buf[pick];
+                        self.agents[i].latency_remaining = duration;
+                        fault_events.push(FaultRecord {
+                            agent_index: i,
+                            fault_type: FaultType::Latency,
+                            source: FaultSource::Scheduled,
+                            tick,
+                            position: self.agents[i].pos,
+                            paths_invalidated: 0,
+                        });
+                    }
+                }
                 ScheduledAction::ZoneLatency { duration } => {
                     // Spatial zone outage: divide the map into 4 equal vertical strips and select
                     // one strip using fault_rng (solver-independent, deterministic per seed).

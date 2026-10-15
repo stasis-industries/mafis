@@ -39,6 +39,7 @@ impl ExperimentConfig {
                 FaultScenarioType::ZoneOutage => {
                     format!("zone_{}t", s.zone_latency_duration)
                 }
+                FaultScenarioType::NullPerturb => "null_perturb".to_string(),
                 FaultScenarioType::IntermittentFault => {
                     // Format: intermittent_{start}s{mtbf}m{recovery}r
                     // `start` = warm-up floor tick (0 = no warm-up).

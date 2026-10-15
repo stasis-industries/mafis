@@ -963,6 +963,12 @@ fn parse_config_json(json: &str) -> Option<ExperimentConfig> {
                 intermittent_start_tick: s.get("start_tick").and_then(|t| t.as_u64()).unwrap_or(0),
                 ..Default::default()
             }),
+            "null_perturb" => Some(FaultScenario {
+                enabled: true,
+                scenario_type: FaultScenarioType::NullPerturb,
+                burst_at_tick: s.get("at_tick").and_then(|t| t.as_u64()).unwrap_or(100),
+                ..Default::default()
+            }),
             "none" | _ => None,
         }
     });

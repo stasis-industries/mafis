@@ -25,6 +25,10 @@ pub enum FaultScenarioType {
     ZoneOutage,
     /// Each robot independently fails temporarily via exponential inter-arrival times.
     IntermittentFault,
+    /// Control: delay ONE robot by ONE tick at `burst_at_tick`. Measures the
+    /// chaotic noise floor of the paired-run metrics (how far FT/TWTE move
+    /// from parity for a perturbation that should not matter).
+    NullPerturb,
 }
 
 impl FaultScenarioType {
@@ -34,6 +38,7 @@ impl FaultScenarioType {
             Self::WearBased => "Wear-Based",
             Self::ZoneOutage => "Zone Outage",
             Self::IntermittentFault => "Intermittent Fault",
+            Self::NullPerturb => "Null Perturbation",
         }
     }
 
@@ -43,6 +48,7 @@ impl FaultScenarioType {
             Self::WearBased => "wear_based",
             Self::ZoneOutage => "zone_outage",
             Self::IntermittentFault => "intermittent_fault",
+            Self::NullPerturb => "null_perturb",
         }
     }
 }
@@ -56,6 +62,7 @@ impl FromStr for FaultScenarioType {
             "wear_based" => Self::WearBased,
             "zone_outage" => Self::ZoneOutage,
             "intermittent_fault" => Self::IntermittentFault,
+            "null_perturb" => Self::NullPerturb,
             _ => return Err(()),
         })
     }
@@ -255,6 +262,13 @@ impl FaultScenario {
                     fired: false,
                 });
             }
+            FaultScenarioType::NullPerturb => {
+                events.push(ScheduledEvent {
+                    tick: self.burst_at_tick.min(total_ticks),
+                    action: ScheduledAction::DelayRandomAgent { duration: 1 },
+                    fired: false,
+                });
+            }
         }
 
         FaultSchedule { events, initialized: true }
@@ -398,6 +412,14 @@ impl FaultList {
             });
         }
 
+        for item in self.items.iter().filter(|i| i.fault_type == FaultScenarioType::NullPerturb) {
+            events.push(ScheduledEvent {
+                tick: item.burst_at_tick.min(total_ticks),
+                action: ScheduledAction::DelayRandomAgent { duration: 1 },
+                fired: false,
+            });
+        }
+
         // Sort by tick for deterministic execution
         events.sort_by_key(|e| e.tick);
 
@@ -431,6 +453,8 @@ pub enum ScheduledAction {
     /// Inject latency on all agents in a randomly-selected vertical strip for N ticks
     /// (spatial, solver-independent).
     ZoneLatency { duration: u32 },
+    /// Inject latency on one random alive agent for N ticks (null-perturbation control).
+    DelayRandomAgent { duration: u32 },
 }
 
 #[derive(Resource, Debug, Clone, Default)]

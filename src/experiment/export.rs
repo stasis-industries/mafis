@@ -323,6 +323,9 @@ fn write_fault_scenario_json<W: Write>(
             "{{\"type\":\"intermittent_fault\",\"start_tick\":{},\"mtbf\":{},\"recovery\":{}}}",
             s.intermittent_start_tick, s.intermittent_mtbf_ticks, s.intermittent_recovery_ticks
         ),
+        FaultScenarioType::NullPerturb => {
+            write!(writer, "{{\"type\":\"null_perturb\",\"at_tick\":{}}}", s.burst_at_tick)
+        }
     }
 }
 
