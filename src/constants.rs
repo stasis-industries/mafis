@@ -169,11 +169,6 @@ pub const PIBT_DEFAULT_MAX_TIMESTEPS: u64 = 1000;
 /// 40 allows larger maps where agents need longer paths to reach goals.
 pub const RHCR_MAX_HORIZON: usize = 40;
 
-/// PBS-specific cap on the planning horizon, applied inside `RhcrConfig::auto`.
-/// PBS tree search is exponential — capping below `RHCR_MAX_HORIZON` keeps
-/// worst-case replan cost bounded on dense fleets.
-pub const RHCR_PBS_MAX_HORIZON: usize = 15;
-
 /// Minimum planning horizon. Below 5, plans are too short for agents to clear
 /// even simple intersections (average aisle length ~4 cells in compact grids).
 pub const RHCR_MIN_HORIZON: usize = 5;
@@ -200,10 +195,17 @@ pub const PBS_MAX_NODE_LIMIT: usize = 10_000;
 /// REFERENCE: `docs/papers_codes/rhcr/src/driver.cpp:116` — `simulation_window`.
 pub const RHCR_SIMULATION_WINDOW_DEFAULT: usize = 5;
 
-/// Default RHCR planning horizon (H).
-/// REFERENCE: Li et al. 2021 §5.1 — typical `w + h` lookahead used in the
-/// published warehouse experiments.
+/// Default RHCR planning window (H): conflicts resolved for the next 10 ticks.
+/// REFERENCE: RHCR README example `--simulation_window=5 --planning_window=10`
+/// (driver.cpp:118 defaults to unbounded).
 pub const RHCR_PLANNING_HORIZON_DEFAULT: usize = 10;
+
+/// Per-call expansion cap for PBS's sequential A* (deterministic; the
+/// reference only has the global solver time limit). Non-binding at the
+/// default planning window: a single-goal search over w = 10 can close at
+/// most sum_{t=0..10}(2t^2 + 2t + 1) = 891 (cell, time) states. Binds only
+/// for w >= 14.
+pub const PBS_ASTAR_MAX_EXPANSIONS: u64 = 2_000;
 
 /// PBS `find_consistent_paths` cycle guard: abort cascade replan if
 /// `count > paths.len() * MULT`.

@@ -228,7 +228,7 @@ impl PibtCore {
     ) {
         let n = positions.len();
 
-        // Reference initial `elapsed` is 0 (pibt_mapd.cpp:32); new ids start there.
+        // Reference initial `elapsed` is 0 (pibt_mapd.cpp:34); new ids start there.
         if let Some(&max_id) = ids.iter().max()
             && self.priorities.len() <= max_id
         {
@@ -332,7 +332,7 @@ impl PibtCore {
 }
 
 /// Per-agent tie-breaker in [0, 1): the reference draws `getRandomFloat(0, 1)`
-/// once per agent at init (pibt_mapd.cpp:33). A seeded hash gives the same
+/// once per agent at init (pibt_mapd.cpp:35). A seeded hash gives the same
 /// distribution without consuming RNG draws and survives rewind/reset.
 pub(crate) fn tie_breaker(salt: u64, id: usize) -> f32 {
     // splitmix64 finalizer

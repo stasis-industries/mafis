@@ -9,14 +9,17 @@
 //! Path Finding in Large-Scale Warehouses", AAAI 2021.
 //!
 //! Fidelity notes (reference file:line in Jiaoyang-Li/RHCR):
-//! - Cadence: replan every `simulation_window` ticks with a `planning_window`
-//!   lookahead (driver.cpp:116-119, KivaSystem.cpp:207). No extra replans.
+//! - Cadence: full-fleet PBS every `simulation_window` ticks with a
+//!   `planning_window` lookahead (driver.cpp:116-119, KivaSystem.cpp:209).
+//!   Between windows only agents left without a plan are planned, around
+//!   the others' fixed paths (`new_agents` vs `initial_rt`,
+//!   BasicSystem.cpp:604-637), counted by `extra_replan_count()`.
 //! - Goals: MAFIS reveals an agent's next goal only when it arrives, so agents
 //!   plan to their current goal and hold it — the reference's
-//!   `hold_endpoints` mode (KivaSystem.cpp:73), not its default chain of
+//!   `hold_endpoints` mode (KivaSystem.cpp:74), not its default chain of
 //!   pre-generated future goals.
 //! - PBS failure: the best node's conflicting paths go through LRA conflict
-//!   resolution (BasicSystem.cpp:661-665). Agents LRA leaves fully waiting get
+//!   resolution (BasicSystem.cpp:663-673). Agents LRA leaves fully waiting get
 //!   one PIBT step — a MAFIS addition.
 //! - Congestion: `BasicSystem::congested()` (BasicSystem.cpp:310) is
 //!   evaluated every window and counted; the reference stops the run there.
@@ -572,11 +575,11 @@ impl LifelongSolver for RhcrSolver {
 
         self.track_movement(agents);
 
-        // Full-fleet PBS every `simulation_window` ticks (KivaSystem.cpp:207).
+        // Full-fleet PBS every `simulation_window` ticks (KivaSystem.cpp:209).
         // In between, only agents left without a plan (new goal, runner-forced
         // wait, fault) are planned, around everyone else's unchanged paths —
         // the reference's `new_agents` planning against `initial_rt`
-        // (BasicSystem.cpp:605-626), run on demand because MAFIS reveals goals
+        // (BasicSystem.cpp:604-637), run on demand because MAFIS reveals goals
         // on arrival instead of pre-generating them.
         let window = self.ticks_since_replan >= self.config.replan_interval;
         self.plan_buffer.clear();
@@ -594,7 +597,7 @@ impl LifelongSolver for RhcrSolver {
         }
 
         // Each agent plans to its current goal and holds it — the reference's
-        // `hold_endpoints` mode (KivaSystem.cpp:73) — since its next goal is
+        // `hold_endpoints` mode (KivaSystem.cpp:74) — since its next goal is
         // unknown until it arrives. Agents outside this window keep their
         // remaining path, which becomes a hard constraint.
         self.scratch_window_agents.clear();

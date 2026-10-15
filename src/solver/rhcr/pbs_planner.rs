@@ -89,7 +89,9 @@ type ArcPlan = Arc<Vec<Action>>;
 /// changes.
 type ArcTimeline = Arc<Vec<IVec2>>;
 
-use crate::constants::{PBS_CONSISTENT_PATHS_REPLAN_MULT, PBS_PRIORITIZE_START_DEFAULT};
+use crate::constants::{
+    PBS_ASTAR_MAX_EXPANSIONS, PBS_CONSISTENT_PATHS_REPLAN_MULT, PBS_PRIORITIZE_START_DEFAULT,
+};
 use crate::core::action::Action;
 use crate::core::grid::GridMap;
 use crate::core::seed::SeededRng;
@@ -610,12 +612,6 @@ fn plan_agent(
     // even when the final goal in the chain is not reachable inside `horizon`
     // ticks, the search makes meaningful progress toward the nearest
     // reachable goal in the sequence.
-    // Per-call expansion budget for PBS's sequential A*. This is tighter than
-    // the global `ASTAR_MAX_EXPANSIONS` (5000) because `plan_agent` is invoked
-    // O(n × nodes) times per PBS window — on warehouse_single_dock/N=40 that's ~500+
-    // calls per window, so a 5000-budget balloons to ~2.5M expansions/window.
-    // 2000 keeps total ~1M which the best-partial fallback still handles well.
-    const PBS_ASTAR_BUDGET: u64 = 2_000;
     while !goals.is_empty() {
         let result = spacetime_astar_sequential(
             grid,
@@ -624,7 +620,7 @@ fn plan_agent(
             ci_buf,
             horizon as u64,
             seq_stg,
-            PBS_ASTAR_BUDGET,
+            PBS_ASTAR_MAX_EXPANSIONS,
         );
         if let Ok(plan) = result {
             *goals_after_trim = goals.len();
@@ -687,7 +683,6 @@ fn plan_agent_root_no_reset(
     }
 
     // ── Trim loop: identical to `plan_agent` ─────────────────────────────
-    const PBS_ASTAR_BUDGET: u64 = 2_000;
     while !goals.is_empty() {
         let result = spacetime_astar_sequential(
             grid,
@@ -696,7 +691,7 @@ fn plan_agent_root_no_reset(
             ci_buf,
             horizon as u64,
             seq_stg,
-            PBS_ASTAR_BUDGET,
+            PBS_ASTAR_MAX_EXPANSIONS,
         );
         if let Ok(plan) = result {
             *goals_after_trim = goals.len();
@@ -1506,7 +1501,7 @@ impl WindowedPlanner for PbsPlanner {
             if let Some(conflict) = conflict {
                 // Budget check after the solution check, so a conflict-free
                 // node is never discarded (the reference detects solutions
-                // when children are generated, PBS.cpp:723).
+                // when children are generated, PBS.cpp:729).
                 if node_count >= ctx.node_limit {
                     diag_node_limit_hit = true;
                     if diag_enabled {
@@ -1859,7 +1854,7 @@ fn to_partial_result(plans: Vec<ArcPlan>, agents: &[WindowAgent]) -> WindowResul
 
     // Only called for unsolved windows: the plans still conflict, so this is
     // Partial even when every agent moves (the caller runs LRA, as the
-    // reference does on PBS failure, BasicSystem.cpp:661-665).
+    // reference does on PBS failure, BasicSystem.cpp:663-673).
     WindowResult::Partial { solved, failed }
 }
 
