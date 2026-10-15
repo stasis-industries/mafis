@@ -124,6 +124,13 @@ pub trait LifelongSolver: Send + Sync + 'static {
         Vec::new()
     }
 
+    /// Task selection owned by the solver itself. Token Passing assigns its
+    /// own tasks (Ma et al. 2017); the runner then ignores the configured
+    /// scheduler. Default: `None` — use the configured scheduler.
+    fn task_scheduler(&self) -> Option<&dyn crate::core::task::TaskScheduler> {
+        None
+    }
+
     /// Solver-specific telemetry: fraction of replan windows that could not
     /// close the full fleet plan within the node budget. RHCR-PBS overrides
     /// this to expose the `WindowResult::Partial` fire rate — used as an

@@ -777,6 +777,8 @@ impl SimulationRunner {
             frozen: a.latency_remaining > 0,
         }));
 
+        // Token Passing selects its own tasks (Ma et al. 2017).
+        let scheduler = self.solver.task_scheduler().unwrap_or(scheduler);
         let recycle =
             recycle_goals_core(&task_input, scheduler, &self.zones, &mut self.rng.rng, self.tick);
 

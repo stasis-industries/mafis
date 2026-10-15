@@ -105,8 +105,9 @@ pub fn recycle_goals_core(
 
     // The scheduler generates random task candidates and assigns them.
     // used_goals is updated in-place so subsequent passes see occupied cells.
+    let path_ends: HashSet<IVec2> = agents.iter().filter(|a| a.alive).map(|a| a.goal).collect();
     let pickup_assignments: HashMap<usize, IVec2> = scheduler
-        .assign_pickups_batch(&free_agents, zones, &mut used_goals, rng)
+        .assign_pickups_with_path_ends(&free_agents, zones, &mut used_goals, &path_ends, rng)
         .into_iter()
         .collect();
 

@@ -203,6 +203,10 @@ impl LifelongSolver for TokenPassingSolver {
         }
     }
 
+    fn task_scheduler(&self) -> Option<&dyn crate::core::task::TaskScheduler> {
+        Some(&crate::core::task::TokenPassingTaskSelection)
+    }
+
     fn reset(&mut self) {
         self.token.reset(0);
         self.plan_buffer.clear();
@@ -552,6 +556,16 @@ mod tests {
                 panic!("vertex collision at tick {tick}: {:?}", positions);
             }
         }
+    }
+
+    /// TP selects its own tasks (Ma et al. 2017 Alg. 1 lines 7-12) instead of
+    /// taking them from the configured scheduler.
+    #[test]
+    fn tp_provides_its_own_task_selection() {
+        let solver = TokenPassingSolver::new();
+        assert_eq!(solver.task_scheduler().map(|s| s.name()), Some("token_passing"));
+        let pibt = crate::solver::pibt::PibtLifelongSolver::new();
+        assert!(pibt.task_scheduler().is_none());
     }
 
     #[test]
