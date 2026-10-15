@@ -102,16 +102,29 @@ impl Default for ExperimentMatrix {
 }
 
 impl ExperimentMatrix {
-    /// Expand into the full Cartesian product of experiment configs.
+    /// Expand into the Cartesian product of experiment configs, skipping
+    /// solver × fleet-size cells above the solver's `recommended_max_agents`
+    /// (with a warning) so no matrix runs a solver outside its supported range.
     pub fn expand(&self) -> Vec<ExperimentConfig> {
         let mut configs = Vec::new();
         let overrides: &[Option<RhcrConfigOverride>] =
             if self.rhcr_overrides.is_empty() { &[None] } else { &self.rhcr_overrides };
         for solver in &self.solvers {
+            let cap = solver_agent_cap(solver);
+            #[cfg(not(target_arch = "wasm32"))]
+            for &n in self.agent_counts.iter().filter(|&&n| cap.is_some_and(|c| n > c)) {
+                eprintln!(
+                    "WARNING: skipping {solver} at {n} agents (recommended max {})",
+                    cap.unwrap_or_default()
+                );
+            }
             for topology in &self.topologies {
                 for scenario in &self.scenarios {
                     for scheduler in &self.schedulers {
                         for &num_agents in &self.agent_counts {
+                            if cap.is_some_and(|c| num_agents > c) {
+                                continue;
+                            }
                             for &seed in &self.seeds {
                                 for ov in overrides {
                                     configs.push(ExperimentConfig {
@@ -135,17 +148,30 @@ impl ExperimentMatrix {
         configs
     }
 
-    /// Total number of runs this matrix will produce.
+    /// Total number of runs this matrix will produce (same skips as `expand`).
     pub fn total_runs(&self) -> usize {
         let ov_len = self.rhcr_overrides.len().max(1);
-        self.solvers.len()
+        let solver_agent_cells: usize = self
+            .solvers
+            .iter()
+            .map(|s| {
+                let cap = solver_agent_cap(s);
+                self.agent_counts.iter().filter(|&&n| cap.is_none_or(|c| n <= c)).count()
+            })
+            .sum();
+        solver_agent_cells
             * self.topologies.len()
             * self.scenarios.len()
             * self.schedulers.len()
-            * self.agent_counts.len()
             * self.seeds.len()
             * ov_len
     }
+}
+
+/// Fleet-size cap from the solver's own `SolverInfo` (`None` = uncapped or unknown).
+fn solver_agent_cap(solver: &str) -> Option<usize> {
+    crate::solver::lifelong_solver_from_name(solver, 0, 0)
+        .and_then(|s| s.info().recommended_max_agents)
 }
 
 /// Helper to build common fault scenarios for experiment matrices.
@@ -207,6 +233,25 @@ mod tests {
         let configs = matrix.expand();
         assert_eq!(configs.len(), 6); // 1×1×1×1×2×3×1
         assert_eq!(matrix.total_runs(), 6);
+    }
+
+    #[test]
+    fn expand_skips_cells_above_the_solver_fleet_cap() {
+        let matrix = ExperimentMatrix {
+            solvers: vec!["pibt".into(), "token_passing".into()],
+            topologies: vec!["warehouse_dual_dock".into()],
+            scenarios: vec![None],
+            schedulers: vec!["closest".into()],
+            agent_counts: vec![40, 120],
+            seeds: vec![1],
+            tick_count: 100,
+            rhcr_overrides: vec![None],
+        };
+        let configs = matrix.expand();
+        let cells: Vec<(&str, usize)> =
+            configs.iter().map(|c| (c.solver_name.as_str(), c.num_agents)).collect();
+        assert_eq!(cells, vec![("pibt", 40), ("pibt", 120), ("token_passing", 40)]);
+        assert_eq!(matrix.total_runs(), 3);
     }
 
     #[test]

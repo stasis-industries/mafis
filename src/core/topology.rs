@@ -95,24 +95,19 @@ impl ActiveTopology {
 
     /// Look up a topology by name from a pre-loaded registry.
     ///
-    /// Falls back to the first available topology if `name` is not found.
-    /// Panics if the registry is empty — this is a configuration error.
+    /// Panics on an unknown name or unparsable entry: silently substituting
+    /// another map would run (and label) an experiment on the wrong topology.
     pub fn from_registry(name: &str, registry: &TopologyRegistry) -> Self {
-        if let Some(entry) = registry.find(name) {
-            if let Some(at) = Self::from_entry(entry) {
-                return at;
-            }
-        }
-        // Fallback: first available topology
-        if let Some(entry) = registry.entries.first() {
-            if let Some(at) = Self::from_entry(entry) {
-                return at;
-            }
-        }
-        panic!(
-            "No topologies found in registry. \
-             Add at least one JSON topology file and run `sh topologies/build-manifest.sh`."
-        );
+        let Some(entry) = registry.find(name) else {
+            let known: Vec<&str> = registry.entries.iter().map(|e| e.id.as_str()).collect();
+            panic!(
+                "Unknown topology '{name}'. Known: [{}]. Add a JSON file to topologies/ \
+                 and run `sh topologies/build-manifest.sh`.",
+                known.join(", ")
+            );
+        };
+        Self::from_entry(entry)
+            .unwrap_or_else(|| panic!("Topology '{name}' failed to parse or validate."))
     }
 
     /// Load a topology by name from the `topologies/` directory.
@@ -587,10 +582,9 @@ mod tests {
     }
 
     #[test]
-    fn active_topology_from_unknown_falls_back() {
-        let at = ActiveTopology::from_name("nonexistent");
-        // Should fall back to first available topology
-        assert!(!at.name().is_empty());
+    #[should_panic(expected = "Unknown topology 'nonexistent'")]
+    fn active_topology_from_unknown_is_an_error() {
+        ActiveTopology::from_name("nonexistent");
     }
 
     // ── Connectivity validation tests ───────────────────────────────

@@ -610,9 +610,10 @@ mod tests {
     fn experiment_counts() {
         let experiments = core_experiment_suite();
         let total: usize = experiments.iter().map(|(_, m)| m.total_runs()).sum();
-        // E1: 3 solvers × 6 scenarios × 3 counts × 30 seeds × 2 topos = 3,240
+        // E1: 3 solvers × 6 scenarios × 3 counts × 30 seeds × 2 topos = 3,240,
+        //     minus Token Passing at DD n=120 (above its 100-agent cap): 180 → 3,060
         // E2: 3 solvers × 6 scenarios × 2 schedulers × 30 seeds = 1,080
-        assert_eq!(total, 4320);
+        assert_eq!(total, 4140);
     }
 
     #[test]
