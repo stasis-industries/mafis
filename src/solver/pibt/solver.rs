@@ -13,6 +13,7 @@ use smallvec::smallvec;
 use crate::core::action::Action;
 use crate::core::grid::GridMap;
 use crate::core::seed::SeededRng;
+use crate::core::task::TaskLeg;
 
 use crate::solver::lifelong::{
     ActiveSolver, AgentPlan, AgentState, LifelongSolver, SolverContext, StepResult,
@@ -33,6 +34,20 @@ pub struct PibtLifelongSolver {
     positions_buf: Vec<IVec2>,
     goals_buf: Vec<IVec2>,
     has_task_buf: Vec<bool>,
+    ids_buf: Vec<usize>,
+}
+
+/// MAFIS legs during which the reference agent holds a task: from pickup
+/// arrival (Loading) until delivery arrival.
+fn carries_task(leg: &TaskLeg) -> bool {
+    matches!(
+        leg,
+        TaskLeg::Loading(_)
+            | TaskLeg::TravelToQueue { .. }
+            | TaskLeg::Queuing { .. }
+            | TaskLeg::TravelLoaded { .. }
+            | TaskLeg::Unloading { .. }
+    )
 }
 
 impl PibtLifelongSolver {
@@ -44,6 +59,7 @@ impl PibtLifelongSolver {
             positions_buf: Vec::new(),
             goals_buf: Vec::new(),
             has_task_buf: Vec::new(),
+            ids_buf: Vec::new(),
         }
     }
 }
@@ -82,11 +98,10 @@ impl LifelongSolver for PibtLifelongSolver {
         distance_cache: &mut DistanceMapCache,
         rng: &mut SeededRng,
     ) -> StepResult<'a> {
-        let _ = rng; // PIBT is deterministic given priorities
-
         // Derive shuffle seed from tick so tie-breaking is deterministic
         // after rewind (survives solver.reset() which clears the counter).
         self.core.set_shuffle_seed(ctx.tick);
+        self.core.set_tie_salt(rng.seed());
 
         if agents.is_empty() {
             self.plan_buffer.clear();
@@ -105,22 +120,21 @@ impl LifelongSolver for PibtLifelongSolver {
         self.goals_buf.clear();
         self.goals_buf.extend(agents.iter().map(|a| a.goal.unwrap_or(a.pos)));
 
-        // Task-aware priorities: agents actively moving toward a goal get
-        // scheduling priority.  Agents where goal == pos (Idle, or Loading at
-        // pickup) are forced to Wait and excluded from PIBT planning so they
-        // don't participate in priority inheritance.
+        // Priority class = "agent carries a task" (reference `a->task != nullptr`,
+        // pibt_mapd.cpp:17): set on pickup arrival, cleared on delivery. Every
+        // agent takes part in PIBT, so agents waiting at their goal (including
+        // Loading) can be pushed aside, as in the reference.
         self.has_task_buf.clear();
-        self.has_task_buf.extend(agents.iter().map(|a| {
-            let goal = a.goal.unwrap_or(a.pos);
-            // Only agents that need to *move* somewhere have a task for PIBT
-            goal != a.pos
-        }));
+        self.has_task_buf.extend(agents.iter().map(|a| carries_task(&a.task_leg)));
+        self.ids_buf.clear();
+        self.ids_buf.extend(agents.iter().map(|a| a.index));
 
         let actions = self.core.one_step_with_tasks(
             &self.positions_buf,
             &self.goals_buf,
             ctx.grid,
             &dist_maps,
+            &self.ids_buf,
             &self.has_task_buf,
         );
 
@@ -480,6 +494,110 @@ mod tests {
                     goals[i] = walkable[rng.random_range(0..walkable.len())];
                 }
             }
+        }
+    }
+
+    // ── Reference priority semantics (pibt_mapd.cpp) ─────────────────
+
+    fn straight_dist_maps(
+        grid: &GridMap,
+        pairs: &[(IVec2, IVec2)],
+    ) -> Vec<crate::solver::shared::heuristics::DistanceMap> {
+        compute_distance_maps(grid, pairs)
+    }
+
+    #[test]
+    fn pibt_elapsed_starts_at_zero_not_distance() {
+        let grid = GridMap::new(10, 1);
+        let pairs = [(IVec2::new(0, 0), IVec2::new(9, 0))];
+        let maps = straight_dist_maps(&grid, &pairs);
+        let refs: Vec<&DistanceMap> = maps.iter().collect();
+        let mut core = PibtCore::new();
+        core.one_step_with_tasks(&[pairs[0].0], &[pairs[0].1], &grid, &refs, &[7], &[]);
+        // Reference: elapsed starts at 0 and gains 1 per step off-goal.
+        assert_eq!(core.priorities()[7], 1.0);
+    }
+
+    #[test]
+    fn pibt_priority_survives_other_agent_death() {
+        // Three agents in separate rows, never interacting.
+        let grid = GridMap::new(10, 3);
+        let mut pos = [IVec2::new(0, 0), IVec2::new(0, 1), IVec2::new(0, 2)];
+        let goals = [IVec2::new(9, 0), IVec2::new(9, 1), IVec2::new(9, 2)];
+        let mut core = PibtCore::new();
+        for _ in 0..3 {
+            let pairs: Vec<_> = pos.iter().zip(goals.iter()).map(|(&p, &g)| (p, g)).collect();
+            let maps = straight_dist_maps(&grid, &pairs);
+            let refs: Vec<&DistanceMap> = maps.iter().collect();
+            let acts =
+                core.one_step_with_tasks(&pos, &goals, &grid, &refs, &[0, 1, 2], &[]).to_vec();
+            for (p, a) in pos.iter_mut().zip(acts) {
+                *p = a.apply(*p);
+            }
+        }
+        assert_eq!(core.priorities()[2], 3.0);
+        // Agent 1 dies: the others keep their elapsed counters.
+        let (p2, g2) = ([pos[0], pos[2]], [goals[0], goals[2]]);
+        let pairs: Vec<_> = p2.iter().zip(g2.iter()).map(|(&p, &g)| (p, g)).collect();
+        let maps = straight_dist_maps(&grid, &pairs);
+        let refs: Vec<&DistanceMap> = maps.iter().collect();
+        core.one_step_with_tasks(&p2, &g2, &grid, &refs, &[0, 2], &[]);
+        assert_eq!(core.priorities()[0], 4.0);
+        assert_eq!(core.priorities()[2], 4.0);
+    }
+
+    /// Two agents both want (1,1). Returns who got it.
+    fn contest(leg_a: TaskLeg, goal_a: IVec2, leg_b: TaskLeg, goal_b: IVec2, seed: u64) -> usize {
+        use crate::core::topology::ZoneMap;
+        let grid = GridMap::new(5, 3);
+        let zones = ZoneMap::default();
+        let agents = vec![
+            AgentState {
+                index: 0,
+                pos: IVec2::new(0, 1),
+                goal: Some(goal_a),
+                has_plan: false,
+                task_leg: leg_a,
+            },
+            AgentState {
+                index: 1,
+                pos: IVec2::new(1, 0),
+                goal: Some(goal_b),
+                has_plan: false,
+                task_leg: leg_b,
+            },
+        ];
+        let ctx = SolverContext { grid: &grid, zones: &zones, tick: 0, num_agents: 2 };
+        let mut solver = PibtLifelongSolver::new();
+        let mut cache = DistanceMapCache::default();
+        let mut rng = SeededRng::new(seed);
+        let StepResult::Replan(plans) = solver.step(&ctx, &agents, &mut cache, &mut rng) else {
+            panic!("PIBT always replans");
+        };
+        let target = IVec2::new(1, 1);
+        plans
+            .iter()
+            .position(|(i, a)| a[0].apply(agents[*i].pos) == target)
+            .expect("someone takes (1,1)")
+    }
+
+    #[test]
+    fn pibt_carrying_agent_outranks_free_agent() {
+        // Agent 0 travels empty to a far goal; agent 1 carries cargo to a near one.
+        let far = IVec2::new(4, 1);
+        let near = IVec2::new(1, 2);
+        let loaded = TaskLeg::TravelLoaded { from: IVec2::ZERO, to: near };
+        assert_eq!(contest(TaskLeg::TravelEmpty(far), far, loaded, near, 42), 1);
+    }
+
+    #[test]
+    fn pibt_equal_priority_broken_by_seeded_tie_breaker() {
+        use crate::solver::shared::pibt_core::tie_breaker;
+        let (ga, gb) = (IVec2::new(2, 1), IVec2::new(1, 2));
+        for seed in [1u64, 2, 3, 42, 99] {
+            let want = if tie_breaker(seed, 0) > tie_breaker(seed, 1) { 0 } else { 1 };
+            let got = contest(TaskLeg::TravelEmpty(ga), ga, TaskLeg::TravelEmpty(gb), gb, seed);
+            assert_eq!(got, want, "seed {seed}");
         }
     }
 

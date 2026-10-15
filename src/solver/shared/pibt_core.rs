@@ -88,8 +88,12 @@ impl OccGrid {
 // ---------------------------------------------------------------------------
 
 pub struct PibtCore {
-    /// Priority per agent — accumulated across steps.
+    /// Reference `elapsed` (pibt_mapd.cpp:137) indexed by agent id, not by
+    /// slot, so an agent keeps its priority when other agents die.
     priorities: Vec<f32>,
+    /// Salt for the per-agent tie-breaker (see [`tie_breaker`]).
+    tie_salt: u64,
+    ids_buf: Vec<usize>,
     /// Reusable scratch buffers (avoid per-step allocation).
     next_pos_buf: Vec<IVec2>,
     decided_buf: Vec<bool>,
@@ -112,6 +116,8 @@ impl PibtCore {
     pub fn new() -> Self {
         Self {
             priorities: Vec::new(),
+            tie_salt: 0,
+            ids_buf: Vec::new(),
             next_pos_buf: Vec::new(),
             decided_buf: Vec::new(),
             current_occ: OccGrid::new(),
@@ -134,13 +140,17 @@ impl PibtCore {
         self.shuffle_seed = tick;
     }
 
+    /// Salt the per-agent tie-breakers (callers pass the solver RNG seed).
+    pub fn set_tie_salt(&mut self, salt: u64) {
+        self.tie_salt = salt;
+    }
+
     /// Get a copy of the current priorities for snapshot saving.
     pub fn priorities(&self) -> &[f32] {
         &self.priorities
     }
 
-    /// Restore priorities from a snapshot. The length must match the agent
-    /// count on the next step, or they'll be reinitialized (harmless fallback).
+    /// Restore priorities (indexed by agent id) from a snapshot.
     pub fn set_priorities(&mut self, priorities: &[f32]) {
         self.priorities.clear();
         self.priorities.extend_from_slice(priorities);
@@ -157,23 +167,30 @@ impl PibtCore {
         grid: &GridMap,
         dist_maps: &[&DistanceMap],
     ) -> &[Action] {
-        self.one_step_impl(positions, goals, grid, dist_maps, &[], &[], None)
+        let mut ids = std::mem::take(&mut self.ids_buf);
+        ids.clear();
+        ids.extend(0..positions.len());
+        self.one_step_impl(positions, goals, grid, dist_maps, &ids, &[], &[], None);
+        self.ids_buf = ids;
+        &self.actions_buf
     }
 
     /// Run one PIBT step with task-awareness (reference PIBT_MAPD behavior).
     ///
-    /// `has_task[i]` = true means agent i has an active task and should be
-    /// prioritized over idle agents. Matches the reference C++ PIBT_MAPD
-    /// where assigned agents outprioritize free agents.
+    /// `ids[i]` is agent i's stable id (priorities are keyed by it).
+    /// `has_task[i]` = true means agent i carries a task and outprioritizes
+    /// free agents, as in the reference C++ PIBT_MAPD. Empty = no classes.
     pub fn one_step_with_tasks(
         &mut self,
         positions: &[IVec2],
         goals: &[IVec2],
         grid: &GridMap,
         dist_maps: &[&DistanceMap],
+        ids: &[usize],
         has_task: &[bool],
     ) -> &[Action] {
-        self.one_step_impl(positions, goals, grid, dist_maps, &[], has_task, None)
+        self.one_step_impl(positions, goals, grid, dist_maps, ids, &[], has_task, None);
+        &self.actions_buf
     }
 
     /// Run one PIBT step with pre-decided constraints.
@@ -187,32 +204,35 @@ impl PibtCore {
         dist_maps: &[&DistanceMap],
         constraints: &[(usize, IVec2)],
     ) -> &[Action] {
-        self.one_step_impl(positions, goals, grid, dist_maps, constraints, &[], None)
+        let mut ids = std::mem::take(&mut self.ids_buf);
+        ids.clear();
+        ids.extend(0..positions.len());
+        self.one_step_impl(positions, goals, grid, dist_maps, &ids, constraints, &[], None);
+        self.ids_buf = ids;
+        &self.actions_buf
     }
 
     /// Internal: full PIBT step with optional constraints, task-awareness, and bias.
-    /// Returns a slice borrowing from self.actions_buf (zero allocation after first call).
+    /// Writes one action per agent into `self.actions_buf`.
+    #[allow(clippy::too_many_arguments)]
     fn one_step_impl(
         &mut self,
         positions: &[IVec2],
         goals: &[IVec2],
         grid: &GridMap,
         dist_maps: &[&DistanceMap],
+        ids: &[usize],
         constraints: &[(usize, IVec2)],
         has_task: &[bool],
         bias_fn: Option<&dyn Fn(IVec2, usize) -> f64>,
-    ) -> &[Action] {
+    ) {
         let n = positions.len();
 
-        // Initialize or reinitialize priorities.
-        // Must clear before resize: resize(shrink) preserves tail values, so a dead
-        // agent's priority would carry over to the agent now occupying that local index.
-        if self.priorities.len() != n {
-            self.priorities.clear();
-            self.priorities.resize(n, 0.0);
-            for i in 0..n {
-                self.priorities[i] = dist_maps[i].get(positions[i]) as f32;
-            }
+        // Reference initial `elapsed` is 0 (pibt_mapd.cpp:32); new ids start there.
+        if let Some(&max_id) = ids.iter().max()
+            && self.priorities.len() <= max_id
+        {
+            self.priorities.resize(max_id + 1, 0.0);
         }
 
         // Prepare reusable buffers
@@ -243,9 +263,9 @@ impl PibtCore {
         // via priority inheritance. They naturally prefer staying at their goal
         // (BFS distance = 0) but are movable when blocking traffic.
 
-        // Sort UNCONSTRAINED agents by priority (descending).
-        // Task-aware: agents with active tasks sort before idle agents
-        // (reference PIBT_MAPD behavior — assigned > free).
+        // Sort UNCONSTRAINED agents by the reference comparator
+        // (pibt_mapd.cpp:16-23): carrying agents first, then elapsed DESC,
+        // then random tie-breaker DESC.
         self.order_buf.clear();
         for i in 0..n {
             if !self.decided_buf[i] {
@@ -253,18 +273,13 @@ impl PibtCore {
             }
         }
         let priorities = &self.priorities;
-        let task_aware = !has_task.is_empty();
+        let salt = self.tie_salt;
         self.order_buf.sort_unstable_by(|&a, &b| {
-            if task_aware {
-                let ta = has_task.get(a).copied().unwrap_or(false);
-                let tb = has_task.get(b).copied().unwrap_or(false);
-                // Tasked agents first (true > false when reversed)
-                tb.cmp(&ta).then_with(|| {
-                    priorities[b].partial_cmp(&priorities[a]).unwrap_or(std::cmp::Ordering::Equal)
-                })
-            } else {
-                priorities[b].partial_cmp(&priorities[a]).unwrap_or(std::cmp::Ordering::Equal)
-            }
+            let ta = has_task.get(a).copied().unwrap_or(false);
+            let tb = has_task.get(b).copied().unwrap_or(false);
+            tb.cmp(&ta)
+                .then_with(|| priorities[ids[b]].total_cmp(&priorities[ids[a]]))
+                .then_with(|| tie_breaker(salt, ids[b]).total_cmp(&tie_breaker(salt, ids[a])))
         });
 
         // Clone order to avoid borrow conflict with &mut self fields
@@ -283,7 +298,6 @@ impl PibtCore {
                 goals,
                 grid,
                 dist_maps,
-                &self.priorities,
                 0,
                 &self.current_occ,
                 &mut self.next_occ,
@@ -306,18 +320,27 @@ impl PibtCore {
         // idle agents with accumulated priority block corridors.
         for (i, goal) in goals.iter().enumerate().take(n) {
             if self.next_pos_buf[i] == *goal {
-                self.priorities[i] = 0.0;
+                self.priorities[ids[i]] = 0.0;
             } else {
-                self.priorities[i] += 1.0;
+                self.priorities[ids[i]] += 1.0;
             }
         }
 
         // Advance shuffle seed for next step
         self.shuffle_seed = self.shuffle_seed.wrapping_add(1);
-
-        // Return slice borrowing internal buffer — zero allocation
-        &self.actions_buf
     }
+}
+
+/// Per-agent tie-breaker in [0, 1): the reference draws `getRandomFloat(0, 1)`
+/// once per agent at init (pibt_mapd.cpp:33). A seeded hash gives the same
+/// distribution without consuming RNG draws and survives rewind/reset.
+pub(crate) fn tie_breaker(salt: u64, id: usize) -> f32 {
+    // splitmix64 finalizer
+    let mut z = salt ^ (id as u64).wrapping_add(0x9E37_79B9_7F4A_7C15);
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^= z >> 31;
+    (z >> 40) as f32 / (1u64 << 24) as f32
 }
 
 // ---------------------------------------------------------------------------
@@ -385,7 +408,6 @@ pub fn pibt_one_step_constrained(
             goals,
             grid,
             dist_maps,
-            priorities,
             0,
             &current_occ,
             &mut next_occ,
@@ -410,7 +432,6 @@ fn pibt_assign_grid(
     goals: &[IVec2],
     grid: &GridMap,
     dist_maps: &[&DistanceMap],
-    priorities: &[f32],
     depth: usize,
     current_occ: &OccGrid,
     next_occ: &mut OccGrid,
@@ -507,7 +528,6 @@ fn pibt_assign_grid(
                 goals,
                 grid,
                 dist_maps,
-                priorities,
                 depth + 1,
                 current_occ,
                 next_occ,
