@@ -5,6 +5,14 @@ Welch's t-test between every pair of solvers using per-seed faulted-run
 values. Collect all p-values across the family, then apply BH FDR at
 q=0.05 to flag the comparisons that survive multiple-comparison correction.
 
+Runs whose baseline gridlocked (`baseline_gridlocked`) are excluded: their
+differential metrics measure the deadlock, not the fault. Rapidity is never
+dropped silently: degraded runs are split into recovered / right-censored,
+the recovered fraction is compared with Fisher's exact test
+(`rapidity_recovered_fraction`) and Rapidity itself only among recovered runs
+(`rapidity_recovered`). Data without the `rapidity_recovered` column cannot
+tell censoring from no degradation, so Rapidity is skipped for it.
+
 Output: results/fdr_adjusted_pvalues.csv
 """
 from __future__ import annotations
@@ -93,8 +101,37 @@ def load_matrix(label: str, path: Path) -> pd.DataFrame | None:
         # CSV uses lowercase true/false strings or bools
         mask = df["is_baseline"].astype(str).str.lower() == "false"
         df = df.loc[mask].copy()
+    if "baseline_gridlocked" in df.columns:
+        gridlocked = df["baseline_gridlocked"].astype(str).str.lower() == "true"
+        print(f"[info] {label}: excluding {int(gridlocked.sum())} gridlocked-baseline runs")
+        df = df.loc[~gridlocked].copy()
+    else:
+        print(f"[warn] {label}: no baseline_gridlocked column, cannot exclude deadlocked baselines")
     df["__matrix__"] = label
     return df
+
+
+def rapidity_tests(sub: pd.DataFrame, sa: str, sb: str) -> list[tuple[str, np.ndarray, np.ndarray, float, float]]:
+    """(metric, xa, xb, stat, p) for the recovered fraction and recovered-only Rapidity."""
+    rec = sub["rapidity_recovered"].astype(str).str.lower()
+    out = []
+    counts = []
+    for solver in (sa, sb):
+        is_solver = sub["solver"] == solver
+        counts.append(
+            (int((is_solver & (rec == "true")).sum()), int((is_solver & (rec == "false")).sum()))
+        )
+    if min(sum(counts[0]), sum(counts[1])) >= 5:
+        odds, p = stats.fisher_exact([list(counts[0]), list(counts[1])])
+        xa = np.array([1.0] * counts[0][0] + [0.0] * counts[0][1])
+        xb = np.array([1.0] * counts[1][0] + [0.0] * counts[1][1])
+        out.append(("rapidity_recovered_fraction", xa, xb, float(odds), float(p)))
+    xa = sub.loc[(sub["solver"] == sa) & (rec == "true"), "rapidity"].to_numpy(dtype=float)
+    xb = sub.loc[(sub["solver"] == sb) & (rec == "true"), "rapidity"].to_numpy(dtype=float)
+    if len(xa) >= 5 and len(xb) >= 5 and not (xa.var(ddof=1) == 0 and xb.var(ddof=1) == 0):
+        t, p = stats.ttest_ind(xa, xb, equal_var=False)
+        out.append(("rapidity_recovered", xa, xb, float(t), float(p)))
+    return out
 
 
 def run_pairwise_tests(df: pd.DataFrame, matrix: str) -> list[ComparisonRow]:
@@ -108,10 +145,38 @@ def run_pairwise_tests(df: pd.DataFrame, matrix: str) -> list[ComparisonRow]:
         for metric in METRICS:
             if metric not in sub.columns:
                 continue
+            if metric == "rapidity":
+                if "rapidity_recovered" not in sub.columns:
+                    continue
+                for sa, sb in PAIRS:
+                    for name, xa, xb, stat, p in rapidity_tests(sub, sa, sb):
+                        if not math.isfinite(p):
+                            continue
+                        rows.append(
+                            ComparisonRow(
+                                matrix=matrix,
+                                topology=str(kdict.get("topology", "")),
+                                scenario=str(kdict.get("scenario", "")),
+                                scheduler=str(kdict.get("scheduler", "")),
+                                num_agents=int(kdict.get("num_agents", 0) or 0),
+                                metric=name,
+                                solver_a=sa,
+                                solver_b=sb,
+                                n_a=int(len(xa)),
+                                n_b=int(len(xb)),
+                                mean_a=float(xa.mean()),
+                                mean_b=float(xb.mean()),
+                                mean_diff=float(xa.mean() - xb.mean()),
+                                t_stat=stat,
+                                p_raw=p,
+                                cliffs_d=float(cliffs_delta(xa, xb)),
+                            )
+                        )
+                continue
             for sa, sb in PAIRS:
                 xa = sub.loc[sub["solver"] == sa, metric].dropna()
                 xb = sub.loc[sub["solver"] == sb, metric].dropna()
-                # Rapidity is NaN-heavy for permanent faults — skip when sample too small
+                # NaN = metric undefined for that run (e.g. no fault event); n_a/n_b record it
                 if len(xa) < 5 or len(xb) < 5:
                     continue
                 # Skip degenerate constant samples (t-test undefined)
