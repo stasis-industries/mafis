@@ -1471,7 +1471,6 @@ mod tests {
             intermittent_mtbf_ticks: 5,
             intermittent_recovery_ticks: 2,
             intermittent_start_tick: 1,
-            ..Default::default()
         };
         let schedule = FaultSchedule {
             events: vec![
