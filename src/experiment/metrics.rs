@@ -42,12 +42,12 @@ pub struct RunMetrics {
     pub mtbf: Option<f64>,
     pub recovery_tick: Option<u64>,
 
-    // ── Cascade (ADG-based, solver-coupled) ────────────────────────
-    /// Average cascade spread per fault event (agents affected via ADG BFS).
-    /// Solver-coupled: depends on per-solver planning lookahead.
+    // ── Cascade (ADG on the fault-instant snapshot, common lookahead) ──
+    /// Average agents involved per fault event: the agents faulted at that
+    /// instant plus those reached by multi-source ADG BFS.
     pub cascade_spread_avg: f64,
-    /// Average cascade depth per fault event (max BFS depth).
-    /// Solver-coupled: depends on per-solver planning lookahead.
+    /// Average cascade depth per fault event (max BFS depth from the nearest
+    /// faulted agent). Lookahead is `ADG_LOOKAHEAD` for every solver.
     pub cascade_depth_avg: f64,
 
     // ── Structural cascade (solver-independent) ────────────────────
@@ -78,8 +78,9 @@ pub struct RunMetrics {
     /// recovers is right-censored at `T − t_f` (see `rapidity_recovered`).
     /// NaN when there is no fault or `R_w` never fell below the threshold.
     pub rapidity: f64,
-    /// Attack Rate — fraction of initial fleet ever materially affected by
-    /// any fault cascade. Wallinga & Lipsitch 2007. Range [0, 1].
+    /// Secondary Attack Rate — among agents never directly faulted, the
+    /// fraction reached by any fault's cascade (ADG BFS on the fault-instant
+    /// snapshot). Range [0, 1]; NaN when every agent was directly faulted.
     pub attack_rate: f64,
 
     // ── Fleet utilization ─────────────────────────────────────────
@@ -113,6 +114,11 @@ pub struct RunMetrics {
     /// The fault-free baseline stalled (see `baseline_gridlocked`). Metrics
     /// against it measure the deadlock, not the fault; summaries exclude it.
     pub baseline_gridlocked: bool,
+    /// Pre-rebuild Attack Rate: fraction of the initial fleet directly faulted
+    /// or reached by a cascade. Kept for comparability with older runs; on
+    /// permanent faults it largely echoes the kill fraction (`attack_rate` is
+    /// the secondary rate that excludes directly faulted agents).
+    pub attack_rate_total: f64,
 }
 
 /// Compute metrics for a baseline run (no faults, self-comparison).
@@ -184,6 +190,7 @@ pub fn compute_baseline_self_metrics(
         twte_undefined_ticks: 0,
         rapidity_recovered: None,
         baseline_gridlocked: baseline_gridlocked(&analysis.throughput_series),
+        attack_rate_total: 0.0,
     }
 }
 
@@ -383,6 +390,7 @@ pub fn compute_run_metrics(
         twte_undefined_ticks,
         rapidity_recovered,
         baseline_gridlocked: baseline_gridlocked(&baseline.throughput_series),
+        attack_rate_total: 0.0,
     }
 }
 

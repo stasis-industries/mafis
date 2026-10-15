@@ -95,7 +95,14 @@ pub const MAX_SURVIVAL_ENTRIES: usize = 1000;
 pub const MAX_FAULT_EVENT_HISTORY: usize = 1000;
 
 /// ADG (Action Dependency Graph) lookahead steps per agent.
-pub const ADG_LOOKAHEAD: usize = 3;
+///
+/// Set to the shortest horizon every solver exposes: PIBT plans one step per
+/// tick, while RHCR exposes its window and Token Passing its full path. A
+/// longer lookahead would give RHCR/TP deeper dependency chains purely
+/// because they plan further, so cascade depth would measure planning
+/// horizon instead of fault propagation. With 1 step the ADG captures the
+/// immediate blocking chain (who cannot make their next move) for any solver.
+pub const ADG_LOOKAHEAD: usize = 1;
 
 /// ADG throttle tiers: tick stride per agent-count bracket.
 /// Below TIER_SMALL → every tick. Between tiers → stride N. Above last tier → XLARGE stride.

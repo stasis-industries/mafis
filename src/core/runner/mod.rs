@@ -110,6 +110,9 @@ pub struct SimulationRunner {
     /// Active spatial zone strip bounds (x_min, x_max) during a zone outage.
     /// Set when ZoneLatency fires, cleared when all latency expires.
     pub zone_strip: Option<(i32, i32)>,
+    /// One snapshot per group of simultaneous faults this tick, captured
+    /// before victims are removed or plans cleared (cascade analysis input).
+    pub fault_snapshots: Vec<FaultSnapshot>,
 }
 
 impl SimulationRunner {
@@ -166,6 +169,7 @@ impl SimulationRunner {
             faults_buf: Vec::new(),
             collision_violations: 0,
             zone_strip: None,
+            fault_snapshots: Vec::new(),
         }
     }
 
@@ -350,6 +354,7 @@ impl SimulationRunner {
         // Reuse fault_events buffer (clear, not deallocate)
         let mut fault_events = std::mem::take(&mut self.fault_events_buf);
         fault_events.clear();
+        self.fault_snapshots.clear();
 
         // Reset per-tick completion counter
         self.tick_completions = 0;
@@ -381,6 +386,9 @@ impl SimulationRunner {
         // Phase 7: Fault pipeline (heat + detect)
         self.run_fault_pipeline(&mut fault_events);
 
+        // Burst/zone groups that hit nobody leave empty snapshots behind.
+        self.fault_snapshots.retain(|s| !s.sources.is_empty());
+
         // Phase 8: Replan agents whose paths cross new obstacles
         if !fault_events.is_empty() {
             self.replan_after_fault();
@@ -405,6 +413,7 @@ impl SimulationRunner {
             match cmd {
                 SimCommand::KillAgent { index, source } => {
                     if index < self.agents.len() && self.agents[index].alive {
+                        push_fault_snapshot(&mut self.fault_snapshots, &self.agents, vec![index]);
                         let pos = self.agents[index].pos;
                         let invalidated = count_paths_through_cell(&self.agents, pos, index);
                         self.agents[index].alive = false;
@@ -427,6 +436,11 @@ impl SimulationRunner {
                 }
                 SimCommand::InjectLatency { agent_index, duration, source } => {
                     if agent_index < self.agents.len() && self.agents[agent_index].alive {
+                        push_fault_snapshot(
+                            &mut self.fault_snapshots,
+                            &self.agents,
+                            vec![agent_index],
+                        );
                         self.agents[agent_index].latency_remaining = duration;
                         let pos = self.agents[agent_index].pos;
                         fault_events.push(FaultRecord {
@@ -471,6 +485,8 @@ impl SimulationRunner {
                     self.available_agents_buf.clear();
                     self.available_agents_buf.extend((0..n).filter(|&i| self.agents[i].alive));
                     let kill_count = count.min(self.available_agents_buf.len());
+                    let snapshot_idx =
+                        push_fault_snapshot(&mut self.fault_snapshots, &self.agents, Vec::new());
 
                     for _ in 0..kill_count {
                         if self.available_agents_buf.is_empty() {
@@ -478,6 +494,7 @@ impl SimulationRunner {
                         }
                         let idx = self.rng.rng.random_range(0..self.available_agents_buf.len());
                         let agent_idx = self.available_agents_buf.swap_remove(idx);
+                        self.fault_snapshots[snapshot_idx].sources.push(agent_idx);
                         let pos = self.agents[agent_idx].pos;
                         let invalidated = count_paths_through_cell(&self.agents, pos, agent_idx);
                         self.agents[agent_idx].alive = false;
@@ -504,6 +521,8 @@ impl SimulationRunner {
                     let x_max = if strip_idx == 3 { grid_width } else { x_min + strip_width };
 
                     self.zone_strip = Some((x_min, x_max));
+                    let snapshot_idx =
+                        push_fault_snapshot(&mut self.fault_snapshots, &self.agents, Vec::new());
 
                     for i in 0..n {
                         if !self.agents[i].alive {
@@ -511,6 +530,7 @@ impl SimulationRunner {
                         }
                         let x = self.agents[i].pos.x;
                         if x >= x_min && x < x_max {
+                            self.fault_snapshots[snapshot_idx].sources.push(i);
                             self.agents[i].latency_remaining = duration;
                             fault_events.push(FaultRecord {
                                 agent_index: i,
@@ -1006,6 +1026,10 @@ impl SimulationRunner {
 
         // Process faults by index to avoid borrow conflict with count_paths_through_cell.
         let fault_count = self.faults_buf.len();
+        if fault_count > 0 {
+            let sources = self.faults_buf.iter().map(|&(i, _)| i).collect();
+            push_fault_snapshot(&mut self.fault_snapshots, &self.agents, sources);
+        }
         for fi in 0..fault_count {
             let (i, ft) = self.faults_buf[fi];
             let pos = self.agents[i].pos;
@@ -1062,6 +1086,7 @@ impl SimulationRunner {
         }
 
         // Phase 2: fire faults and resample next interval.
+        let mut fired = Vec::new();
         for i in 0..n {
             if !self.agents[i].alive {
                 continue;
@@ -1073,6 +1098,7 @@ impl SimulationRunner {
                 continue;
             }
             // Inject latency -- temporary unavailability, not death.
+            fired.push(i);
             self.agents[i].latency_remaining = recovery;
             // Resample next fault (fault_rng stream). Capped at 10× mtbf.
             let u = self.fault_rng.rng.random_range(f64::EPSILON..1.0_f64);
@@ -1089,6 +1115,11 @@ impl SimulationRunner {
                 position: pos,
                 paths_invalidated: 0,
             });
+        }
+        // Latency changed neither positions nor plans, so capturing after the
+        // loop still records the state at the fault instant.
+        if !fired.is_empty() {
+            push_fault_snapshot(&mut self.fault_snapshots, &self.agents, fired);
         }
     }
 
@@ -1180,6 +1211,20 @@ impl SimulationRunner {
             heat_avg,
         }
     }
+}
+
+/// Capture the pre-fault state for cascade analysis and return its index.
+/// Call before any victim is removed or any plan cleared. Takes fields, not
+/// `&mut self`, so it can run inside loops that borrow other runner buffers.
+fn push_fault_snapshot(
+    snapshots: &mut Vec<FaultSnapshot>,
+    agents: &[SimAgent],
+    sources: Vec<usize>,
+) -> usize {
+    let mut snapshot = FaultSnapshot::capture(agents, crate::constants::ADG_LOOKAHEAD);
+    snapshot.sources = sources;
+    snapshots.push(snapshot);
+    snapshots.len() - 1
 }
 
 // ---------------------------------------------------------------------------
@@ -1367,6 +1412,110 @@ mod tests {
         assert!(runner.grid().is_obstacle(IVec2::new(1, 1)));
         assert_eq!(result.fault_events.len(), 1);
         assert_eq!(result.dead_count, 1);
+    }
+
+    /// Head of an East-bound queue at x=3 with followers at x=2,1,0.
+    fn queued_corridor_agents() -> Vec<SimAgent> {
+        use crate::core::action::Direction;
+        (0..4)
+            .map(|k| {
+                let mut a = SimAgent::new(IVec2::new(3 - k, 0));
+                a.planned_path = VecDeque::from(vec![Action::Move(Direction::East)]);
+                a
+            })
+            .collect()
+    }
+
+    #[test]
+    fn kill_captures_snapshot_before_victim_is_removed() {
+        let mut runner = make_runner(queued_corridor_agents());
+        runner.enqueue_command(SimCommand::KillAgent { index: 0, source: FaultSource::Manual });
+        runner.tick(&RandomScheduler, &ClosestQueuePolicy);
+
+        assert_eq!(runner.fault_snapshots.len(), 1);
+        let snap = &runner.fault_snapshots[0];
+        assert_eq!(snap.sources, vec![0]);
+        // Victim still alive with its plan in the snapshot.
+        assert_eq!(snap.cells[0].as_slice(), &[IVec2::new(3, 0), IVec2::new(4, 0)]);
+        let out = crate::analysis::cascade::cascade_from_snapshot(snap, 200);
+        assert_eq!(out.max_depth, 3, "kill must cascade down the queue, not read 0");
+    }
+
+    #[test]
+    fn latency_captures_plans_in_force_at_fault_instant() {
+        let mut runner = make_runner(queued_corridor_agents());
+        runner.enqueue_command(SimCommand::InjectLatency {
+            agent_index: 0,
+            duration: 5,
+            source: FaultSource::Manual,
+        });
+        runner.tick(&RandomScheduler, &ClosestQueuePolicy);
+
+        assert_eq!(runner.fault_snapshots.len(), 1);
+        let out = crate::analysis::cascade::cascade_from_snapshot(&runner.fault_snapshots[0], 200);
+        assert_eq!(out.max_depth, 3);
+    }
+
+    #[test]
+    fn snapshot_sources_list_fault_records_in_order() {
+        // live_sim pairs fault records with snapshot groups by position, so
+        // every fault site must append its victims in record order.
+        let agents: Vec<SimAgent> =
+            (0..20).map(|i| SimAgent::new(IVec2::new(i % 8, i / 8))).collect();
+        let fault_config = FaultConfig {
+            enabled: true,
+            weibull_enabled: true,
+            weibull_beta: 2.0,
+            weibull_eta: 15.0,
+            intermittent_enabled: true,
+            intermittent_mtbf_ticks: 5,
+            intermittent_recovery_ticks: 2,
+            intermittent_start_tick: 1,
+        };
+        let schedule = FaultSchedule {
+            events: vec![
+                crate::fault::scenario::ScheduledEvent {
+                    tick: 3,
+                    action: ScheduledAction::KillRandomAgents(3),
+                    fired: false,
+                },
+                crate::fault::scenario::ScheduledEvent {
+                    tick: 4,
+                    action: ScheduledAction::ZoneLatency { duration: 3 },
+                    fired: false,
+                },
+            ],
+            initialized: true,
+        };
+        let mut runner = SimulationRunner::new(
+            test_grid(),
+            test_zones(),
+            agents,
+            test_solver(),
+            test_rng(),
+            fault_config,
+            schedule,
+        );
+        let mut total = 0;
+        for _ in 0..40 {
+            let result = runner.tick(&RandomScheduler, &ClosestQueuePolicy);
+            let from_records: Vec<usize> =
+                result.fault_events.iter().map(|f| f.agent_index).collect();
+            let from_snapshots: Vec<usize> =
+                runner.fault_snapshots.iter().flat_map(|s| s.sources.iter().copied()).collect();
+            assert_eq!(from_snapshots, from_records, "tick {}", runner.tick);
+            total += from_records.len();
+        }
+        assert!(total > 5, "scenario must actually fire faults ({total})");
+    }
+
+    #[test]
+    fn snapshots_cleared_each_tick() {
+        let mut runner = make_runner(queued_corridor_agents());
+        runner.enqueue_command(SimCommand::KillAgent { index: 0, source: FaultSource::Manual });
+        runner.tick(&RandomScheduler, &ClosestQueuePolicy);
+        runner.tick(&RandomScheduler, &ClosestQueuePolicy);
+        assert!(runner.fault_snapshots.is_empty());
     }
 
     #[test]

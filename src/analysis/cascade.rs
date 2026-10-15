@@ -3,12 +3,12 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::constants;
 use crate::core::grid::GridMap;
-use crate::core::runner::SimAgent;
+use crate::core::runner::{FaultSnapshot, SimAgent};
 use crate::core::state::SimulationConfig;
 use crate::fault::breakdown::FaultEvent;
 use crate::fault::config::{FaultSource, FaultType};
 
-use super::dependency::{ActionDependencyGraph, IndexedDependencyGraph};
+use super::dependency::{ActionDependencyGraph, IndexedDependencyGraph, build_adg_from_snapshot};
 
 /// Per-agent cascade record — counting only, no artificial delay numbers.
 #[derive(Component, Debug, Clone)]
@@ -59,8 +59,9 @@ impl CascadeState {
     }
 }
 
-/// On each tick, read FaultEvents. For each fault, BFS through the ADG
-/// and count affected agents + depth. No artificial delay numbers.
+/// On each tick, read FaultEvents and record each fault's cascade. Runner
+/// faults carry the cascade computed at the fault instant (same definition as
+/// the experiment runner); other faults BFS through the live ADG.
 /// Cascade depth is capped at `constants::MAX_CASCADE_DEPTH` to bound cost.
 pub fn propagate_cascade(
     mut commands: Commands,
@@ -71,6 +72,29 @@ pub fn propagate_cascade(
 ) {
     for event in fault_events.read() {
         let fault_origin = event.entity;
+
+        if let Some((event_max_depth, reached)) = &event.cascade {
+            for &(entity, depth) in reached {
+                let record =
+                    cascade.records.entry(entity).or_insert(DelayRecord { fault_origin, depth: 0 });
+                record.fault_origin = fault_origin;
+                record.depth = record.depth.max(depth);
+                commands.entity(entity).insert(DelayRecord { fault_origin, depth: record.depth });
+            }
+            cascade.max_depth = cascade.max_depth.max(*event_max_depth);
+            cascade.fault_count += 1;
+            cascade.fault_log.push(CascadeFaultEntry {
+                tick: sim_config.tick,
+                faulted_entity: event.entity,
+                fault_type: event.fault_type,
+                source: event.source,
+                position: event.position,
+                agents_affected: reached.len() as u32 + 1,
+                max_depth: *event_max_depth,
+            });
+            continue;
+        }
+
         let mut visited = HashSet::new();
         // BFS queue: (entity, depth) — no chain cloning needed
         let mut queue: VecDeque<(Entity, u32)> = VecDeque::new();
@@ -134,26 +158,30 @@ pub fn propagate_cascade(
 // Standalone cascade BFS — for experiment runner
 // ---------------------------------------------------------------------------
 
-/// Standalone cascade BFS for headless use.
-/// Returns (agents_affected, max_depth) for a given dead agent index.
-/// Mirrors the BFS logic of `propagate_cascade` but without ECS dependencies.
-pub fn cascade_bfs_standalone(
-    graph: &IndexedDependencyGraph,
-    dead_agent: usize,
-    max_depth: u32,
-) -> (u32, u32) {
-    let mut visited = HashSet::new();
-    let mut queue: VecDeque<(usize, u32)> = VecDeque::new();
-    visited.insert(dead_agent);
-    queue.push_back((dead_agent, 0));
+/// Cascade of one fault group: agents reached through the ADG (the faulted
+/// agents themselves excluded) and the deepest BFS level reached.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct CascadeOutcome {
+    /// (agent, BFS depth from the nearest faulted agent).
+    pub reached: Vec<(usize, u32)>,
+    pub max_depth: u32,
+}
 
-    let mut affected = 0u32;
-    let mut deepest = 0u32;
+/// Multi-source BFS from every agent faulted at the same instant. A reached
+/// agent's depth is its distance to the nearest faulted agent.
+pub fn cascade_bfs(
+    graph: &IndexedDependencyGraph,
+    sources: &[usize],
+    max_depth: u32,
+) -> CascadeOutcome {
+    let mut visited: HashSet<usize> = sources.iter().copied().collect();
+    let mut queue: VecDeque<(usize, u32)> = sources.iter().map(|&s| (s, 0)).collect();
+    let mut out = CascadeOutcome::default();
 
     while let Some((idx, depth)) = queue.pop_front() {
         if depth > 0 {
-            affected += 1;
-            deepest = deepest.max(depth);
+            out.reached.push((idx, depth));
+            out.max_depth = out.max_depth.max(depth);
         }
         if depth >= max_depth {
             continue;
@@ -164,41 +192,25 @@ pub fn cascade_bfs_standalone(
             }
         }
     }
-
-    (affected + 1, deepest)
+    out
 }
 
-/// Like `cascade_bfs_standalone` but also marks every visited agent
-/// (including the faulted agent) in `affected`. Used by the headless
-/// experiment runner to populate the `ever_affected` trace required for
-/// the Attack Rate metric (Wallinga & Lipsitch 2007).
-///
-/// Out-of-range indices in `affected` are silently skipped — callers are
-/// responsible for sizing the slice to the agent count.
-pub fn cascade_bfs_mark(
-    graph: &IndexedDependencyGraph,
-    dead_agent: usize,
-    max_depth: u32,
-    affected: &mut [bool],
-) {
-    let mut visited = HashSet::new();
-    let mut queue: VecDeque<(usize, u32)> = VecDeque::new();
-    visited.insert(dead_agent);
-    queue.push_back((dead_agent, 0));
+/// Cascade of a fault group from the state captured at the fault instant.
+pub fn cascade_from_snapshot(snapshot: &FaultSnapshot, max_depth: u32) -> CascadeOutcome {
+    cascade_bfs(&build_adg_from_snapshot(snapshot), &snapshot.sources, max_depth)
+}
 
-    while let Some((idx, depth)) = queue.pop_front() {
-        if let Some(slot) = affected.get_mut(idx) {
-            *slot = true;
-        }
-        if depth >= max_depth {
-            continue;
-        }
-        for &dep in graph.direct_dependents(idx) {
-            if visited.insert(dep) {
-                queue.push_back((dep, depth + 1));
-            }
-        }
-    }
+/// Secondary attack rate (epidemiology): among agents never directly faulted,
+/// the fraction reached by any fault's cascade. Directly faulted agents are
+/// primary cases and excluded from both sides, so the value does not echo the
+/// configured kill fraction. NaN when every agent was directly faulted.
+pub fn secondary_attack_rate(directly_hit: &[bool], reached: &[bool]) -> f64 {
+    let (secondary, susceptible) = directly_hit
+        .iter()
+        .zip(reached)
+        .filter(|&(&hit, _)| !hit)
+        .fold((0usize, 0usize), |(s, n), (_, &r)| (s + usize::from(r), n + 1));
+    if susceptible == 0 { f64::NAN } else { secondary as f64 / susceptible as f64 }
 }
 
 // ---------------------------------------------------------------------------
@@ -443,103 +455,132 @@ mod tests {
 
     // ── Standalone cascade BFS ───────────────────────────────────────
 
+    fn chain_graph(edges: &[(usize, usize)]) -> IndexedDependencyGraph {
+        let mut deps: HashMap<usize, Vec<usize>> = HashMap::new();
+        for &(a, b) in edges {
+            deps.entry(a).or_default().push(b);
+        }
+        IndexedDependencyGraph { dependents: deps }
+    }
+
     #[test]
     fn test_cascade_bfs_no_dependents() {
-        use super::super::dependency::IndexedDependencyGraph;
-        let graph = IndexedDependencyGraph { dependents: HashMap::new() };
-        let (affected, depth) = cascade_bfs_standalone(&graph, 0, 10);
-        assert_eq!(affected, 1); // the faulted agent itself
-        assert_eq!(depth, 0);
+        let out = cascade_bfs(&chain_graph(&[]), &[0], 10);
+        assert!(out.reached.is_empty());
+        assert_eq!(out.max_depth, 0);
     }
 
     #[test]
     fn test_cascade_bfs_linear_chain() {
-        use super::super::dependency::IndexedDependencyGraph;
-        // Chain: 0 → 1 → 2
-        let mut deps = HashMap::new();
-        deps.insert(0, vec![1]);
-        deps.insert(1, vec![2]);
-        let graph = IndexedDependencyGraph { dependents: deps };
-        let (affected, depth) = cascade_bfs_standalone(&graph, 0, 10);
-        assert_eq!(affected, 3); // faulted + 2 cascade
-        assert_eq!(depth, 2);
+        let out = cascade_bfs(&chain_graph(&[(0, 1), (1, 2)]), &[0], 10);
+        assert_eq!(out.reached, vec![(1, 1), (2, 2)]);
+        assert_eq!(out.max_depth, 2);
     }
 
     #[test]
     fn test_cascade_bfs_depth_cap() {
-        use super::super::dependency::IndexedDependencyGraph;
-        // Chain: 0 → 1 → 2 → 3, but max_depth = 1
-        let mut deps = HashMap::new();
-        deps.insert(0, vec![1]);
-        deps.insert(1, vec![2]);
-        deps.insert(2, vec![3]);
-        let graph = IndexedDependencyGraph { dependents: deps };
-        let (affected, depth) = cascade_bfs_standalone(&graph, 0, 1);
-        assert_eq!(affected, 2); // faulted + agent 1
-        assert_eq!(depth, 1);
-    }
-
-    // ── cascade_bfs_mark (Attack Rate trace) ─────────────────────────
-
-    #[test]
-    fn cascade_bfs_mark_marks_linear_chain() {
-        use super::super::dependency::IndexedDependencyGraph;
-        // Chain: 0 → 1 → 2
-        let mut deps = HashMap::new();
-        deps.insert(0, vec![1]);
-        deps.insert(1, vec![2]);
-        let graph = IndexedDependencyGraph { dependents: deps };
-        let mut affected = vec![false; 3];
-        cascade_bfs_mark(&graph, 0, 10, &mut affected);
-        assert_eq!(affected, vec![true, true, true]);
+        let out = cascade_bfs(&chain_graph(&[(0, 1), (1, 2), (2, 3)]), &[0], 1);
+        assert_eq!(out.reached, vec![(1, 1)]);
+        assert_eq!(out.max_depth, 1);
     }
 
     #[test]
-    fn cascade_bfs_mark_no_dependents_marks_only_faulted() {
-        use super::super::dependency::IndexedDependencyGraph;
-        let graph = IndexedDependencyGraph { dependents: HashMap::new() };
-        let mut affected = vec![false; 3];
-        cascade_bfs_mark(&graph, 1, 10, &mut affected);
-        assert_eq!(affected, vec![false, true, false]);
+    fn test_cascade_bfs_multi_source_uses_nearest_source() {
+        // 0 → 1 → 2 → 3 with sources {0, 2}: agent 3 is depth 1 from source 2.
+        let out = cascade_bfs(&chain_graph(&[(0, 1), (1, 2), (2, 3)]), &[0, 2], 10);
+        assert_eq!(out.reached, vec![(1, 1), (3, 1)]);
+        assert_eq!(out.max_depth, 1);
+    }
+
+    // ── Fault-instant snapshot cascade ───────────────────────────────
+
+    /// Agents queued East-bound in a 1-wide corridor: index 0 is the head at
+    /// x = `followers`, index k sits at x = `followers - k`. Every agent plans
+    /// `plan_len` East moves (1 = PIBT-style, longer = RHCR/TP-style paths).
+    fn corridor_queue(followers: i32, plan_len: usize) -> Vec<SimAgent> {
+        use crate::core::action::{Action, Direction};
+        (0..=followers)
+            .map(|k| {
+                let mut a = SimAgent::new(IVec2::new(followers - k, 0));
+                a.planned_path = VecDeque::from(vec![Action::Move(Direction::East); plan_len]);
+                a
+            })
+            .collect()
+    }
+
+    fn snapshot_cascade(agents: &[SimAgent], sources: &[usize]) -> CascadeOutcome {
+        use crate::core::runner::FaultSnapshot;
+        let mut snap = FaultSnapshot::capture(agents, constants::ADG_LOOKAHEAD);
+        snap.sources = sources.to_vec();
+        cascade_from_snapshot(&snap, constants::MAX_CASCADE_DEPTH)
     }
 
     #[test]
-    fn cascade_bfs_mark_respects_depth_cap() {
-        use super::super::dependency::IndexedDependencyGraph;
-        // Chain: 0 → 1 → 2 → 3, depth cap = 1
-        let mut deps = HashMap::new();
-        deps.insert(0, vec![1]);
-        deps.insert(1, vec![2]);
-        deps.insert(2, vec![3]);
-        let graph = IndexedDependencyGraph { dependents: deps };
-        let mut affected = vec![false; 4];
-        cascade_bfs_mark(&graph, 0, 1, &mut affected);
-        // depth 0 = agent 0, depth 1 = agent 1. Agents 2, 3 NOT marked.
-        assert_eq!(affected, vec![true, true, false, false]);
+    fn snapshot_cascade_corridor_chain_depth_equals_chain_length() {
+        // Head killed with 3 followers queued behind it: each follower's next
+        // cell is the cell the agent ahead must vacate → chain of depth 3.
+        let agents = corridor_queue(3, 1);
+        let out = snapshot_cascade(&agents, &[0]);
+        assert_eq!(out.max_depth, 3);
+        let mut reached = out.reached.clone();
+        reached.sort_unstable();
+        assert_eq!(reached, vec![(1, 1), (2, 2), (3, 3)]);
     }
 
     #[test]
-    fn cascade_bfs_mark_accumulates_across_calls() {
-        use super::super::dependency::IndexedDependencyGraph;
-        // Two disjoint chains: 0→1, 2→3
-        let mut deps = HashMap::new();
-        deps.insert(0, vec![1]);
-        deps.insert(2, vec![3]);
-        let graph = IndexedDependencyGraph { dependents: deps };
-        let mut affected = vec![false; 4];
-        cascade_bfs_mark(&graph, 0, 10, &mut affected);
-        cascade_bfs_mark(&graph, 2, 10, &mut affected);
-        assert_eq!(affected, vec![true, true, true, true]);
+    fn snapshot_cascade_same_for_any_solver_plan_length() {
+        // Identical positions, plans of 1 (PIBT), 5 (RHCR window) and 30 (TP
+        // full path) steps: the common lookahead makes depth solver-independent.
+        let depths: Vec<u32> = [1, 5, 30]
+            .iter()
+            .map(|&len| snapshot_cascade(&corridor_queue(3, len), &[0]).max_depth)
+            .collect();
+        assert_eq!(depths, vec![3, 3, 3]);
     }
 
     #[test]
-    fn cascade_bfs_mark_out_of_range_safe() {
-        use super::super::dependency::IndexedDependencyGraph;
-        let graph = IndexedDependencyGraph { dependents: HashMap::new() };
-        let mut affected = vec![false; 2];
-        // idx=5 > slice len — must not panic
-        cascade_bfs_mark(&graph, 5, 10, &mut affected);
-        assert_eq!(affected, vec![false, false]);
+    fn snapshot_cascade_no_followers_is_zero() {
+        // Followers plan to move away (West) — nobody needs the victim's cell.
+        use crate::core::action::{Action, Direction};
+        let mut agents = corridor_queue(2, 1);
+        for a in agents.iter_mut().skip(1) {
+            a.planned_path = VecDeque::from(vec![Action::Move(Direction::West)]);
+        }
+        let out = snapshot_cascade(&agents, &[0]);
+        assert_eq!(out.max_depth, 0);
+        assert!(out.reached.is_empty());
+    }
+
+    #[test]
+    fn snapshot_cascade_multi_source_counts_victims_as_roots() {
+        // Burst kills the head and the 2nd follower: agent 1 is reached from
+        // agent 0 (depth 1); agent 3 is reached from agent 2 (depth 1).
+        let agents = corridor_queue(3, 1);
+        let out = snapshot_cascade(&agents, &[0, 2]);
+        assert_eq!(out.max_depth, 1);
+        let mut reached = out.reached.clone();
+        reached.sort_unstable();
+        assert_eq!(reached, vec![(1, 1), (3, 1)]);
+    }
+
+    #[test]
+    fn snapshot_dead_agents_are_not_nodes() {
+        // An already-dead agent between victim and follower breaks the chain.
+        let mut agents = corridor_queue(2, 1);
+        agents[1].alive = false;
+        let out = snapshot_cascade(&agents, &[0]);
+        assert_eq!(out.max_depth, 0);
+    }
+
+    #[test]
+    fn secondary_attack_rate_excludes_primary_cases() {
+        // 4 agents: 0 directly hit, 1 reached, 2 reached then directly hit
+        // later (primary), 3 untouched → 1 secondary of 2 never-hit agents.
+        let hit = [true, false, true, false];
+        let reached = [false, true, true, false];
+        assert!((secondary_attack_rate(&hit, &reached) - 0.5).abs() < 1e-12);
+        assert_eq!(secondary_attack_rate(&[false; 3], &[false; 3]), 0.0);
+        assert!(secondary_attack_rate(&[true; 2], &[false; 2]).is_nan());
     }
 
     // ── Structural cascade (solver-independent) ───────────────────────

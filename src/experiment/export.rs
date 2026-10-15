@@ -19,7 +19,7 @@ pub fn write_runs_csv<W: Write>(writer: &mut W, runs: &[RunResult]) -> std::io::
          itae,rapidity,attack_rate,fleet_utilization,\
          pbs_partial_rate,\
          solver_step_avg_us,solver_step_max_us,wall_time_ms,\
-         twte_undefined_ticks,rapidity_recovered,baseline_gridlocked"
+         twte_undefined_ticks,rapidity_recovered,baseline_gridlocked,attack_rate_total"
     )?;
 
     for run in runs {
@@ -55,7 +55,7 @@ fn write_run_row<W: Write>(
          {},{},{},{},\
          {},\
          {},{},{},\
-         {},{},{}",
+         {},{},{},{}",
         config.solver_name,
         config.topology_name,
         config.scenario_label(),
@@ -92,6 +92,7 @@ fn write_run_row<W: Write>(
         m.twte_undefined_ticks,
         m.rapidity_recovered.map_or("".to_string(), |v| v.to_string()),
         m.baseline_gridlocked,
+        csv_f64(m.attack_rate_total, 4),
     )
 }
 
@@ -363,7 +364,8 @@ fn write_metrics_json<W: Write>(
          \"fleet_utilization\":{},\
          \"solver_step_avg_us\":{},\"solver_step_max_us\":{},\
          \"wall_time_ms\":{},\
-         \"twte_undefined_ticks\":{},\"rapidity_recovered\":{},\"baseline_gridlocked\":{}}}",
+         \"twte_undefined_ticks\":{},\"rapidity_recovered\":{},\"baseline_gridlocked\":{},\
+         \"attack_rate_total\":{}}}",
         json_f64(m.avg_throughput, 4),
         m.total_tasks,
         json_f64(m.unassigned_ratio, 4),
@@ -392,6 +394,7 @@ fn write_metrics_json<W: Write>(
         m.twte_undefined_ticks,
         m.rapidity_recovered.map_or("null".to_string(), |v| v.to_string()),
         m.baseline_gridlocked,
+        json_f64(m.attack_rate_total, 4),
     )?;
     Ok(())
 }

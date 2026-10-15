@@ -66,8 +66,30 @@ pub fn drive_simulation(
 ) {
     let mut result = sim.runner.tick(scheduler.scheduler(), queue_policy.policy());
 
+    // One cascade per group of simultaneous faults, from the state captured at
+    // the fault instant. Snapshot sources list the fault records in order, so
+    // the group's cascade goes to its first record and the rest get none.
+    let mut cascades = sim.runner.fault_snapshots.iter().flat_map(|snap| {
+        let out = crate::analysis::cascade::cascade_from_snapshot(
+            snap,
+            crate::constants::MAX_CASCADE_DEPTH,
+        );
+        std::iter::once(out).chain(std::iter::repeat_n(
+            crate::analysis::cascade::CascadeOutcome::default(),
+            snap.sources.len() - 1,
+        ))
+    });
+
     // Forward runner fault events to ECS BEFORE record_tick (which takes ownership via mem::take)
     for fe in &result.fault_events {
+        let cascade = cascades.next().map(|out| {
+            let reached = out
+                .reached
+                .iter()
+                .filter_map(|&(i, d)| agent_registry.get_entity(AgentIndex(i)).map(|e| (e, d)))
+                .collect();
+            (out.max_depth, reached)
+        });
         if let Some(entity) = agent_registry.get_entity(AgentIndex(fe.agent_index)) {
             fault_events.write(FaultEvent {
                 entity,
@@ -76,6 +98,7 @@ pub fn drive_simulation(
                 tick: fe.tick,
                 position: fe.position,
                 paths_invalidated: fe.paths_invalidated,
+                cascade,
             });
         }
     }

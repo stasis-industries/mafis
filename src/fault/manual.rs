@@ -768,6 +768,7 @@ pub fn process_manual_faults(
                         tick: effective_tick,
                         position: pos,
                         paths_invalidated: 0, // manual faults: cascade handled by BFS
+                        cascade: None,
                     });
                     fault_metrics.register_manual_event(
                         effective_tick,
@@ -862,6 +863,7 @@ pub fn process_manual_faults(
                             tick: effective_tick,
                             position: pos,
                             paths_invalidated: 0,
+                            cascade: None,
                         });
                         fault_metrics.register_manual_event(
                             effective_tick,

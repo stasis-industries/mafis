@@ -207,54 +207,14 @@ pub fn run_single_experiment(config: &ExperimentConfig) -> RunResult {
 
         let mut analysis = AnalysisEngine::new(config.tick_count as usize);
         let mut step_times = Vec::with_capacity(config.tick_count as usize);
-        let mut cascade_depths: Vec<f64> = Vec::with_capacity(actual_agents);
-        let mut cascade_spreads: Vec<f64> = Vec::with_capacity(actual_agents);
-        // Solver-independent topological vulnerability per fault event.
-        // See `analysis::cascade::structural_cascade_at`.
-        let mut structural_cascades: Vec<f64> = Vec::with_capacity(actual_agents);
-        let mut structural_cascade_max: u32 = 0;
-        // Per-agent "ever materially affected" trace for Attack Rate
-        // (Wallinga & Lipsitch 2007). Populated by cascade BFS on every fault.
-        let mut ever_affected: Vec<bool> = vec![false; actual_agents];
+        let mut cascade = CascadeTally::new(actual_agents);
 
         let faulted_start = Instant::now();
         for _ in 0..config.tick_count {
             let tick_start = Instant::now();
             let mut result = runner.tick(scheduler.scheduler(), queue_policy.policy());
             step_times.push(tick_start.elapsed().as_micros() as f64);
-
-            // Cascade analysis via standalone ADG
-            if !result.fault_events.is_empty() {
-                let adg = crate::analysis::dependency::build_adg_from_agents(
-                    &runner.agents,
-                    crate::constants::ADG_LOOKAHEAD,
-                );
-                for fault in &result.fault_events {
-                    let (spread, depth) = crate::analysis::cascade::cascade_bfs_standalone(
-                        &adg,
-                        fault.agent_index,
-                        crate::constants::MAX_CASCADE_DEPTH,
-                    );
-                    cascade_spreads.push(spread as f64);
-                    cascade_depths.push(depth as f64);
-                    crate::analysis::cascade::cascade_bfs_mark(
-                        &adg,
-                        fault.agent_index,
-                        crate::constants::MAX_CASCADE_DEPTH,
-                        &mut ever_affected,
-                    );
-
-                    // Solver-independent topological vulnerability of dead cell.
-                    let sc = crate::analysis::cascade::structural_cascade_at(
-                        &runner.grid,
-                        fault.position,
-                        &runner.agents,
-                    );
-                    structural_cascades.push(sc.agents_disrupted as f64);
-                    structural_cascade_max = structural_cascade_max.max(sc.agents_disrupted);
-                }
-            }
-
+            cascade.record(&runner, &result.fault_events);
             analysis.record_tick(&runner, &mut result);
         }
         analysis.compute_aggregates();
@@ -270,29 +230,7 @@ pub fn run_single_experiment(config: &ExperimentConfig) -> RunResult {
             faulted_wall_ms,
         );
         fm.pbs_partial_rate = partial_rate;
-
-        fm.cascade_depth_avg = if cascade_depths.is_empty() {
-            0.0
-        } else {
-            cascade_depths.iter().sum::<f64>() / cascade_depths.len() as f64
-        };
-        fm.cascade_spread_avg = if cascade_spreads.is_empty() {
-            0.0
-        } else {
-            cascade_spreads.iter().sum::<f64>() / cascade_spreads.len() as f64
-        };
-        fm.structural_cascade_avg = if structural_cascades.is_empty() {
-            0.0
-        } else {
-            structural_cascades.iter().sum::<f64>() / structural_cascades.len() as f64
-        };
-        fm.structural_cascade_max = structural_cascade_max as f64;
-        fm.mitigation_delta_avg = fm.cascade_spread_avg - fm.structural_cascade_avg;
-
-        // Attack Rate — fraction of initial fleet ever materially affected.
-        let affected_count = ever_affected.iter().filter(|&&x| x).count() as f64;
-        fm.attack_rate =
-            if actual_agents > 0 { affected_count / actual_agents as f64 } else { 0.0 };
+        cascade.apply(&mut fm);
 
         // Optional per-tick throughput export (set MAFIS_TICK_EXPORT_DIR to enable)
         #[cfg(not(target_arch = "wasm32"))]
@@ -302,6 +240,81 @@ pub fn run_single_experiment(config: &ExperimentConfig) -> RunResult {
     }
 
     RunResult { config: config.clone(), baseline_metrics, faulted_metrics }
+}
+
+// ---------------------------------------------------------------------------
+// Cascade accounting (shared by both faulted-run paths)
+// ---------------------------------------------------------------------------
+
+/// Accumulates cascade metrics over a faulted run. One fault *event* is a
+/// group of agents faulted at the same instant (one `FaultSnapshot`).
+struct CascadeTally {
+    depths: Vec<f64>,
+    spreads: Vec<f64>,
+    /// Solver-independent topological vulnerability, per faulted agent.
+    structural: Vec<f64>,
+    structural_max: u32,
+    directly_hit: Vec<bool>,
+    reached: Vec<bool>,
+}
+
+impl CascadeTally {
+    fn new(agents: usize) -> Self {
+        Self {
+            depths: Vec::new(),
+            spreads: Vec::new(),
+            structural: Vec::new(),
+            structural_max: 0,
+            directly_hit: vec![false; agents],
+            reached: vec![false; agents],
+        }
+    }
+
+    fn record(
+        &mut self,
+        runner: &SimulationRunner,
+        fault_events: &[crate::core::runner::FaultRecord],
+    ) {
+        for snapshot in &runner.fault_snapshots {
+            let out = crate::analysis::cascade::cascade_from_snapshot(
+                snapshot,
+                crate::constants::MAX_CASCADE_DEPTH,
+            );
+            self.depths.push(out.max_depth as f64);
+            self.spreads.push((snapshot.sources.len() + out.reached.len()) as f64);
+            for &s in &snapshot.sources {
+                self.directly_hit[s] = true;
+            }
+            for &(r, _) in &out.reached {
+                self.reached[r] = true;
+            }
+        }
+        for fault in fault_events {
+            let sc = crate::analysis::cascade::structural_cascade_at(
+                &runner.grid,
+                fault.position,
+                &runner.agents,
+            );
+            self.structural.push(sc.agents_disrupted as f64);
+            self.structural_max = self.structural_max.max(sc.agents_disrupted);
+        }
+    }
+
+    fn apply(&self, fm: &mut RunMetrics) {
+        let mean =
+            |v: &[f64]| if v.is_empty() { 0.0 } else { v.iter().sum::<f64>() / v.len() as f64 };
+        fm.cascade_depth_avg = mean(&self.depths);
+        fm.cascade_spread_avg = mean(&self.spreads);
+        fm.structural_cascade_avg = mean(&self.structural);
+        fm.structural_cascade_max = self.structural_max as f64;
+        fm.mitigation_delta_avg = fm.cascade_spread_avg - fm.structural_cascade_avg;
+        fm.attack_rate =
+            crate::analysis::cascade::secondary_attack_rate(&self.directly_hit, &self.reached);
+        let n = self.directly_hit.len();
+        let touched =
+            self.directly_hit.iter().zip(&self.reached).filter(|&(&h, &r)| h || r).count();
+        fm.attack_rate_total = if n > 0 { touched as f64 / n as f64 } else { 0.0 };
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -496,51 +509,14 @@ fn run_faulted_only(config: &ExperimentConfig, cached: &CachedBaseline) -> RunRe
 
     let mut analysis = AnalysisEngine::new(config.tick_count as usize);
     let mut step_times = Vec::with_capacity(config.tick_count as usize);
-    let mut cascade_depths: Vec<f64> = Vec::with_capacity(actual_agents);
-    let mut cascade_spreads: Vec<f64> = Vec::with_capacity(actual_agents);
-    // Solver-independent topological vulnerability per fault event.
-    let mut structural_cascades: Vec<f64> = Vec::with_capacity(actual_agents);
-    let mut structural_cascade_max: u32 = 0;
-    // Per-agent "ever materially affected" trace for Attack Rate
-    // (Wallinga & Lipsitch 2007). Populated by cascade BFS on every fault.
-    let mut ever_affected: Vec<bool> = vec![false; actual_agents];
+    let mut cascade = CascadeTally::new(actual_agents);
 
     let faulted_start = Instant::now();
     for _ in 0..config.tick_count {
         let tick_start = Instant::now();
         let mut result = runner.tick(scheduler.scheduler(), queue_policy.policy());
         step_times.push(tick_start.elapsed().as_micros() as f64);
-
-        if !result.fault_events.is_empty() {
-            let adg = crate::analysis::dependency::build_adg_from_agents(
-                &runner.agents,
-                crate::constants::ADG_LOOKAHEAD,
-            );
-            for fault in &result.fault_events {
-                let (spread, depth) = crate::analysis::cascade::cascade_bfs_standalone(
-                    &adg,
-                    fault.agent_index,
-                    crate::constants::MAX_CASCADE_DEPTH,
-                );
-                cascade_spreads.push(spread as f64);
-                cascade_depths.push(depth as f64);
-                crate::analysis::cascade::cascade_bfs_mark(
-                    &adg,
-                    fault.agent_index,
-                    crate::constants::MAX_CASCADE_DEPTH,
-                    &mut ever_affected,
-                );
-
-                let sc = crate::analysis::cascade::structural_cascade_at(
-                    &runner.grid,
-                    fault.position,
-                    &runner.agents,
-                );
-                structural_cascades.push(sc.agents_disrupted as f64);
-                structural_cascade_max = structural_cascade_max.max(sc.agents_disrupted);
-            }
-        }
-
+        cascade.record(&runner, &result.fault_events);
         analysis.record_tick(&runner, &mut result);
     }
     analysis.compute_aggregates();
@@ -556,28 +532,7 @@ fn run_faulted_only(config: &ExperimentConfig, cached: &CachedBaseline) -> RunRe
         faulted_wall_ms,
     );
     fm.pbs_partial_rate = partial_rate;
-
-    fm.cascade_depth_avg = if cascade_depths.is_empty() {
-        0.0
-    } else {
-        cascade_depths.iter().sum::<f64>() / cascade_depths.len() as f64
-    };
-    fm.cascade_spread_avg = if cascade_spreads.is_empty() {
-        0.0
-    } else {
-        cascade_spreads.iter().sum::<f64>() / cascade_spreads.len() as f64
-    };
-    fm.structural_cascade_avg = if structural_cascades.is_empty() {
-        0.0
-    } else {
-        structural_cascades.iter().sum::<f64>() / structural_cascades.len() as f64
-    };
-    fm.structural_cascade_max = structural_cascade_max as f64;
-    fm.mitigation_delta_avg = fm.cascade_spread_avg - fm.structural_cascade_avg;
-
-    // Attack Rate — fraction of initial fleet ever materially affected.
-    let affected_count = ever_affected.iter().filter(|&&x| x).count() as f64;
-    fm.attack_rate = if actual_agents > 0 { affected_count / actual_agents as f64 } else { 0.0 };
+    cascade.apply(&mut fm);
 
     RunResult {
         config: config.clone(),
@@ -1095,8 +1050,8 @@ mod tests {
 
     #[test]
     fn single_experiment_burst_attack_rate_positive() {
-        // 30% burst kill → AR ≥ 0.3 from direct deaths. Any cascade pushes
-        // it higher. Bounded above by 1.0 by construction.
+        // 30% burst kill → total AR ≥ 0.3 from direct deaths. The secondary
+        // rate excludes the dead, so it must not just echo 1 − survival.
         let config = ExperimentConfig {
             solver_name: "pibt".into(),
             topology_name: "warehouse_single_dock".into(),
@@ -1115,9 +1070,16 @@ mod tests {
             rhcr_override: None,
         };
         let result = run_single_experiment(&config);
-        let ar = result.faulted_metrics.attack_rate;
-        assert!(ar >= 0.3, "attack_rate {ar} should be >= 0.3 for 30% burst");
-        assert!(ar <= 1.0, "attack_rate {ar} should be <= 1.0");
+        let m = &result.faulted_metrics;
+        let total = m.attack_rate_total;
+        assert!(total >= 0.3, "attack_rate_total {total} should be >= 0.3 for 30% burst");
+        assert!(total <= 1.0, "attack_rate_total {total} should be <= 1.0");
+        let ar = m.attack_rate;
+        assert!((0.0..=1.0).contains(&ar), "secondary attack_rate {ar} out of [0,1]");
+        assert!(
+            (ar - (1.0 - m.survival_rate)).abs() > 1e-9,
+            "secondary attack_rate {ar} must not equal 1 - survival"
+        );
     }
 
     #[test]
