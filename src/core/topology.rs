@@ -18,6 +18,7 @@ pub enum ZoneType {
     CrossAisle, // vertical aisle cutting through storage rows
     Open,       // generic walkable (open floor topology)
     Recharging, // recharging station — walkable
+    Parking,    // non-task endpoint (Ma et al. 2017) — walkable, used only by Token Passing
 }
 
 #[derive(Resource, Debug, Clone, Default)]
@@ -30,6 +31,22 @@ pub struct ZoneMap {
     /// Directed queue lines for delivery zones. Each delivery cell with a
     /// `queue_direction` gets a queue line extending in that direction.
     pub queue_lines: Vec<QueueLine>,
+}
+
+impl ZoneMap {
+    /// Non-task endpoints (parking cells) in row-major order. Parking cells
+    /// are also kept in `corridor_cells`, so only Token Passing treats them
+    /// differently from plain corridor.
+    pub fn parking_cells(&self) -> Vec<IVec2> {
+        let mut cells: Vec<IVec2> = self
+            .zone_type
+            .iter()
+            .filter(|(_, t)| **t == ZoneType::Parking)
+            .map(|(&p, _)| p)
+            .collect();
+        cells.sort_by_key(|p| (p.y, p.x));
+        cells
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -283,6 +300,7 @@ impl TopologyRegistry {
         }
 
         let mut obstacles = std::collections::HashSet::new();
+        let mut parking = std::collections::HashSet::new();
         let mut zones = ZoneMap::default();
         let mut delivery_directions: Vec<(IVec2, Direction)> = Vec::new();
 
@@ -328,18 +346,24 @@ impl TopologyRegistry {
                         zones.recharging_cells.push(pos);
                         zones.zone_type.insert(pos, ZoneType::Recharging);
                     }
+                    "parking" => {
+                        parking.insert(pos);
+                    }
                     _ => {}
                 }
             }
         }
 
-        // All walkable non-zone cells are corridors
+        // All walkable non-zone cells are corridors. Parking cells stay in the
+        // corridor pool (same order as before) so spawning is unchanged.
         for x in 0..width {
             for y in 0..height {
                 let pos = IVec2::new(x, y);
                 if !obstacles.contains(&pos) && !zones.zone_type.contains_key(&pos) {
                     zones.corridor_cells.push(pos);
-                    zones.zone_type.insert(pos, ZoneType::Corridor);
+                    let zone =
+                        if parking.contains(&pos) { ZoneType::Parking } else { ZoneType::Corridor };
+                    zones.zone_type.insert(pos, zone);
                 }
             }
         }
@@ -436,6 +460,103 @@ pub fn validate_connectivity(grid: &GridMap, zones: &ZoneMap) -> Result<(), Vec<
     }
 
     if unreachable.is_empty() { Ok(()) } else { Err(unreachable) }
+}
+
+// ---------------------------------------------------------------------------
+// Well-formedness (Ma, Li, Kumar, Koenig, AAMAS 2017, Def. "well-formed")
+// ---------------------------------------------------------------------------
+
+/// Well-formedness of a lifelong MAPD map for Token Passing.
+///
+/// Endpoints = pickup ∪ delivery ∪ parking cells. Ma et al. require
+/// (2) at least as many non-task endpoints (parking) as agents and
+/// (3) a path between any two endpoints that traverses no other endpoint.
+/// Condition (1), a finite task set, does not apply to lifelong runs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WellFormedness {
+    /// Number of non-task endpoints (parking cells).
+    pub parking: usize,
+    /// Endpoint pairs with no connecting path that avoids every other endpoint.
+    pub disconnected_pairs: usize,
+}
+
+impl WellFormedness {
+    /// Whether the map is well-formed for a fleet of `num_agents`.
+    pub fn holds_for(&self, num_agents: usize) -> bool {
+        self.disconnected_pairs == 0 && self.parking >= num_agents
+    }
+}
+
+/// Check Ma et al.'s well-formedness conditions (2) and (3).
+///
+/// Two endpoints are joined by a path avoiding all other endpoints iff they
+/// are adjacent or both touch the same component of non-endpoint cells.
+pub fn check_well_formed(grid: &GridMap, zones: &ZoneMap) -> WellFormedness {
+    let parking = zones.parking_cells();
+    let mut endpoints: Vec<IVec2> =
+        zones.pickup_cells.iter().chain(&zones.delivery_cells).chain(&parking).copied().collect();
+    endpoints.sort_by_key(|p| (p.y, p.x));
+    endpoints.dedup();
+
+    let idx = |pos: IVec2| (pos.y * grid.width + pos.x) as usize;
+    let mut is_endpoint = vec![false; (grid.width * grid.height) as usize];
+    for &e in &endpoints {
+        is_endpoint[idx(e)] = true;
+    }
+
+    // Label connected components of walkable non-endpoint cells.
+    let mut component = vec![usize::MAX; is_endpoint.len()];
+    let mut next = 0;
+    for y in 0..grid.height {
+        for x in 0..grid.width {
+            let seed = IVec2::new(x, y);
+            if !grid.is_walkable(seed)
+                || is_endpoint[idx(seed)]
+                || component[idx(seed)] != usize::MAX
+            {
+                continue;
+            }
+            component[idx(seed)] = next;
+            let mut queue = std::collections::VecDeque::from([seed]);
+            while let Some(pos) = queue.pop_front() {
+                for n in grid.walkable_neighbors(pos) {
+                    if !is_endpoint[idx(n)] && component[idx(n)] == usize::MAX {
+                        component[idx(n)] = next;
+                        queue.push_back(n);
+                    }
+                }
+            }
+            next += 1;
+        }
+    }
+
+    let touching: Vec<Vec<usize>> = endpoints
+        .iter()
+        .map(|&e| {
+            let mut c: Vec<usize> = grid
+                .walkable_neighbors(e)
+                .into_iter()
+                .filter(|&n| !is_endpoint[idx(n)])
+                .map(|n| component[idx(n)])
+                .collect();
+            c.sort_unstable();
+            c.dedup();
+            c
+        })
+        .collect();
+
+    let mut disconnected_pairs = 0;
+    for i in 0..endpoints.len() {
+        for j in i + 1..endpoints.len() {
+            let adjacent = (endpoints[i] - endpoints[j]).abs().element_sum() == 1;
+            let shared = touching[i].iter().any(|c| touching[j].contains(c));
+            if !adjacent && !shared {
+                disconnected_pairs += 1;
+            }
+        }
+    }
+
+    WellFormedness { parking: parking.len(), disconnected_pairs }
 }
 
 // ---------------------------------------------------------------------------
@@ -677,6 +798,80 @@ mod tests {
         for entry in &registry.entries {
             let result = TopologyRegistry::parse_entry(entry);
             assert!(result.is_some(), "Topology '{}' failed connectivity validation", entry.id,);
+        }
+    }
+
+    // ── Parking + well-formedness (Ma et al. 2017) ─────────────────
+
+    /// 5×3 open map: pickup (0,0), delivery (4,0), parking (0,2) and (4,2).
+    fn small_tp_json(extra_cells: &str) -> serde_json::Value {
+        let json = format!(
+            r#"{{"width":5,"height":3,"cells":[
+                {{"x":0,"y":0,"type":"pickup"}},
+                {{"x":4,"y":0,"type":"delivery"}},
+                {{"x":0,"y":2,"type":"parking"}},
+                {{"x":4,"y":2,"type":"parking"}}{extra_cells}]}}"#
+        );
+        serde_json::from_str(&json).unwrap()
+    }
+
+    #[test]
+    fn parking_cells_parsed_and_kept_in_corridor_pool() {
+        let (_, zones) = TopologyRegistry::parse_json_value(&small_tp_json("")).unwrap();
+        assert_eq!(zones.parking_cells(), vec![IVec2::new(0, 2), IVec2::new(4, 2)]);
+        assert_eq!(zones.zone_type.get(&IVec2::new(0, 2)), Some(&ZoneType::Parking));
+        // Parking stays in the corridor pool so agent spawning and every
+        // non-TP solver see exactly the same map as before.
+        assert!(zones.corridor_cells.contains(&IVec2::new(0, 2)));
+        assert!(zones.corridor_cells.contains(&IVec2::new(4, 2)));
+    }
+
+    #[test]
+    fn well_formed_small_map() {
+        let (grid, zones) = TopologyRegistry::parse_json_value(&small_tp_json("")).unwrap();
+        let wf = check_well_formed(&grid, &zones);
+        assert_eq!(wf.parking, 2);
+        assert_eq!(wf.disconnected_pairs, 0);
+        assert!(wf.holds_for(2));
+        assert!(!wf.holds_for(3), "more agents than non-task endpoints");
+    }
+
+    #[test]
+    fn endpoint_walled_in_by_endpoints_is_not_well_formed() {
+        // A 1-wide aisle lined with pickups: (1,1) can only leave through (0,1)
+        // or (2,1), both pickups — Ma et al. condition 3 fails.
+        let json = serde_json::json!({
+            "width": 3, "height": 3,
+            "cells": [
+                {"x":0,"y":0,"type":"wall"}, {"x":1,"y":0,"type":"wall"}, {"x":2,"y":0,"type":"wall"},
+                {"x":0,"y":2,"type":"wall"}, {"x":1,"y":2,"type":"wall"}, {"x":2,"y":2,"type":"wall"},
+                {"x":0,"y":1,"type":"pickup"}, {"x":1,"y":1,"type":"pickup"}, {"x":2,"y":1,"type":"delivery"}
+            ]
+        });
+        let (grid, zones) = TopologyRegistry::parse_json_value(&json).unwrap();
+        let wf = check_well_formed(&grid, &zones);
+        assert!(wf.disconnected_pairs > 0);
+        assert!(!wf.holds_for(0));
+    }
+
+    /// Locks the parking count and well-formedness of every experiment map.
+    /// SD-w1, SD-w2 and DD fail condition 3 because pickups line 1-wide (or
+    /// 2-wide, both sides) aisles; only SD-w3 has a free lane beside every pickup.
+    #[test]
+    fn experiment_topologies_parking_and_well_formedness() {
+        let registry = TopologyRegistry::load_from_dir(std::path::Path::new("topologies"));
+        let expected = [
+            ("warehouse_single_dock", 60, false),
+            ("warehouse_single_dock_w2", 66, false),
+            ("warehouse_single_dock_w3", 78, true),
+            ("warehouse_dual_dock", 120, false),
+        ];
+        for (id, parking, well_formed) in expected {
+            let entry = registry.find(id).unwrap_or_else(|| panic!("{id} missing"));
+            let (grid, zones) = TopologyRegistry::parse_entry(entry).unwrap();
+            let wf = check_well_formed(&grid, &zones);
+            assert_eq!(wf.parking, parking, "{id} parking count");
+            assert_eq!(wf.disconnected_pairs == 0, well_formed, "{id} condition 3");
         }
     }
 

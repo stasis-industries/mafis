@@ -20,6 +20,8 @@ pub mod random;
 pub use random::{RandomScheduler, random_cell_from};
 pub mod recycle;
 pub use recycle::{RecycleResult, TaskAgentSnapshot, TaskUpdate, recycle_goals_core};
+pub mod token_passing;
+pub use token_passing::TokenPassingTaskSelection;
 
 // ---------------------------------------------------------------------------
 // TaskLeg
@@ -140,6 +142,22 @@ pub trait TaskScheduler: Send + Sync + 'static {
             }
         }
         assignments
+    }
+
+    /// `assign_pickups_batch` plus `path_ends`: the goal and current cell of
+    /// every alive agent (a superset of where their paths end — an agent
+    /// whose plan failed rests in place). Token Passing needs it to skip tasks
+    /// whose pickup is the end of another agent's path (Ma et al. 2017).
+    /// Default: ignore `path_ends`.
+    fn assign_pickups_with_path_ends(
+        &self,
+        free_agents: &[(usize, IVec2)],
+        zones: &ZoneMap,
+        used_goals: &mut HashSet<IVec2>,
+        _path_ends: &HashSet<IVec2>,
+        rng: &mut ChaCha8Rng,
+    ) -> Vec<(usize, IVec2)> {
+        self.assign_pickups_batch(free_agents, zones, used_goals, rng)
     }
 
     /// Peek a hypothetical chain of future goals for one agent without committing them.

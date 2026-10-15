@@ -2,15 +2,14 @@
 //!
 //! REFERENCE: docs/papers_codes/pibt/pibt2/src/tp.cpp (Okumura et al., pibt2)
 //!            docs/papers_codes/pibt/pibt2/include/tp.hpp
-//! Paper: Ma, Tovey, Sharon, Kumar, Koenig — "Lifelong Multi-Agent Path Finding
-//! for Online Pickup and Delivery Tasks", AAMAS 2017.
+//! Paper: Ma, Li, Kumar, Koenig — "Lifelong Multi-Agent Path Finding for Online
+//! Pickup and Delivery Tasks", AAMAS 2017 (Algorithm 1, TP).
 //!
-//! Audited 2026-04-07 against the canonical pibt2 reference (~320 lines C++).
+//! Ported 2026-10-15 against pibt2 `tp.cpp`: task selection, endpoint rule,
+//! parking and `checkAstarFin`. The deviations below come from MAFIS's task
+//! model (queues, loading dwell), not from the planner.
 //!
 //! ## Structural mapping (MAFIS ↔ pibt2)
-//!
-//! The MAFIS implementation is **semantically equivalent** to pibt2's canonical
-//! algorithm but expressed in different but isomorphic data structures. Specifically:
 //!
 //! | pibt2 (absolute time)              | MAFIS (relative time)                  |
 //! |------------------------------------|----------------------------------------|
@@ -20,39 +19,48 @@
 //! | `TOKEN[i].size()-1 == current_t`   | `paths[i].len() <= 1` (no future plan) |
 //! | `CONFLICT_TABLE[t][cell] != NIL`   | `MasterConstraintIndex::is_vertex_blocked(cell, t)` |
 //! | endpoint blocking via `token_endpoints[v]` + `TOKEN[k].size()-1 < t` | `MasterConstraintIndex::add_path` extends final-cell vertex constraints to `max_time` |
-//! | `checkAstarFin: g + current_t > max_constraint_time` | vertex constraints on goal cell at all blocked times naturally force A* to delay arrival |
+//! | `checkAstarFin: g + current_t > max_constraint_time` | `ArriveAfter` blocks the goal cell up to the last time another token path uses it |
+//! | task selection (tp.cpp:64-96) | `core::task::TokenPassingTaskSelection`, used via `LifelongSolver::task_scheduler` |
+//! | `updatePath2` parking (tp.cpp:99-123, 206-248) | `free_parking` + `drain_goal_overrides` |
 //!
-//! ## Adaptations to MAFIS architecture
+//! ## Algorithm TP in MAFIS
 //!
-//! MAFIS separates task scheduling from path planning. Where pibt2 picks tasks
-//! inside the solver loop (`tp.cpp` lines 64-103), MAFIS receives `agent.goal:
-//! Option<IVec2>` already set by the `TaskScheduler` trait (see
-//! `src/core/task/`). Therefore the pibt2 task assignment phase is omitted —
-//! MAFIS only ports the **path planning portion** of TP (`tp.cpp` lines 250-317
-//! `updatePath` + the conflict-table A* hooks).
+//! - **Task selection** (Alg. 1 l. 7-12): TP replaces the configured scheduler.
+//!   Agents take tasks in index order; a task is skipped if its pickup is the
+//!   end of another agent's path; the nearest pickup wins.
+//! - **No eligible task** (l. 13-16): a free agent stays put, unless it stands
+//!   on a delivery endpoint; then it moves to the nearest free parking cell
+//!   (non-task endpoint, `ZoneType::Parking`).
+//! - **Paths** (`updatePath`): spacetime A* against every other token path;
+//!   the agent may only finish at its goal after the last time another path
+//!   passes through it, and never where another path ends.
 //!
-//! Position synchronization (`step()` lines 187-196) is a MAFIS-specific addition
-//! that handles fault-induced divergence: if an agent's actual position differs
-//! from its expected token position, the token is reset to `[actual_pos]` and
-//! the agent is replanned next tick. pibt2 has no fault handling because it's
-//! a finite-task experiment.
+//! ## Deviations from Ma et al. 2017 / pibt2 (MAFIS task model)
 //!
-//! ## Tracked deviations from the canonical algorithm
-//!
-//! 1. **Relative vs absolute time** — semantically equivalent (see mapping table
-//!    above). Relative time gives bounded memory for lifelong operation; absolute
-//!    time would grow `TOKEN[i]` indefinitely.
-//!
-//! 2. **No `updatePath2` (closest non-conflicting endpoint selection)** — pibt2
-//!    line 206-248 handles the case where an agent has no task and its current
-//!    cell is a delivery location, by moving to the closest free endpoint.
-//!    MAFIS's task scheduler handles idle-state task generation differently
-//!    (the `TaskLeg::Free` state machine), so this branch isn't applicable.
-//!
-//! 3. **Planning order: pibt2 line 52 iterates agents in vector order**. The
-//!    sequential planning order matters in TP because agent k's plan affects
-//!    agent k+1's constraints. MAFIS now matches this (was previously
-//!    "tasked-first" — fixed in 2026-04-07 audit).
+//! 1. **Relative vs absolute time** — semantically equivalent (see mapping
+//!    table). Relative time keeps memory bounded in lifelong runs.
+//! 2. **One leg per path, not pickup→delivery in one path** (`updatePath1`).
+//!    MAFIS agents dwell at the pickup (`Loading`) and the queue manager picks
+//!    the delivery queue only then, so the delivery is unknown at selection.
+//! 3. **Delivery side of the endpoint rule** — tasks have no delivery when
+//!    selected; docks are serialised by the shared queue manager instead
+//!    (one agent at a dock, up to 4 waiting). Queue cells are not endpoints.
+//! 4. **Task set** — one random candidate task per free agent per tick (the
+//!    closest scheduler's pool), not an accumulating MAPD task set.
+//! 5. **Distance for task choice** — Manhattan, pibt2 uses BFS distance.
+//!    Parking choice uses BFS distance as in pibt2.
+//! 6. **Spawn** — agents start on corridor cells, not on non-task endpoints.
+//! 7. **Planning failure** — A* is capped (`ASTAR_MAX_EXPANSIONS`,
+//!    `TOKEN_ASTAR_MAX_TIME`); on failure the agent waits and retries next
+//!    tick (pibt2 halts). No parking cell free → the agent stays (pibt2 halts:
+//!    "not well-formed").
+//! 8. **Faults** — token reset when an agent's position or goal drifts from
+//!    its token (latency, collisions, queue goal changes); dead agents are
+//!    obstacles, parking cells they block are skipped.
+//! 9. **Well-formedness** — `core::topology::check_well_formed`. Only SD-w3
+//!    satisfies Ma et al.'s condition 3; SD-w1, SD-w2 and DD do not (pickups
+//!    line their aisles), so TP's completeness guarantee does not transfer.
+//!    `max_agents` = number of parking cells (condition 2).
 
 use bevy::prelude::*;
 use smallvec::smallvec;
@@ -67,8 +75,8 @@ use super::common::{MasterConstraintIndex, Token};
 use crate::solver::lifelong::{
     AgentPlan, AgentRestoreState, AgentState, LifelongSolver, SolverContext, StepResult,
 };
-use crate::solver::shared::astar::{SpacetimeGrid, spacetime_astar_fast};
-use crate::solver::shared::heuristics::DistanceMapCache;
+use crate::solver::shared::astar::{ConstraintChecker, SpacetimeGrid, spacetime_astar_fast};
+use crate::solver::shared::heuristics::{DistanceMap, DistanceMapCache};
 use crate::solver::shared::traits::{Optimality, Scalability, SolverInfo};
 
 use crate::constants::{ASTAR_MAX_EXPANSIONS, TOKEN_ASTAR_MAX_TIME, TOKEN_PATH_MAX_TIME};
@@ -88,6 +96,31 @@ pub struct TokenPassingSolver {
     stg: SpacetimeGrid,
     /// Reusable set tracking which agents were replanned this tick (avoids per-tick HashSet alloc).
     replanned_set: std::collections::HashSet<usize>,
+    /// Free agents sent to a parking endpoint this step (applied by the runner).
+    goal_overrides: Vec<(usize, IVec2)>,
+    /// Agents that were free and at their goal at the previous step. Such an
+    /// agent has since asked for a task (MAFIS assigns one tick after an agent
+    /// turns Free), so if it is still free now it got none.
+    free_last_step: std::collections::HashSet<usize>,
+}
+
+/// pibt2 `checkAstarFin` (tp.cpp:270-272): the goal cell may only be entered
+/// after `after`, the last time another token path passes through it.
+struct ArriveAfter<'a> {
+    inner: &'a MasterConstraintIndex,
+    goal: IVec2,
+    after: Option<u64>,
+}
+
+impl ConstraintChecker for ArriveAfter<'_> {
+    fn is_vertex_blocked(&self, pos: IVec2, time: u64) -> bool {
+        (pos == self.goal && self.after.is_some_and(|a| time <= a))
+            || self.inner.is_vertex_blocked(pos, time)
+    }
+
+    fn is_edge_blocked(&self, from: IVec2, to: IVec2, time: u64) -> bool {
+        self.inner.is_edge_blocked(from, to, time)
+    }
 }
 
 impl Default for TokenPassingSolver {
@@ -108,6 +141,8 @@ impl TokenPassingSolver {
             master_ci: MasterConstraintIndex::new(),
             stg: SpacetimeGrid::new(),
             replanned_set: std::collections::HashSet::new(),
+            goal_overrides: Vec::new(),
+            free_last_step: std::collections::HashSet::new(),
         }
     }
 
@@ -145,7 +180,7 @@ impl TokenPassingSolver {
 
     fn plan_for_agent(
         &mut self,
-        _local: usize,
+        local: usize,
         start: IVec2,
         goal: IVec2,
         grid: &GridMap,
@@ -156,7 +191,17 @@ impl TokenPassingSolver {
         }
 
         // Master CI already has this agent's path removed by the caller.
-        // Use it directly as the constraint source.
+        // REFERENCE: pibt2 tp.cpp:255-264 — last time another path uses `goal`.
+        let after = self
+            .token
+            .paths
+            .iter()
+            .enumerate()
+            .filter(|&(j, _)| j != local)
+            .filter_map(|(_, path)| path.iter().rposition(|&p| p == goal))
+            .max()
+            .map(|t| t as u64);
+        let ci = ArriveAfter { inner: &self.master_ci, goal, after };
 
         let agent_pair = [(start, goal)];
         let maps = dist_cache.get_or_compute(grid, &agent_pair);
@@ -166,7 +211,7 @@ impl TokenPassingSolver {
             grid,
             start,
             goal,
-            &self.master_ci,
+            &ci,
             TOKEN_ASTAR_MAX_TIME,
             Some(dm),
             &mut self.stg,
@@ -185,6 +230,25 @@ impl TokenPassingSolver {
 
         Some(positions)
     }
+
+    /// pibt2 `updatePath2` (tp.cpp:206-248): nearest parking endpoint (BFS
+    /// distance) that is walkable and not the end of another token path.
+    /// `None` if every parking cell is taken (pibt2 halts: not well-formed).
+    fn free_parking(&self, local: usize, pos: IVec2, ctx: &SolverContext) -> Option<IVec2> {
+        let dm = DistanceMap::compute(ctx.grid, pos);
+        ctx.zones
+            .parking_cells()
+            .into_iter()
+            .filter(|&p| ctx.grid.is_walkable(p) && dm.get(p) != u64::MAX)
+            .filter(|&p| {
+                self.token
+                    .paths
+                    .iter()
+                    .enumerate()
+                    .all(|(j, path)| j == local || path.back() != Some(&p))
+            })
+            .min_by_key(|&p| dm.get(p))
+    }
 }
 
 impl LifelongSolver for TokenPassingSolver {
@@ -199,8 +263,17 @@ impl LifelongSolver for TokenPassingSolver {
             scalability: Scalability::Medium,
             description: "Token Passing — decentralized sequential planning. Each idle agent plans a collision-free path against all others' TOKEN paths.",
             source: "Ma et al., AAMAS 2017",
-            recommended_max_agents: Some(100),
+            // Instance-dependent: see `max_agents`.
+            recommended_max_agents: None,
         }
+    }
+
+    fn max_agents(&self, zones: &crate::core::topology::ZoneMap) -> Option<usize> {
+        Some(zones.parking_cells().len())
+    }
+
+    fn task_scheduler(&self) -> Option<&dyn crate::core::task::TaskScheduler> {
+        Some(&crate::core::task::TokenPassingTaskSelection)
     }
 
     fn reset(&mut self) {
@@ -210,7 +283,13 @@ impl LifelongSolver for TokenPassingSolver {
         self.reverse_map.clear();
         self.last_agent_indices.clear();
         self.replanned_set.clear();
+        self.goal_overrides.clear();
+        self.free_last_step.clear();
         self.initialized = false;
+    }
+
+    fn drain_goal_overrides(&mut self) -> Vec<(usize, IVec2)> {
+        std::mem::take(&mut self.goal_overrides)
     }
 
     /// Restore TP's per-agent token paths from the snapshot's restored
@@ -277,6 +356,7 @@ impl LifelongSolver for TokenPassingSolver {
 
         self.ensure_initialized(agents);
         self.plan_buffer.clear();
+        self.goal_overrides.clear();
 
         // Advance token: pop the front of every path, simulating that all agents
         // moved to their TOKEN[i][1] position. This is the relative-time
@@ -355,14 +435,28 @@ impl LifelongSolver for TokenPassingSolver {
             // i.e. agent needs replan iff its token doesn't extend past now.
             // Relative-time equivalent: `paths[local].len() <= 1` means
             // path[0]=current_pos with no future planned steps.
-            let needs_plan =
-                self.token.paths[local].len() <= 1 && a.goal.is_some() && a.pos != a.goal.unwrap();
+            let token_idle = self.token.paths[local].len() <= 1;
 
-            if !needs_plan {
+            // REFERENCE: pibt2 tp.cpp:99-123. A free agent that got no task
+            // stays put, unless it stands on a delivery endpoint: then it
+            // moves to a parking endpoint (`updatePath2`).
+            let parking = if token_idle
+                && a.task_leg == TaskLeg::Free
+                && a.goal == Some(a.pos)
+                && self.free_last_step.contains(&a.index)
+                && ctx.zones.delivery_cells.contains(&a.pos)
+            {
+                self.free_parking(local, a.pos, ctx)
+            } else {
+                None
+            };
+            let needs_plan = token_idle && a.goal.is_some_and(|g| g != a.pos);
+
+            if parking.is_none() && !needs_plan {
                 continue;
             }
 
-            let goal = a.goal.unwrap();
+            let goal = parking.or(a.goal).unwrap_or(a.pos);
 
             // Remove this agent's own token from the constraint index before
             // planning (so the agent doesn't constrain itself).
@@ -388,6 +482,9 @@ impl LifelongSolver for TokenPassingSolver {
             };
 
             if let Some(positions) = path {
+                if let Some(p) = parking {
+                    self.goal_overrides.push((a.index, p));
+                }
                 let actions: smallvec::SmallVec<[Action; 20]> = positions
                     .windows(2)
                     .map(|w| crate::solver::shared::heuristics::delta_to_action(w[0], w[1]))
@@ -429,6 +526,14 @@ impl LifelongSolver for TokenPassingSolver {
                 self.plan_buffer.push((a.index, smallvec![Action::Wait]));
             }
         }
+
+        self.free_last_step.clear();
+        self.free_last_step.extend(
+            agents
+                .iter()
+                .filter(|a| a.task_leg == TaskLeg::Free && a.goal == Some(a.pos))
+                .map(|a| a.index),
+        );
 
         StepResult::Replan(&self.plan_buffer)
     }
@@ -552,6 +657,210 @@ mod tests {
                 panic!("vertex collision at tick {tick}: {:?}", positions);
             }
         }
+    }
+
+    fn tp_agent(index: usize, pos: IVec2, goal: IVec2, task_leg: TaskLeg) -> AgentState {
+        AgentState { index, pos, goal: Some(goal), has_plan: false, task_leg }
+    }
+
+    /// pibt2 tp.cpp:255-272 (`checkAstarFin`): an agent may only finish at its
+    /// goal after the last time another token path passes through that cell,
+    /// otherwise it would rest on that path.
+    #[test]
+    fn tp_arrives_after_other_paths_leave_goal() {
+        let grid = GridMap::new(5, 3);
+        let zones = test_zones();
+        let mut solver = TokenPassingSolver::new();
+        let mut cache = DistanceMapCache::default();
+        let mut rng = SeededRng::new(42);
+        let goal = IVec2::new(2, 1);
+        // Agent 0 plans first and crosses `goal` at t=2 on its way to (4,1).
+        let agents = vec![
+            tp_agent(0, IVec2::new(0, 1), IVec2::new(4, 1), TaskLeg::TravelEmpty(IVec2::new(4, 1))),
+            tp_agent(1, IVec2::new(2, 0), goal, TaskLeg::TravelEmpty(goal)),
+        ];
+        let ctx = SolverContext { grid: &grid, zones: &zones, tick: 0, num_agents: 2 };
+        let _ = solver.step(&ctx, &agents, &mut cache, &mut rng);
+        let crossing = solver.token.paths[0].iter().position(|&p| p == goal).unwrap();
+        let arrival = solver.token.paths[1].iter().position(|&p| p == goal).unwrap();
+        assert_eq!(solver.token.paths[1].back(), Some(&goal));
+        assert!(arrival > crossing, "arrived at t={arrival}, other path crosses at t={crossing}");
+    }
+
+    fn parking_zones() -> ZoneMap {
+        let mut zones = test_zones();
+        zones.delivery_cells = vec![IVec2::new(4, 0)];
+        zones.zone_type.insert(IVec2::new(0, 2), crate::core::topology::ZoneType::Parking);
+        zones.zone_type.insert(IVec2::new(4, 2), crate::core::topology::ZoneType::Parking);
+        zones
+    }
+
+    /// pibt2 tp.cpp:99-123 (`updatePath2`): a free agent with no task that
+    /// stands on a delivery endpoint moves to the nearest parking endpoint
+    /// that is not the end of another token path. A free agent elsewhere stays.
+    /// The rule fires only once the agent has asked for a task and got none:
+    /// on the tick it turns Free (MAFIS's 1-tick dwell before assignment) it
+    /// has not asked yet, so it must not be sent away.
+    #[test]
+    fn tp_free_agent_on_delivery_moves_to_free_parking() {
+        let grid = GridMap::new(5, 3);
+        let zones = parking_zones();
+        let mut solver = TokenPassingSolver::new();
+        let mut cache = DistanceMapCache::default();
+        let mut rng = SeededRng::new(42);
+        let dock = IVec2::new(4, 0);
+        let rest = IVec2::new(4, 2); // nearest parking, but agent 1 rests there
+        let agents =
+            vec![tp_agent(0, dock, dock, TaskLeg::Free), tp_agent(1, rest, rest, TaskLeg::Free)];
+        let ctx = SolverContext { grid: &grid, zones: &zones, tick: 0, num_agents: 2 };
+        let _ = solver.step(&ctx, &agents, &mut cache, &mut rng);
+        assert!(solver.drain_goal_overrides().is_empty(), "just turned Free: no request yet");
+        let ctx = SolverContext { grid: &grid, zones: &zones, tick: 1, num_agents: 2 };
+        let _ = solver.step(&ctx, &agents, &mut cache, &mut rng);
+        assert_eq!(solver.drain_goal_overrides(), vec![(0, IVec2::new(0, 2))]);
+        assert_eq!(solver.token.paths[0].back(), Some(&IVec2::new(0, 2)));
+        assert_eq!(solver.token.paths[1].iter().copied().collect::<Vec<_>>(), vec![rest]);
+    }
+
+    /// A parking cell blocked by a dead agent (now an obstacle) is skipped.
+    #[test]
+    fn tp_parking_skips_blocked_cells() {
+        let mut grid = GridMap::new(5, 3);
+        grid.set_obstacle(IVec2::new(4, 2));
+        let zones = parking_zones();
+        let mut solver = TokenPassingSolver::new();
+        let mut cache = DistanceMapCache::default();
+        let mut rng = SeededRng::new(42);
+        let dock = IVec2::new(4, 0);
+        let agents = vec![tp_agent(0, dock, dock, TaskLeg::Free)];
+        for tick in 0..2 {
+            let ctx = SolverContext { grid: &grid, zones: &zones, tick, num_agents: 1 };
+            let _ = solver.step(&ctx, &agents, &mut cache, &mut rng);
+        }
+        assert_eq!(solver.drain_goal_overrides(), vec![(0, IVec2::new(0, 2))]);
+    }
+
+    /// 10×7 well-formed map: 4 parking (row 1), 3 pickups (row 3), one dock
+    /// at (8,5) with a 4-cell queue extending west.
+    fn tiny_well_formed_map() -> (GridMap, ZoneMap) {
+        let mut cells = Vec::new();
+        for x in 0..10 {
+            cells.push(serde_json::json!({"x": x, "y": 0, "type": "wall"}));
+            cells.push(serde_json::json!({"x": x, "y": 6, "type": "wall"}));
+        }
+        for y in 1..6 {
+            cells.push(serde_json::json!({"x": 0, "y": y, "type": "wall"}));
+            cells.push(serde_json::json!({"x": 9, "y": y, "type": "wall"}));
+        }
+        for x in [1, 3, 5, 7] {
+            cells.push(serde_json::json!({"x": x, "y": 1, "type": "parking"}));
+        }
+        for x in [2, 4, 6] {
+            cells.push(serde_json::json!({"x": x, "y": 3, "type": "pickup"}));
+        }
+        cells.push(
+            serde_json::json!({"x": 8, "y": 5, "type": "delivery", "queue_direction": "west"}),
+        );
+        let json = serde_json::json!({"width": 10, "height": 7, "cells": cells});
+        crate::core::topology::TopologyRegistry::parse_json_value(&json).unwrap()
+    }
+
+    /// Runs TP through the full runner (task system + queue) and returns the
+    /// per-tick positions plus the tick of every completed task.
+    fn run_tp(seed: u64, num_agents: usize, ticks: u64) -> (Vec<Vec<IVec2>>, Vec<u64>) {
+        use crate::core::queue::ActiveQueuePolicy;
+        use crate::core::runner::SimulationRunner;
+        use crate::core::task::ClosestFirstScheduler;
+        use crate::fault::config::FaultConfig;
+        use crate::fault::scenario::FaultSchedule;
+
+        let (grid, zones) = tiny_well_formed_map();
+        let wf = crate::core::topology::check_well_formed(&grid, &zones);
+        assert!(wf.holds_for(num_agents), "{wf:?}");
+        let mut rng = SeededRng::new(seed);
+        let agents = crate::analysis::baseline::place_agents(num_agents, &grid, &zones, &mut rng);
+        let mut runner = SimulationRunner::new(
+            grid,
+            zones.clone(),
+            agents,
+            Box::new(TokenPassingSolver::new()),
+            rng,
+            FaultConfig { enabled: false, ..Default::default() },
+            FaultSchedule::default(),
+        );
+        let policy = ActiveQueuePolicy::from_name("closest");
+        let mut trace = Vec::new();
+        let mut completions = Vec::new();
+        for _ in 0..ticks {
+            let result = runner.tick(&ClosestFirstScheduler, policy.policy());
+            completions.extend(result.completion_ticks.iter().copied());
+            // Endpoint rule: no two path ends coincide on pickups or parking.
+            // Queue-line and dock cells are assigned by the shared queue
+            // manager, which can send two agents to the same slot or hand a
+            // dock over while its last user still stands on it (deviation).
+            let queue_cell = |c: IVec2| {
+                zones.queue_lines.iter().any(|l| l.delivery_cell == c || l.cells.contains(&c))
+            };
+            let alive: Vec<_> = runner.agents.iter().filter(|a| a.alive).collect();
+            for (i, a) in alive.iter().enumerate() {
+                for b in &alive[i + 1..] {
+                    assert!(
+                        a.goal != b.goal || queue_cell(a.goal),
+                        "tick {}: two paths end at {} ({:?} at {}, {:?} at {})",
+                        result.tick,
+                        a.goal,
+                        a.task_leg,
+                        a.pos,
+                        b.task_leg,
+                        b.pos
+                    );
+                }
+            }
+            trace.push(runner.agents.iter().map(|a| a.pos).collect());
+        }
+        (trace, completions)
+    }
+
+    /// On a well-formed instance TP keeps completing tasks (no deadlock).
+    #[test]
+    fn tp_well_formed_map_completes_tasks_without_deadlock() {
+        for seed in 1..=10 {
+            let (_, completions) = run_tp(seed, 4, 600);
+            assert!(completions.len() >= 20, "seed {seed}: only {} tasks", completions.len());
+            let longest_gap = completions.windows(2).map(|w| w[1] - w[0]).max().unwrap();
+            assert!(longest_gap <= 60, "seed {seed}: no completion for {longest_gap} ticks");
+        }
+    }
+
+    /// Same seed → identical trajectories.
+    #[test]
+    fn tp_is_deterministic() {
+        assert_eq!(run_tp(7, 4, 300), run_tp(7, 4, 300));
+    }
+
+    /// TP's fleet cap comes from the instance: Ma et al. well-formedness
+    /// condition 2 needs at least one non-task endpoint (parking) per agent.
+    #[test]
+    fn tp_max_agents_is_parking_count() {
+        use crate::core::topology::TopologyRegistry;
+        let registry = TopologyRegistry::load_from_dir(std::path::Path::new("topologies"));
+        let zones_of =
+            |id: &str| TopologyRegistry::parse_entry(registry.find(id).unwrap()).unwrap().1;
+        let tp = TokenPassingSolver::new();
+        assert_eq!(tp.max_agents(&zones_of("warehouse_single_dock")), Some(60));
+        assert_eq!(tp.max_agents(&zones_of("warehouse_dual_dock")), Some(120));
+        let pibt = crate::solver::pibt::PibtLifelongSolver::new();
+        assert_eq!(pibt.max_agents(&zones_of("warehouse_single_dock")), None);
+    }
+
+    /// TP selects its own tasks (Ma et al. 2017 Alg. 1 lines 7-12) instead of
+    /// taking them from the configured scheduler.
+    #[test]
+    fn tp_provides_its_own_task_selection() {
+        let solver = TokenPassingSolver::new();
+        assert_eq!(solver.task_scheduler().map(|s| s.name()), Some("token_passing"));
+        let pibt = crate::solver::pibt::PibtLifelongSolver::new();
+        assert!(pibt.task_scheduler().is_none());
     }
 
     #[test]

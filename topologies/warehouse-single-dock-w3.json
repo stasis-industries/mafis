@@ -9266,6 +9266,396 @@
       "x": 56,
       "y": 54,
       "type": "wall"
+    },
+    {
+      "x": 51,
+      "y": 2,
+      "type": "parking"
+    },
+    {
+      "x": 53,
+      "y": 2,
+      "type": "parking"
+    },
+    {
+      "x": 55,
+      "y": 2,
+      "type": "parking"
+    },
+    {
+      "x": 51,
+      "y": 4,
+      "type": "parking"
+    },
+    {
+      "x": 53,
+      "y": 4,
+      "type": "parking"
+    },
+    {
+      "x": 55,
+      "y": 4,
+      "type": "parking"
+    },
+    {
+      "x": 51,
+      "y": 6,
+      "type": "parking"
+    },
+    {
+      "x": 53,
+      "y": 6,
+      "type": "parking"
+    },
+    {
+      "x": 55,
+      "y": 6,
+      "type": "parking"
+    },
+    {
+      "x": 51,
+      "y": 8,
+      "type": "parking"
+    },
+    {
+      "x": 53,
+      "y": 8,
+      "type": "parking"
+    },
+    {
+      "x": 55,
+      "y": 8,
+      "type": "parking"
+    },
+    {
+      "x": 51,
+      "y": 10,
+      "type": "parking"
+    },
+    {
+      "x": 53,
+      "y": 10,
+      "type": "parking"
+    },
+    {
+      "x": 55,
+      "y": 10,
+      "type": "parking"
+    },
+    {
+      "x": 51,
+      "y": 12,
+      "type": "parking"
+    },
+    {
+      "x": 53,
+      "y": 12,
+      "type": "parking"
+    },
+    {
+      "x": 55,
+      "y": 12,
+      "type": "parking"
+    },
+    {
+      "x": 51,
+      "y": 14,
+      "type": "parking"
+    },
+    {
+      "x": 53,
+      "y": 14,
+      "type": "parking"
+    },
+    {
+      "x": 55,
+      "y": 14,
+      "type": "parking"
+    },
+    {
+      "x": 51,
+      "y": 16,
+      "type": "parking"
+    },
+    {
+      "x": 53,
+      "y": 16,
+      "type": "parking"
+    },
+    {
+      "x": 55,
+      "y": 16,
+      "type": "parking"
+    },
+    {
+      "x": 51,
+      "y": 18,
+      "type": "parking"
+    },
+    {
+      "x": 53,
+      "y": 18,
+      "type": "parking"
+    },
+    {
+      "x": 55,
+      "y": 18,
+      "type": "parking"
+    },
+    {
+      "x": 51,
+      "y": 20,
+      "type": "parking"
+    },
+    {
+      "x": 53,
+      "y": 20,
+      "type": "parking"
+    },
+    {
+      "x": 55,
+      "y": 20,
+      "type": "parking"
+    },
+    {
+      "x": 51,
+      "y": 22,
+      "type": "parking"
+    },
+    {
+      "x": 53,
+      "y": 22,
+      "type": "parking"
+    },
+    {
+      "x": 55,
+      "y": 22,
+      "type": "parking"
+    },
+    {
+      "x": 51,
+      "y": 24,
+      "type": "parking"
+    },
+    {
+      "x": 53,
+      "y": 24,
+      "type": "parking"
+    },
+    {
+      "x": 55,
+      "y": 24,
+      "type": "parking"
+    },
+    {
+      "x": 51,
+      "y": 26,
+      "type": "parking"
+    },
+    {
+      "x": 53,
+      "y": 26,
+      "type": "parking"
+    },
+    {
+      "x": 55,
+      "y": 26,
+      "type": "parking"
+    },
+    {
+      "x": 51,
+      "y": 28,
+      "type": "parking"
+    },
+    {
+      "x": 53,
+      "y": 28,
+      "type": "parking"
+    },
+    {
+      "x": 55,
+      "y": 28,
+      "type": "parking"
+    },
+    {
+      "x": 51,
+      "y": 30,
+      "type": "parking"
+    },
+    {
+      "x": 53,
+      "y": 30,
+      "type": "parking"
+    },
+    {
+      "x": 55,
+      "y": 30,
+      "type": "parking"
+    },
+    {
+      "x": 51,
+      "y": 32,
+      "type": "parking"
+    },
+    {
+      "x": 53,
+      "y": 32,
+      "type": "parking"
+    },
+    {
+      "x": 55,
+      "y": 32,
+      "type": "parking"
+    },
+    {
+      "x": 51,
+      "y": 34,
+      "type": "parking"
+    },
+    {
+      "x": 53,
+      "y": 34,
+      "type": "parking"
+    },
+    {
+      "x": 55,
+      "y": 34,
+      "type": "parking"
+    },
+    {
+      "x": 51,
+      "y": 36,
+      "type": "parking"
+    },
+    {
+      "x": 53,
+      "y": 36,
+      "type": "parking"
+    },
+    {
+      "x": 55,
+      "y": 36,
+      "type": "parking"
+    },
+    {
+      "x": 51,
+      "y": 38,
+      "type": "parking"
+    },
+    {
+      "x": 53,
+      "y": 38,
+      "type": "parking"
+    },
+    {
+      "x": 55,
+      "y": 38,
+      "type": "parking"
+    },
+    {
+      "x": 51,
+      "y": 40,
+      "type": "parking"
+    },
+    {
+      "x": 53,
+      "y": 40,
+      "type": "parking"
+    },
+    {
+      "x": 55,
+      "y": 40,
+      "type": "parking"
+    },
+    {
+      "x": 51,
+      "y": 42,
+      "type": "parking"
+    },
+    {
+      "x": 53,
+      "y": 42,
+      "type": "parking"
+    },
+    {
+      "x": 55,
+      "y": 42,
+      "type": "parking"
+    },
+    {
+      "x": 51,
+      "y": 44,
+      "type": "parking"
+    },
+    {
+      "x": 53,
+      "y": 44,
+      "type": "parking"
+    },
+    {
+      "x": 55,
+      "y": 44,
+      "type": "parking"
+    },
+    {
+      "x": 51,
+      "y": 46,
+      "type": "parking"
+    },
+    {
+      "x": 53,
+      "y": 46,
+      "type": "parking"
+    },
+    {
+      "x": 55,
+      "y": 46,
+      "type": "parking"
+    },
+    {
+      "x": 51,
+      "y": 48,
+      "type": "parking"
+    },
+    {
+      "x": 53,
+      "y": 48,
+      "type": "parking"
+    },
+    {
+      "x": 55,
+      "y": 48,
+      "type": "parking"
+    },
+    {
+      "x": 51,
+      "y": 50,
+      "type": "parking"
+    },
+    {
+      "x": 53,
+      "y": 50,
+      "type": "parking"
+    },
+    {
+      "x": 55,
+      "y": 50,
+      "type": "parking"
+    },
+    {
+      "x": 51,
+      "y": 52,
+      "type": "parking"
+    },
+    {
+      "x": 53,
+      "y": 52,
+      "type": "parking"
+    },
+    {
+      "x": 55,
+      "y": 52,
+      "type": "parking"
     }
   ],
   "robots": [
