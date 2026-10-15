@@ -631,6 +631,13 @@ pub fn spacetime_astar_sequential<C: ConstraintChecker>(
         base + remaining_h[gid]
     };
 
+    // The executor holds an agent on its last goal once its plan ends, so the
+    // search may only finish there after the cell's last constrained time —
+    // reference `earliest_holding_time` (StateTimeAStar.cpp:72-87).
+    let last_goal = goals[n_goals - 1].0;
+    let hold_from =
+        (0..=max_time).rev().find(|&t| ci.is_vertex_blocked(last_goal, t)).map_or(0, |t| t + 1);
+
     let start_st = stg.st_index(start, 0, 0);
     // First touch of `start_st` after reset — always a MAX → 0 transition,
     // so unconditionally record it in the dirty list.
@@ -724,7 +731,9 @@ pub fn spacetime_astar_sequential<C: ConstraintChecker>(
         // This is a zero-time transition (same pos, same time, next layer).
         // Must happen BEFORE the max_time guard — reaching the last goal at
         // exactly max_time is valid (no further movement needed).
-        if current.pos == goals[current.goal_id].0 {
+        if current.pos == goals[current.goal_id].0
+            && (current.goal_id + 1 < n_goals || current.time >= hold_from)
+        {
             let next_gid = current.goal_id + 1;
             let next_st = stg.st_index(current.pos, next_gid, current.time);
             if !stg.closed[next_st] && current.g < stg.best_g[next_st] {
@@ -1619,6 +1628,32 @@ mod tests {
                 assert_ne!(pos, IVec2::new(2, 0), "constraint violated at t=2");
             }
         }
+    }
+
+    #[test]
+    fn sequential_astar_arrives_only_when_goal_can_be_held() {
+        // Goal (2,0) is taken at t=5 by someone else. Arriving at t=2 and
+        // holding would collide, so the path must arrive after t=5
+        // (reference earliest_holding_time).
+        let grid = GridMap::new(5, 2);
+        let goal = IVec2::new(2, 0);
+        let dm = DistanceMap::compute(&grid, goal);
+        let goals: Vec<(IVec2, &DistanceMap)> = vec![(goal, &dm)];
+        let mut ci = ConstraintIndex::new();
+        ci.add_vertex(goal, 5);
+
+        let mut stg = SeqGoalGrid::new();
+        let path =
+            spacetime_astar_sequential(&grid, IVec2::ZERO, &goals, &ci, 10, &mut stg, u64::MAX)
+                .unwrap();
+
+        assert!(path.len() >= 6, "arrived at t={} before the t=5 block", path.len());
+        let mut pos = IVec2::ZERO;
+        for (t, a) in path.iter().enumerate() {
+            pos = a.apply(pos);
+            assert!(!(t + 1 == 5 && pos == goal), "on the goal at t=5");
+        }
+        assert_eq!(pos, goal);
     }
 
     #[test]
