@@ -63,7 +63,7 @@ fn burst_50() -> FaultScenario {
 }
 
 fn wear_medium() -> FaultScenario {
-    // WearHeatRate::Medium -> Weibull beta=2.5, eta=500 -> ~63% fleet dead by tick 500.
+    // WearHeatRate::Medium -> Weibull beta=2.5, eta=500 -> 63.2% fleet dead by tick 500.
     // Models typical industrial AGV deployment (Canadian survey: 500-1,000 h MTBF).
     FaultScenario {
         enabled: true,
@@ -75,7 +75,8 @@ fn wear_medium() -> FaultScenario {
 }
 
 fn wear_high() -> FaultScenario {
-    // WearHeatRate::High -> Weibull beta=3.5, eta=150 -> ~90% fleet dead by tick 500.
+    // WearHeatRate::High -> Weibull beta=3.5, eta=150 -> 100% fleet dead by tick 500
+    // (90% by tick 190, 99% by tick 232).
     // Models high-stress operation (Carlson & Murphy 2005: field robot MTBF ~ 24 h).
     FaultScenario {
         enabled: true,

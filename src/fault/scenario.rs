@@ -67,14 +67,16 @@ impl FromStr for FaultScenarioType {
 
 /// Wear intensity preset for the WearBased scenario.
 ///
-/// Maps to Weibull (beta, eta) parameters calibrated to produce realistic failure
-/// distributions within a 500-tick experiment window:
+/// Maps to Weibull (beta, eta) parameters; the clock is ticks alive, and
+/// F(t) = 1 - exp(-(t/eta)^beta) is the fraction of the fleet dead by tick t:
 ///
-/// | Level  | beta | eta | MTTF  | ~% dead at tick 500 | Literature basis                |
-/// |--------|------|-----|-------|---------------------|---------------------------------|
-/// | Low    | 2.0  | 900 | ~800t |  ~27%               | Well-maintained warehouse AGV   |
-/// | Medium | 2.5  | 500 | ~445t |  ~63%               | Typical industrial AGV          |
-/// | High   | 3.5  | 150 | ~137t |  ~90%               | Carlson & Murphy 2005: MTBF~24h |
+/// | Level  | beta | eta | MTTF | dead at t=500 | 90% dead at | Literature basis                |
+/// |--------|------|-----|------|---------------|-------------|---------------------------------|
+/// | Low    | 2.0  | 900 | 798t | 26.6%         | t=1366      | Well-maintained warehouse AGV   |
+/// | Medium | 2.5  | 500 | 444t | 63.2%         | t=698       | Typical industrial AGV          |
+/// | High   | 3.5  | 150 | 135t | 100.0%        | t=190       | Carlson & Murphy 2005: MTBF~24h |
+///
+/// High is fleet extinction within a 500-tick run (99% dead by t=232).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub enum WearHeatRate {
     Low,
@@ -93,12 +95,12 @@ impl WearHeatRate {
     }
 
     /// Weibull (beta, eta) parameters for this intensity level.
-    /// beta = shape (wear-out acceleration); eta = scale (characteristic life in movement-ticks).
+    /// beta = shape (wear-out acceleration); eta = scale (characteristic life in ticks alive).
     pub fn weibull_params(&self) -> (f32, f32) {
         match self {
-            Self::Low => (2.0, 900.0),    // ~27% dead by tick 500
-            Self::Medium => (2.5, 500.0), // ~63% dead by tick 500
-            Self::High => (3.5, 150.0),   // ~90% dead by tick 500
+            Self::Low => (2.0, 900.0),    // 26.6% dead by tick 500
+            Self::Medium => (2.5, 500.0), // 63.2% dead by tick 500
+            Self::High => (3.5, 150.0),   // 100% dead by tick 500 (90% by tick 190)
         }
     }
 

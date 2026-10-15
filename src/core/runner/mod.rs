@@ -985,9 +985,9 @@ impl SimulationRunner {
 
     /// Update each alive agent's operational age and visual stress indicator.
     ///
-    /// `operational_age` increments only on actual moves (distance-based wear).
-    /// Grid-blocked moves (e.g., obstacle from a dead agent) are converted to
-    /// `Action::Wait` during collision resolution, so they do not count as wear.
+    /// `operational_age` counts every tick the agent is alive, so a given seed
+    /// kills the same agents at the same ticks under every solver: the wear
+    /// fault is an exogenous event, not a function of how much a solver moves.
     /// `heat` shows individual progress toward this agent's sampled failure tick:
     /// 0.0 = fresh, 1.0 = about to fail. This replaces the old Weibull CDF which
     /// showed population-level failure probability, causing agents to visually die
@@ -997,9 +997,7 @@ impl SimulationRunner {
             if !self.agents[i].alive {
                 continue;
             }
-            if matches!(self.agents[i].last_action, Action::Move(_)) {
-                self.agents[i].operational_age = self.agents[i].operational_age.saturating_add(1);
-            }
+            self.agents[i].operational_age = self.agents[i].operational_age.saturating_add(1);
             // Visual stress: progress toward individual failure tick (0 → 1 at death).
             if i < self.weibull_failure_ticks.len() && self.weibull_failure_ticks[i] > 0 {
                 self.agents[i].heat = (self.agents[i].operational_age as f32

@@ -41,7 +41,7 @@ pub struct AgentSnapshot {
     /// Skipped from JSON — internal use only.
     #[serde(skip)]
     pub planned_actions: Vec<u8>,
-    /// Weibull operational age (movement-ticks). Required for wear rollback.
+    /// Weibull operational age (ticks alive). Required for wear rollback.
     #[serde(skip)]
     pub operational_age: u32,
 }

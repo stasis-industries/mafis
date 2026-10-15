@@ -60,7 +60,7 @@ pub struct FaultConfig {
     /// Shape parameter beta (beta > 1 = wear-out, increasing failure rate).
     /// Low = 2.0 (well-maintained warehouse AGV); High = 3.5 (Carlson & Murphy 2005 field robots).
     pub weibull_beta: f32,
-    /// Scale parameter eta -- characteristic life in operational movement-ticks.
+    /// Scale parameter eta -- characteristic life in ticks alive.
     /// Accelerated time scale; calibrated to produce failures within experiment window.
     pub weibull_eta: f32,
 
