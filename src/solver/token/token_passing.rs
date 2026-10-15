@@ -236,7 +236,11 @@ impl TokenPassingSolver {
             .into_iter()
             .filter(|&p| ctx.grid.is_walkable(p) && dm.get(p) != u64::MAX)
             .filter(|&p| {
-                self.token.paths.iter().enumerate().all(|(j, path)| j == local || path.back() != Some(&p))
+                self.token
+                    .paths
+                    .iter()
+                    .enumerate()
+                    .all(|(j, path)| j == local || path.back() != Some(&p))
             })
             .min_by_key(|&p| dm.get(p))
     }
@@ -688,10 +692,8 @@ mod tests {
         let mut rng = SeededRng::new(42);
         let dock = IVec2::new(4, 0);
         let rest = IVec2::new(4, 2); // nearest parking, but agent 1 rests there
-        let agents = vec![
-            tp_agent(0, dock, dock, TaskLeg::Free),
-            tp_agent(1, rest, rest, TaskLeg::Free),
-        ];
+        let agents =
+            vec![tp_agent(0, dock, dock, TaskLeg::Free), tp_agent(1, rest, rest, TaskLeg::Free)];
         let ctx = SolverContext { grid: &grid, zones: &zones, tick: 0, num_agents: 2 };
         let _ = solver.step(&ctx, &agents, &mut cache, &mut rng);
         assert_eq!(solver.drain_goal_overrides(), vec![(0, IVec2::new(0, 2))]);
@@ -819,7 +821,8 @@ mod tests {
     fn tp_max_agents_is_parking_count() {
         use crate::core::topology::TopologyRegistry;
         let registry = TopologyRegistry::load_from_dir(std::path::Path::new("topologies"));
-        let zones_of = |id: &str| TopologyRegistry::parse_entry(registry.find(id).unwrap()).unwrap().1;
+        let zones_of =
+            |id: &str| TopologyRegistry::parse_entry(registry.find(id).unwrap()).unwrap().1;
         let tp = TokenPassingSolver::new();
         assert_eq!(tp.max_agents(&zones_of("warehouse_single_dock")), Some(60));
         assert_eq!(tp.max_agents(&zones_of("warehouse_dual_dock")), Some(120));

@@ -518,11 +518,14 @@ impl QueueManager {
     ) {
         for (qi, state) in self.queues.iter_mut().enumerate() {
             let line = &queue_lines[qi];
-            let slots: Vec<usize> = (0..state.slots.len()).filter(|&s| state.slots[s].is_some()).collect();
+            let slots: Vec<usize> =
+                (0..state.slots.len()).filter(|&s| state.slots[s].is_some()).collect();
             let mut occupants: Vec<usize> = slots.iter().filter_map(|&s| state.slots[s]).collect();
             // Agents off the lane (or unknown indices) keep their relative order at the back.
             occupants.sort_by_key(|&a| {
-                agents.get(a).and_then(|ag| line.cells.iter().position(|&c| c == ag.pos))
+                agents
+                    .get(a)
+                    .and_then(|ag| line.cells.iter().position(|&c| c == ag.pos))
                     .unwrap_or(usize::MAX)
             });
             for (&s, &a) in slots.iter().zip(&occupants) {

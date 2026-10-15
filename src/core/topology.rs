@@ -510,7 +510,9 @@ pub fn check_well_formed(grid: &GridMap, zones: &ZoneMap) -> WellFormedness {
     for y in 0..grid.height {
         for x in 0..grid.width {
             let seed = IVec2::new(x, y);
-            if !grid.is_walkable(seed) || is_endpoint[idx(seed)] || component[idx(seed)] != usize::MAX
+            if !grid.is_walkable(seed)
+                || is_endpoint[idx(seed)]
+                || component[idx(seed)] != usize::MAX
             {
                 continue;
             }
