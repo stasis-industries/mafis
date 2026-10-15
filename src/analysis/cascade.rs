@@ -59,8 +59,9 @@ impl CascadeState {
     }
 }
 
-/// On each tick, read FaultEvents. For each fault, BFS through the ADG
-/// and count affected agents + depth. No artificial delay numbers.
+/// On each tick, read FaultEvents and record each fault's cascade. Runner
+/// faults carry the cascade computed at the fault instant (same definition as
+/// the experiment runner); other faults BFS through the live ADG.
 /// Cascade depth is capped at `constants::MAX_CASCADE_DEPTH` to bound cost.
 pub fn propagate_cascade(
     mut commands: Commands,
@@ -71,6 +72,28 @@ pub fn propagate_cascade(
 ) {
     for event in fault_events.read() {
         let fault_origin = event.entity;
+
+        if let Some((event_max_depth, reached)) = &event.cascade {
+            for &(entity, depth) in reached {
+                let record =
+                    cascade.records.entry(entity).or_insert(DelayRecord { fault_origin, depth: 0 });
+                record.fault_origin = fault_origin;
+                record.depth = record.depth.max(depth);
+                commands.entity(entity).insert(DelayRecord { fault_origin, depth: record.depth });
+            }
+            cascade.max_depth = cascade.max_depth.max(*event_max_depth);
+            cascade.fault_count += 1;
+            cascade.fault_log.push(CascadeFaultEntry {
+                tick: sim_config.tick,
+                faulted_entity: event.entity,
+                fault_type: event.fault_type,
+                source: event.source,
+                position: event.position,
+                agents_affected: reached.len() as u32 + 1,
+                max_depth: *event_max_depth,
+            });
+            continue;
+        }
 
         let mut visited = HashSet::new();
         // BFS queue: (entity, depth) — no chain cloning needed

@@ -16,6 +16,12 @@ pub struct FaultEvent {
     /// Path invalidations counted at the instant of death (before replanning).
     /// Used as a floor for cascade `agents_affected` when ADG BFS finds fewer.
     pub paths_invalidated: u32,
+    /// Cascade computed from the runner's fault-instant snapshot: (max BFS
+    /// depth, reached agents with their depth). A group of simultaneous faults
+    /// is attributed to its first victim; the others carry an empty cascade.
+    /// `None` for faults injected outside the runner (manual ECS path), which
+    /// fall back to the live ADG.
+    pub cascade: Option<(u32, Vec<(Entity, u32)>)>,
 }
 
 /// Latency injection: forces Wait for `remaining` ticks, then auto-removes.
