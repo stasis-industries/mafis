@@ -113,9 +113,13 @@ pub struct SimulationRunner {
     available_agents_buf: Vec<usize>,
     /// Reusable buffer for detected fault decisions.
     faults_buf: Vec<(usize, FaultType)>,
-    /// Number of post-hoc collision violations detected (release mode only).
-    /// Always 0 if solver and collision resolution are correct.
+    /// Ticks with a vertex or edge-swap conflict after resolution (release
+    /// builds; debug builds panic instead). Always 0 if resolution is correct.
     pub collision_violations: u64,
+    /// Agent-ticks where the runner overrode a solver move with a Wait: a
+    /// conflict the resolver had to break, or a move into an obstacle.
+    /// Zero means the solver's own plans were conflict-free.
+    pub forced_waits: u64,
     /// Active spatial zone strip bounds (x_min, x_max) during a zone outage.
     /// Set when ZoneLatency fires, cleared when all latency expires.
     pub zone_strip: Option<(i32, i32)>,
@@ -176,6 +180,7 @@ impl SimulationRunner {
             available_agents_buf: Vec::new(),
             faults_buf: Vec::new(),
             collision_violations: 0,
+            forced_waits: 0,
             zone_strip: None,
         }
     }
@@ -601,6 +606,8 @@ impl SimulationRunner {
                 let (target, effective_action) = if self.grid.is_walkable(new_pos) {
                     (new_pos, action)
                 } else {
+                    // The solver planned into an obstacle: the runner overrides it.
+                    self.forced_waits += 1;
                     (a.pos, Action::Wait)
                 };
                 col.moves.push((a.pos, effective_action, target, false));
@@ -719,6 +726,9 @@ impl SimulationRunner {
             let (_, action, target, was_forced) = self.collision.moves[i];
             let agent = &mut self.agents[i];
             if agent.alive {
+                if was_forced {
+                    self.forced_waits += 1;
+                }
                 agent.planned_path.pop_front();
 
                 if target != agent.pos && !self.grid.is_walkable(target) {
@@ -739,62 +749,63 @@ impl SimulationRunner {
         }
 
         // ── Post-hoc collision validator (LoRR-inspired) ────────────────
-        // Independent safety net: verify no two alive agents share a position
-        // AFTER collision resolution applied moves. This catches bugs in the
-        // resolution logic itself, not just in the solver.
-        #[cfg(debug_assertions)]
-        {
-            let mut seen_positions: std::collections::HashMap<IVec2, usize> =
-                std::collections::HashMap::with_capacity(n);
-            for (i, a) in self.agents.iter().enumerate() {
-                if !a.alive {
-                    continue;
-                }
-                if let Some(&prev) = seen_positions.get(&a.pos) {
-                    panic!(
-                        "POST-HOC COLLISION VALIDATOR: tick {} — agents {} and {} \
-                         both at {:?} after collision resolution. \
-                         This is a bug in resolve_collisions_fast().",
-                        self.tick, prev, i, a.pos
-                    );
-                }
-                seen_positions.insert(a.pos, i);
-            }
-        }
-
-        // Release-mode: lightweight check with counter (no HashMap)
-        #[cfg(not(debug_assertions))]
-        {
-            // Use the collision grid we already have for O(1) duplicate detection
-            let col = &mut self.collision;
-            col.clear_targets();
-            let mut collision_found = false;
-            for (_i, a) in self.agents.iter().enumerate() {
-                if !a.alive {
-                    continue;
-                }
-                let idx = col.idx(a.pos);
-                if idx < col.grid_size {
-                    if col.target_count[idx] > 0 {
-                        collision_found = true;
-                        // Log but don't panic in release — the simulation can
-                        // continue, but the collision is recorded for analysis.
-                        #[cfg(not(target_arch = "wasm32"))]
-                        eprintln!(
-                            "WARNING: post-hoc collision at tick {} pos {:?} (agent {})",
-                            self.tick, a.pos, _i
-                        );
-                    }
-                    col.target_count[idx] += 1;
-                    col.dirty_targets.push(idx);
-                }
-            }
-            if collision_found {
+        // Independent safety net on the APPLIED positions: catches bugs in the
+        // resolution logic itself. Debug builds panic; release builds keep
+        // running and count the tick in `collision_violations`.
+        if let Some(violation) = self.find_post_hoc_collision() {
+            #[cfg(debug_assertions)]
+            panic!(
+                "POST-HOC COLLISION VALIDATOR: tick {} — {violation} after collision \
+                 resolution. This is a bug in resolve_collisions_fast().",
+                self.tick
+            );
+            #[cfg(not(debug_assertions))]
+            {
+                #[cfg(not(target_arch = "wasm32"))]
+                eprintln!("WARNING: post-hoc collision at tick {}: {violation}", self.tick);
                 self.collision_violations += 1;
             }
         }
 
         moves
+    }
+
+    /// Vertex (two alive agents on one cell) or edge (two agents swapped cells)
+    /// conflict in the positions just applied. Reuses the flat collision grid.
+    fn find_post_hoc_collision(&mut self) -> Option<String> {
+        let col = &mut self.collision;
+        col.clear_targets();
+        col.clear_sources();
+        for (i, a) in self.agents.iter().enumerate() {
+            if !a.alive {
+                continue;
+            }
+            let idx = col.idx(a.pos);
+            if col.target_count[idx] > 0 {
+                return Some(format!("agents {} and {i} both at {:?}", col.target_agent[idx], a.pos));
+            }
+            col.target_count[idx] = 1;
+            col.target_agent[idx] = i as u32;
+            col.dirty_targets.push(idx);
+            let src = col.moves[i].0;
+            if src != a.pos {
+                let s = col.idx(src);
+                col.source_agent[s] = i as u32;
+                col.dirty_sources.push(s);
+            }
+        }
+        for (i, a) in self.agents.iter().enumerate() {
+            let src = col.moves[i].0;
+            if !a.alive || src == a.pos {
+                continue;
+            }
+            // j left the cell i entered; if j entered the cell i left, they swapped.
+            let j = col.source_agent[col.idx(a.pos)] as usize;
+            if j < self.agents.len() && j != i && self.agents[j].pos == src {
+                return Some(format!("agents {i} and {j} swapped {src:?} <-> {:?}", a.pos));
+            }
+        }
+        None
     }
 
     /// Task state machine: recycle goals, assign new tasks.
@@ -1396,6 +1407,23 @@ mod tests {
             runner.tick(&RandomScheduler, &ClosestQueuePolicy);
             assert_ne!(runner.agents[1].pos, IVec2::new(2, 1));
         }
+    }
+
+    #[test]
+    fn post_hoc_validator_flags_vertex_and_edge_conflicts() {
+        let mut runner =
+            make_runner(vec![SimAgent::new(IVec2::new(1, 1)), SimAgent::new(IVec2::new(2, 1))]);
+        runner.tick(&RandomScheduler, &ClosestQueuePolicy);
+        // Fake an applied swap: sources (1,1),(2,1) -> positions (2,1),(1,1).
+        runner.collision.moves[0].0 = IVec2::new(1, 1);
+        runner.collision.moves[1].0 = IVec2::new(2, 1);
+        runner.agents[0].pos = IVec2::new(2, 1);
+        runner.agents[1].pos = IVec2::new(1, 1);
+        assert!(runner.find_post_hoc_collision().unwrap().contains("swapped"));
+        runner.agents[1].pos = IVec2::new(2, 1);
+        assert!(runner.find_post_hoc_collision().unwrap().contains("both at"));
+        runner.agents[1].pos = IVec2::new(3, 1);
+        assert!(runner.find_post_hoc_collision().is_none());
     }
 
     // ── Commands ─────────────────────────────────────────────────────

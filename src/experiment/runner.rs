@@ -155,6 +155,8 @@ pub fn run_single_experiment(config: &ExperimentConfig) -> RunResult {
         baseline_metrics =
             super::metrics::compute_baseline_self_metrics(&analysis, &step_times, bl_wall_ms);
         baseline_metrics.pbs_partial_rate = partial_rate;
+        baseline_metrics.forced_waits = runner.forced_waits;
+        baseline_metrics.collision_violations = runner.collision_violations;
 
         // Consume engine into baseline record (no clone!)
         baseline_record = analysis.into_baseline_record(
@@ -265,6 +267,8 @@ pub fn run_single_experiment(config: &ExperimentConfig) -> RunResult {
             faulted_wall_ms,
         );
         fm.pbs_partial_rate = partial_rate;
+        fm.forced_waits = runner.forced_waits;
+        fm.collision_violations = runner.collision_violations;
 
         fm.cascade_depth_avg = if cascade_depths.is_empty() {
             0.0
@@ -440,6 +444,8 @@ fn run_baseline_only(config: &ExperimentConfig) -> CachedBaseline {
     let mut metrics =
         super::metrics::compute_baseline_self_metrics(&analysis, &step_times, bl_wall_ms);
     metrics.pbs_partial_rate = partial_rate;
+    metrics.forced_waits = runner.forced_waits;
+    metrics.collision_violations = runner.collision_violations;
     let record = analysis.into_baseline_record(0, config.tick_count, actual_agents);
 
     CachedBaseline { record, metrics }
@@ -551,6 +557,8 @@ fn run_faulted_only(config: &ExperimentConfig, cached: &CachedBaseline) -> RunRe
         faulted_wall_ms,
     );
     fm.pbs_partial_rate = partial_rate;
+    fm.forced_waits = runner.forced_waits;
+    fm.collision_violations = runner.collision_violations;
 
     fm.cascade_depth_avg = if cascade_depths.is_empty() {
         0.0

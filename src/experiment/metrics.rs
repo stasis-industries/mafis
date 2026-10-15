@@ -97,6 +97,12 @@ pub struct RunMetrics {
     pub solver_step_time_avg_us: f64,
     pub solver_step_time_max_us: f64,
     pub wall_time_ms: u64,
+
+    // ── Collision accounting (set by the experiment runner) ───────
+    /// Agent-ticks where the runner overrode a solver move with a Wait.
+    pub forced_waits: u64,
+    /// Ticks with a vertex or edge-swap conflict after resolution. Must be 0.
+    pub collision_violations: u64,
 }
 
 /// Compute metrics for a baseline run (no faults, self-comparison).
@@ -165,6 +171,8 @@ pub fn compute_baseline_self_metrics(
         solver_step_time_avg_us,
         solver_step_time_max_us,
         wall_time_ms,
+        forced_waits: 0,
+        collision_violations: 0,
     }
 }
 
@@ -368,6 +376,8 @@ pub fn compute_run_metrics(
         solver_step_time_avg_us,
         solver_step_time_max_us,
         wall_time_ms,
+        forced_waits: 0,
+        collision_violations: 0,
     }
 }
 
