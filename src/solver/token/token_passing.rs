@@ -702,6 +702,104 @@ mod tests {
         assert_eq!(solver.drain_goal_overrides(), vec![(0, IVec2::new(0, 2))]);
     }
 
+    /// 10×7 well-formed map: 4 parking (row 1), 3 pickups (row 3), one dock
+    /// at (8,5) with a 4-cell queue extending west.
+    fn tiny_well_formed_map() -> (GridMap, ZoneMap) {
+        let mut cells = Vec::new();
+        for x in 0..10 {
+            cells.push(serde_json::json!({"x": x, "y": 0, "type": "wall"}));
+            cells.push(serde_json::json!({"x": x, "y": 6, "type": "wall"}));
+        }
+        for y in 1..6 {
+            cells.push(serde_json::json!({"x": 0, "y": y, "type": "wall"}));
+            cells.push(serde_json::json!({"x": 9, "y": y, "type": "wall"}));
+        }
+        for x in [1, 3, 5, 7] {
+            cells.push(serde_json::json!({"x": x, "y": 1, "type": "parking"}));
+        }
+        for x in [2, 4, 6] {
+            cells.push(serde_json::json!({"x": x, "y": 3, "type": "pickup"}));
+        }
+        cells.push(
+            serde_json::json!({"x": 8, "y": 5, "type": "delivery", "queue_direction": "west"}),
+        );
+        let json = serde_json::json!({"width": 10, "height": 7, "cells": cells});
+        crate::core::topology::TopologyRegistry::parse_json_value(&json).unwrap()
+    }
+
+    /// Runs TP through the full runner (task system + queue) and returns the
+    /// per-tick positions plus the tick of every completed task.
+    fn run_tp(seed: u64, num_agents: usize, ticks: u64) -> (Vec<Vec<IVec2>>, Vec<u64>) {
+        use crate::core::queue::ActiveQueuePolicy;
+        use crate::core::runner::SimulationRunner;
+        use crate::core::task::ClosestFirstScheduler;
+        use crate::fault::config::FaultConfig;
+        use crate::fault::scenario::FaultSchedule;
+
+        let (grid, zones) = tiny_well_formed_map();
+        let wf = crate::core::topology::check_well_formed(&grid, &zones);
+        assert!(wf.holds_for(num_agents), "{wf:?}");
+        let mut rng = SeededRng::new(seed);
+        let agents = crate::analysis::baseline::place_agents(num_agents, &grid, &zones, &mut rng);
+        let mut runner = SimulationRunner::new(
+            grid,
+            zones.clone(),
+            agents,
+            Box::new(TokenPassingSolver::new()),
+            rng,
+            FaultConfig { enabled: false, ..Default::default() },
+            FaultSchedule::default(),
+        );
+        let policy = ActiveQueuePolicy::from_name("closest");
+        let mut trace = Vec::new();
+        let mut completions = Vec::new();
+        for _ in 0..ticks {
+            let result = runner.tick(&ClosestFirstScheduler, policy.policy());
+            completions.extend(result.completion_ticks.iter().copied());
+            // Endpoint rule: no two path ends coincide on pickups or parking.
+            // Queue-line and dock cells are assigned by the shared queue
+            // manager, which can send two agents to the same slot or hand a
+            // dock over while its last user still stands on it (deviation).
+            let queue_cell = |c: IVec2| {
+                zones.queue_lines.iter().any(|l| l.delivery_cell == c || l.cells.contains(&c))
+            };
+            let alive: Vec<_> = runner.agents.iter().filter(|a| a.alive).collect();
+            for (i, a) in alive.iter().enumerate() {
+                for b in &alive[i + 1..] {
+                    assert!(
+                        a.goal != b.goal || queue_cell(a.goal),
+                        "tick {}: two paths end at {} ({:?} at {}, {:?} at {})",
+                        result.tick,
+                        a.goal,
+                        a.task_leg,
+                        a.pos,
+                        b.task_leg,
+                        b.pos
+                    );
+                }
+            }
+            trace.push(runner.agents.iter().map(|a| a.pos).collect());
+        }
+        (trace, completions)
+    }
+
+    /// On a well-formed instance TP keeps completing tasks (no deadlock).
+    #[test]
+    fn tp_well_formed_map_completes_tasks_without_deadlock() {
+        for seed in 1..=10 {
+            let (_, completions) = run_tp(seed, 4, 600);
+            assert!(completions.len() >= 20, "seed {seed}: only {} tasks", completions.len());
+            let longest_gap = completions.windows(2).map(|w| w[1] - w[0]).max().unwrap();
+            assert!(longest_gap <= 60, "seed {seed}: no completion for {longest_gap} ticks");
+        }
+    }
+
+    /// Same seed → identical trajectories.
+    #[test]
+    fn tp_is_deterministic() {
+        assert_eq!(run_tp(7, 4, 300), run_tp(7, 4, 300));
+    }
+
     /// TP selects its own tasks (Ma et al. 2017 Alg. 1 lines 7-12) instead of
     /// taking them from the configured scheduler.
     #[test]
