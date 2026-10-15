@@ -88,13 +88,23 @@ _T95_TABLE = [
 
 
 def t_critical_95(n):
-    """Two-tailed t critical value for 95% CI (df = n-1). Falls back to 1.96 for n > 31."""
+    """Two-tailed Student-t critical value for a one-sample 95% CI (df = n-1).
+
+    Published table for df 1..30; above that the Cornish-Fisher expansion
+    around z (Abramowitz & Stegun 26.7.5), error < 1e-5 for df > 30.
+    Mirrors `t_critical_95` in src/experiment/stats.rs.
+    """
     df = n - 1
     if df <= 0:
         return float("inf")
     if df <= 30:
         return _T95_TABLE[df - 1]
-    return 1.96
+    z = 1.959963984540054
+    g1 = (z**3 + z) / 4
+    g2 = (5 * z**5 + 16 * z**3 + 3 * z) / 96
+    g3 = (3 * z**7 + 19 * z**5 + 17 * z**3 - 15 * z) / 384
+    g4 = (79 * z**9 + 776 * z**7 + 1482 * z**5 - 1920 * z**3 - 945 * z) / 92160
+    return z + g1 / df + g2 / df**2 + g3 / df**3 + g4 / df**4
 
 
 def ci95(xs):
@@ -191,11 +201,12 @@ def benjamini_hochberg(p_values):
     valid.sort(key=lambda x: x[1])
     m = len(valid)
     adjusted = {}
-    prev_adj = 0.0
-    for rank, (key, p) in enumerate(valid, 1):
-        adj = min(max(p * m / rank, prev_adj), 1.0)
-        adjusted[key] = adj
-        prev_adj = adj
+    # Step-up: adj_(i) = min_{j >= i} p_(j) * m / j, so walk from the largest rank down.
+    running_min = 1.0
+    for rank in range(m, 0, -1):
+        key, p = valid[rank - 1]
+        running_min = min(running_min, p * m / rank)
+        adjusted[key] = running_min
     for k, _ in p_values:
         if k not in adjusted:
             adjusted[k] = float("nan")

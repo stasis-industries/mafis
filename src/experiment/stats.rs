@@ -62,8 +62,9 @@ pub fn compute_stat_summary(values: &[f64]) -> Option<StatSummary> {
     Some(StatSummary { n, mean, std, ci95_lo, ci95_hi, min, max })
 }
 
-/// Two-tailed t-critical value for 95% confidence (α=0.05).
-/// Uses a lookup table for df 1..30, then the z-value 1.96 for df > 30.
+/// Two-tailed Student-t critical value for a one-sample 95% CI (α=0.05), df = n−1.
+/// Published table for df 1..30; above that, the Cornish–Fisher expansion of the
+/// t quantile around z (Abramowitz & Stegun 26.7.5), error < 1e-5 for df > 30.
 pub fn t_critical_95(n: usize) -> f64 {
     let df = n.saturating_sub(1);
     // Table: t_{0.025, df} for two-tailed 95% CI
@@ -80,10 +81,18 @@ pub fn t_critical_95(n: usize) -> f64 {
         return f64::INFINITY;
     }
     if df <= 30 {
-        TABLE[df - 1]
-    } else {
-        1.96 // z-value approximation for large df
+        return TABLE[df - 1];
     }
+    let z: f64 = 1.959_963_984_540_054; // standard normal 0.975 quantile
+    let v = df as f64;
+    let g1 = (z.powi(3) + z) / 4.0;
+    let g2 = (5.0 * z.powi(5) + 16.0 * z.powi(3) + 3.0 * z) / 96.0;
+    let g3 = (3.0 * z.powi(7) + 19.0 * z.powi(5) + 17.0 * z.powi(3) - 15.0 * z) / 384.0;
+    let g4 = (79.0 * z.powi(9) + 776.0 * z.powi(7) + 1482.0 * z.powi(5)
+        - 1920.0 * z.powi(3)
+        - 945.0 * z)
+        / 92160.0;
+    z + g1 / v + g2 / v.powi(2) + g3 / v.powi(3) + g4 / v.powi(4)
 }
 
 // ---------------------------------------------------------------------------
@@ -97,14 +106,18 @@ pub fn t_critical_95(n: usize) -> f64 {
 /// Range: [-1, 1]. Positive = group A tends to be larger.
 /// Thresholds (Romano et al. 2006):
 /// |d| < 0.147 → negligible, < 0.33 → small, < 0.474 → medium, else → large.
+/// NaN observations are undefined, not ties: they are excluded. Returns NaN
+/// when either group has no finite observation.
 pub fn cliff_delta(a: &[f64], b: &[f64]) -> f64 {
+    let a: Vec<f64> = a.iter().copied().filter(|v| !v.is_nan()).collect();
+    let b: Vec<f64> = b.iter().copied().filter(|v| !v.is_nan()).collect();
     if a.is_empty() || b.is_empty() {
-        return 0.0;
+        return f64::NAN;
     }
     let mut more = 0i64;
     let mut less = 0i64;
-    for &ai in a {
-        for &bj in b {
+    for &ai in &a {
+        for &bj in &b {
             if ai > bj {
                 more += 1;
             } else if ai < bj {
@@ -235,7 +248,22 @@ mod tests {
         assert_eq!(t_critical_95(1), f64::INFINITY); // df=0
         assert!((t_critical_95(2) - 12.706).abs() < 1e-3); // df=1
         assert!((t_critical_95(31) - 2.042).abs() < 1e-3); // df=30
-        assert!((t_critical_95(100) - 1.96).abs() < 1e-3); // df>30
+    }
+
+    #[test]
+    fn t_critical_matches_student_t_above_table() {
+        // Reference values: scipy.stats.t.ppf(0.975, df).
+        for (df, expected) in [
+            (29, 2.04523),
+            (31, 2.03951),
+            (40, 2.02108),
+            (49, 2.00958),
+            (99, 1.98422),
+            (999, 1.96234),
+        ] {
+            let t = t_critical_95(df + 1);
+            assert!((t - expected).abs() < 1e-3, "df={df}: got {t}, want {expected}");
+        }
     }
 
     #[test]
@@ -306,8 +334,16 @@ mod tests {
 
     #[test]
     fn cliff_delta_empty() {
-        assert_eq!(cliff_delta(&[], &[1.0]), 0.0);
-        assert_eq!(cliff_delta(&[1.0], &[]), 0.0);
+        assert!(cliff_delta(&[], &[1.0]).is_nan());
+        assert!(cliff_delta(&[1.0], &[]).is_nan());
+        assert!(cliff_delta(&[f64::NAN], &[1.0]).is_nan());
+    }
+
+    #[test]
+    fn cliff_delta_excludes_nan() {
+        // NaN is an undefined observation, not a tie: [1, NaN] vs [0] is [1] vs [0].
+        let d = cliff_delta(&[1.0, f64::NAN], &[0.0]);
+        assert!((d - 1.0).abs() < 1e-10, "NaN must be excluded, got {d}");
     }
 
     #[test]
