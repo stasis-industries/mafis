@@ -59,8 +59,9 @@
 //! - **Deterministic node budget** instead of the reference's 60-second time
 //!   budget (PBS.cpp:675-681). Time budgets break determinism across hardware,
 //!   which would invalidate MAFIS's rewind/replay guarantees. The budget is
-//!   `PBS_MAX_NODE_LIMIT` (1,000 on wasm / 10,000 on native). Accepted in
-//!   exchange for reproducibility.
+//!   `PBS_NODES_PER_AGENT` × n, clamped to [`PBS_MIN_NODE_LIMIT`,
+//!   `PBS_MAX_NODE_LIMIT`] (see `constants.rs` for the evidence). Accepted
+//!   in exchange for reproducibility.
 //!
 //! ## Historical deviations now closed
 //!
@@ -89,7 +90,9 @@ type ArcPlan = Arc<Vec<Action>>;
 /// changes.
 type ArcTimeline = Arc<Vec<IVec2>>;
 
-use crate::constants::{PBS_CONSISTENT_PATHS_REPLAN_MULT, PBS_PRIORITIZE_START_DEFAULT};
+use crate::constants::{
+    PBS_ASTAR_MAX_EXPANSIONS, PBS_CONSISTENT_PATHS_REPLAN_MULT, PBS_PRIORITIZE_START_DEFAULT,
+};
 use crate::core::action::Action;
 use crate::core::grid::GridMap;
 use crate::core::seed::SeededRng;
@@ -484,6 +487,27 @@ fn pos_at(timeline: &[IVec2], t: usize) -> IVec2 {
 // Plan one agent with priority constraints (sequential-goal A*)
 // ---------------------------------------------------------------------------
 
+/// Constraints every agent of a window obeys: the other window agents'
+/// start cells (an agent skips its own) and the fixed paths of agents
+/// outside the window.
+#[derive(Clone, Copy)]
+struct SharedConstraints<'a> {
+    starts: &'a [(IVec2, u64)],
+    fixed_vertices: &'a [(IVec2, u64)],
+    fixed_edges: &'a [(IVec2, IVec2, u64)],
+}
+
+impl SharedConstraints<'_> {
+    fn add_fixed(&self, ci: &mut FlatConstraintIndex) {
+        for &(pos, t) in self.fixed_vertices {
+            ci.add_vertex(pos, t);
+        }
+        for &(from, to, t) in self.fixed_edges {
+            ci.add_edge(from, to, t);
+        }
+    }
+}
+
 /// Plan a single agent's path under PBS priority constraints, using
 /// `spacetime_astar_sequential` over the agent's goal sequence
 /// (`primary_goal` followed by the peek-chain extensions in
@@ -516,7 +540,7 @@ fn plan_agent(
     horizon: usize,
     ci_buf: &mut FlatConstraintIndex,
     seq_stg: &mut SeqGoalGrid,
-    start_constraints: &[(IVec2, u64)],
+    shared: SharedConstraints,
     dist_cache: &DistanceMapCache,
     goals_after_trim: &mut usize,
 ) -> Option<Vec<Action>> {
@@ -527,11 +551,12 @@ fn plan_agent(
 
     // Start constraints (other agents at t=0). The fix-window prevents an
     // agent from planning to be at another agent's pre-window cell.
-    for (j, &(pos, time)) in start_constraints.iter().enumerate() {
+    for (j, &(pos, time)) in shared.starts.iter().enumerate() {
         if j != agent_idx {
             ci_buf.add_vertex(pos, time);
         }
     }
+    shared.add_fixed(ci_buf);
 
     // Higher-priority agents' plans become hard constraints for this agent.
     for &(higher, lower) in priority_pairs {
@@ -588,12 +613,6 @@ fn plan_agent(
     // even when the final goal in the chain is not reachable inside `horizon`
     // ticks, the search makes meaningful progress toward the nearest
     // reachable goal in the sequence.
-    // Per-call expansion budget for PBS's sequential A*. This is tighter than
-    // the global `ASTAR_MAX_EXPANSIONS` (5000) because `plan_agent` is invoked
-    // O(n × nodes) times per PBS window — on warehouse_single_dock/N=40 that's ~500+
-    // calls per window, so a 5000-budget balloons to ~2.5M expansions/window.
-    // 2000 keeps total ~1M which the best-partial fallback still handles well.
-    const PBS_ASTAR_BUDGET: u64 = 2_000;
     while !goals.is_empty() {
         let result = spacetime_astar_sequential(
             grid,
@@ -602,7 +621,7 @@ fn plan_agent(
             ci_buf,
             horizon as u64,
             seq_stg,
-            PBS_ASTAR_BUDGET,
+            PBS_ASTAR_MAX_EXPANSIONS,
         );
         if let Ok(plan) = result {
             *goals_after_trim = goals.len();
@@ -665,7 +684,6 @@ fn plan_agent_root_no_reset(
     }
 
     // ── Trim loop: identical to `plan_agent` ─────────────────────────────
-    const PBS_ASTAR_BUDGET: u64 = 2_000;
     while !goals.is_empty() {
         let result = spacetime_astar_sequential(
             grid,
@@ -674,7 +692,7 @@ fn plan_agent_root_no_reset(
             ci_buf,
             horizon as u64,
             seq_stg,
-            PBS_ASTAR_BUDGET,
+            PBS_ASTAR_MAX_EXPANSIONS,
         );
         if let Ok(plan) = result {
             *goals_after_trim = goals.len();
@@ -992,7 +1010,7 @@ fn find_consistent_paths(
     horizon: usize,
     ci_buf: &mut FlatConstraintIndex,
     seq_stg: &mut SeqGoalGrid,
-    start_constraints: &[(IVec2, u64)],
+    shared: SharedConstraints,
     dist_cache: &DistanceMapCache,
     conflicts_seed: Vec<ReplanConflict>,
     agent_starts: &[IVec2],
@@ -1060,7 +1078,7 @@ fn find_consistent_paths(
             horizon,
             ci_buf,
             seq_stg,
-            start_constraints,
+            shared,
             dist_cache,
             &mut goals_after_trim,
         );
@@ -1329,9 +1347,15 @@ impl WindowedPlanner for PbsPlanner {
         // no-reset variant below. Saves N-1 resets + N×|start_constraints|
         // redundant `add_vertex` calls per window.
         self.ci_buf.reset(ctx.grid.width, ctx.grid.height, ctx.horizon as u64);
+        let shared = SharedConstraints {
+            starts: ctx.start_constraints,
+            fixed_vertices: ctx.fixed_vertices,
+            fixed_edges: ctx.fixed_edges,
+        };
         for &(pos, time) in ctx.start_constraints {
             self.ci_buf.add_vertex(pos, time);
         }
+        shared.add_fixed(&mut self.ci_buf);
 
         // Plans are built as owned `Vec<Action>` first, then wrapped into
         // `Arc` before entering the PBS tree so siblings can share them
@@ -1439,26 +1463,6 @@ impl WindowedPlanner for PbsPlanner {
         let eager = self.eager;
 
         while let Some(node) = dfs.pop() {
-            if node_count >= ctx.node_limit {
-                diag_node_limit_hit = true;
-                let best = best_node.unwrap_or(node);
-                if diag_enabled {
-                    eprintln!(
-                        "PBS_DIAG: n={n} H={} W={} node_limit={} nodes={} branches={}/{}ok/{}fail solved={} limit_hit={}",
-                        ctx.horizon,
-                        ctx.start_constraints.len(),
-                        ctx.node_limit,
-                        node_count,
-                        diag_branches_total,
-                        diag_branches_ok,
-                        diag_branches_fail,
-                        diag_solved,
-                        diag_node_limit_hit,
-                    );
-                }
-                return to_partial_result(best.plans, ctx.agents);
-            }
-
             // Update best node — reference tie-break (PBS.cpp:630):
             //     (earliest_collision DESC, f_val/g_val ASC)
             // where "later earliest_collision" means the node delays the first
@@ -1496,6 +1500,26 @@ impl WindowedPlanner for PbsPlanner {
             );
 
             if let Some(conflict) = conflict {
+                // Budget check after the solution check, so a conflict-free
+                // node is never discarded (the reference detects solutions
+                // when children are generated, PBS.cpp:729).
+                if node_count >= ctx.node_limit {
+                    diag_node_limit_hit = true;
+                    if diag_enabled {
+                        eprintln!(
+                            "PBS_DIAG: n={n} H={} node_limit={} nodes={} branches={}/{}ok/{}fail solved={} limit_hit={}",
+                            ctx.horizon,
+                            ctx.node_limit,
+                            node_count,
+                            diag_branches_total,
+                            diag_branches_ok,
+                            diag_branches_fail,
+                            diag_solved,
+                            diag_node_limit_hit,
+                        );
+                    }
+                    return to_partial_result(best_node.unwrap_or(node).plans, ctx.agents);
+                }
                 let child1 = try_branch(
                     &node,
                     conflict.agent_a,
@@ -1505,7 +1529,7 @@ impl WindowedPlanner for PbsPlanner {
                     ctx.horizon,
                     &mut self.ci_buf,
                     &mut self.seq_stg,
-                    ctx.start_constraints,
+                    shared,
                     dist_cache,
                     eager,
                     &self.scratch_agent_starts,
@@ -1530,7 +1554,7 @@ impl WindowedPlanner for PbsPlanner {
                     ctx.horizon,
                     &mut self.ci_buf,
                     &mut self.seq_stg,
-                    ctx.start_constraints,
+                    shared,
                     dist_cache,
                     eager,
                     &self.scratch_agent_starts,
@@ -1698,7 +1722,7 @@ fn try_branch(
     horizon: usize,
     ci_buf: &mut FlatConstraintIndex,
     seq_stg: &mut SeqGoalGrid,
-    start_constraints: &[(IVec2, u64)],
+    shared: SharedConstraints,
     dist_cache: &DistanceMapCache,
     eager: bool,
     agent_starts: &[IVec2],
@@ -1746,7 +1770,7 @@ fn try_branch(
             horizon,
             ci_buf,
             seq_stg,
-            start_constraints,
+            shared,
             dist_cache,
             parent.conflict_list.clone(),
             agent_starts,
@@ -1769,7 +1793,7 @@ fn try_branch(
             horizon,
             ci_buf,
             seq_stg,
-            start_constraints,
+            shared,
             dist_cache,
             &mut goals_after_trim,
         ) {
@@ -1829,11 +1853,10 @@ fn to_partial_result(plans: Vec<ArcPlan>, agents: &[WindowAgent]) -> WindowResul
         }
     }
 
-    if failed.is_empty() {
-        WindowResult::Solved(solved)
-    } else {
-        WindowResult::Partial { solved, failed }
-    }
+    // Only called for unsolved windows: the plans still conflict, so this is
+    // Partial even when every agent moves (the caller runs LRA, as the
+    // reference does on PBS failure, BasicSystem.cpp:663-673).
+    WindowResult::Partial { solved, failed }
 }
 
 #[cfg(test)]
@@ -1874,7 +1897,8 @@ mod tests {
             distance_maps: dist_maps,
             initial_plans: &owned.initial_plans,
             start_constraints: &owned.start_constraints,
-            travel_penalties: &[],
+            fixed_vertices: &[],
+            fixed_edges: &[],
         }
     }
 
@@ -2039,7 +2063,8 @@ mod tests {
             distance_maps: &dist_maps,
             initial_plans: &initial_plans,
             start_constraints: &start_constraints,
-            travel_penalties: &[],
+            fixed_vertices: &[],
+            fixed_edges: &[],
         };
         let mut planner = PbsPlanner::new();
         let mut dist_cache = DistanceMapCache::default();
@@ -2111,7 +2136,7 @@ mod tests {
             horizon,
             &mut planner.ci_buf,
             &mut planner.seq_stg,
-            &start_constraints,
+            SharedConstraints { starts: &start_constraints, fixed_vertices: &[], fixed_edges: &[] },
             &dist_cache,
             &mut goals_after_trim,
         );

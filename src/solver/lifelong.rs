@@ -146,6 +146,19 @@ pub trait LifelongSolver: Send + Sync + 'static {
     fn pbs_partial_rate(&self) -> Option<f32> {
         None
     }
+
+    /// RHCR telemetry: fraction of replan windows in which more than half the
+    /// agents never moved (reference `BasicSystem::congested`, where the
+    /// reference run would stop). Default: no telemetry.
+    fn congested_window_rate(&self) -> Option<f32> {
+        None
+    }
+
+    /// RHCR telemetry: plans made between windows for agents left without a
+    /// plan (new goal, runner-forced wait, fault). Default: no telemetry.
+    fn extra_replan_count(&self) -> Option<usize> {
+        None
+    }
 }
 
 // ---------------------------------------------------------------------------

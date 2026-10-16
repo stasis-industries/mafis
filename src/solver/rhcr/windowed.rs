@@ -44,10 +44,10 @@ pub struct WindowContext<'a> {
     ///
     /// Borrowed (not owned) — same scratch-pool reasoning as `initial_plans`.
     pub start_constraints: &'a [(IVec2, u64)],
-    /// Per-cell travel penalties (grid-aligned flat array, indexed by y*width+x).
-    /// Higher values indicate historically congested cells. Planners may use
-    /// this as an additive cost bias. Empty slice = no penalties.
-    pub travel_penalties: &'a [f32],
+    /// Vertex and edge constraints from the fixed paths of agents outside
+    /// this window (they keep their plans; window agents must avoid them).
+    pub fixed_vertices: &'a [(IVec2, u64)],
+    pub fixed_edges: &'a [(IVec2, IVec2, u64)],
 }
 
 #[derive(Clone, Debug)]
