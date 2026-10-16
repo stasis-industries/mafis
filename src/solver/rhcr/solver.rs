@@ -55,14 +55,15 @@ pub struct RhcrConfig {
 
 impl RhcrConfig {
     /// Reference defaults: replan every `simulation_window` = 5 ticks with a
-    /// `planning_window` of 10 (RHCR README example; driver.cpp:116-119).
-    /// Both are scale-independent in the reference, so the grid area and
-    /// agent count are not used.
-    pub fn auto(_grid_area: usize, _num_agents: usize) -> Self {
+    /// `planning_window` of 10 (RHCR README example; driver.cpp:116-119),
+    /// independent of the grid. The PBS budget scales with the fleet (see
+    /// `PBS_NODES_PER_AGENT`).
+    pub fn auto(_grid_area: usize, num_agents: usize) -> Self {
         Self {
             horizon: constants::RHCR_PLANNING_HORIZON_DEFAULT,
             replan_interval: constants::RHCR_SIMULATION_WINDOW_DEFAULT,
-            pbs_node_limit: constants::PBS_MAX_NODE_LIMIT,
+            pbs_node_limit: (num_agents * constants::PBS_NODES_PER_AGENT)
+                .clamp(constants::PBS_MIN_NODE_LIMIT, constants::PBS_MAX_NODE_LIMIT),
         }
     }
 }
@@ -79,7 +80,8 @@ impl RhcrConfig {
                 self.horizon = h.clamp(constants::RHCR_MIN_HORIZON, constants::RHCR_MAX_HORIZON);
             }
             if let Some(m) = o.node_limit_mult {
-                self.pbs_node_limit = (num_agents * m).clamp(50, constants::PBS_MAX_NODE_LIMIT);
+                self.pbs_node_limit = (num_agents * m)
+                    .clamp(constants::PBS_MIN_NODE_LIMIT, constants::PBS_MAX_NODE_LIMIT);
             }
         }
         self
@@ -875,7 +877,11 @@ mod tests {
             let cfg = RhcrConfig::auto(area, n);
             assert_eq!(cfg.replan_interval, constants::RHCR_SIMULATION_WINDOW_DEFAULT);
             assert_eq!(cfg.horizon, constants::RHCR_PLANNING_HORIZON_DEFAULT);
-            assert_eq!(cfg.pbs_node_limit, constants::PBS_MAX_NODE_LIMIT);
+            assert_eq!(
+                cfg.pbs_node_limit,
+                (n * constants::PBS_NODES_PER_AGENT)
+                    .clamp(constants::PBS_MIN_NODE_LIMIT, constants::PBS_MAX_NODE_LIMIT)
+            );
         }
     }
 

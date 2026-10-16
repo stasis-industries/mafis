@@ -59,8 +59,9 @@
 //! - **Deterministic node budget** instead of the reference's 60-second time
 //!   budget (PBS.cpp:675-681). Time budgets break determinism across hardware,
 //!   which would invalidate MAFIS's rewind/replay guarantees. The budget is
-//!   `PBS_MAX_NODE_LIMIT` (1,000 on wasm / 10,000 on native). Accepted in
-//!   exchange for reproducibility.
+//!   `PBS_NODES_PER_AGENT` × n, clamped to [`PBS_MIN_NODE_LIMIT`,
+//!   `PBS_MAX_NODE_LIMIT`] (see `constants.rs` for the evidence). Accepted
+//!   in exchange for reproducibility.
 //!
 //! ## Historical deviations now closed
 //!

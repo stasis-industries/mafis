@@ -179,6 +179,18 @@ pub const RHCR_MAX_REPLAN_INTERVAL: usize = 40;
 /// Minimum replan interval. Every-tick defeats RHCR's purpose.
 pub const RHCR_MIN_REPLAN_INTERVAL: usize = 2;
 
+/// PBS high-level node budget per agent. The reference stops PBS on a 60 s
+/// clock (driver.cpp:108); MAFIS needs a deterministic budget. Once A* stopped
+/// returning unholdable end cells, solved windows needed at most 23 nodes at
+/// DD n=40 (10 seeds) and 54 at DD n=80, well inside 3n, while a 10,000-node
+/// budget made one DD n=120 window run for hours. The budget therefore only
+/// cuts off windows PBS would not solve; those go to LRA and are counted in
+/// `pbs_partial_rate`.
+pub const PBS_NODES_PER_AGENT: usize = 3;
+
+/// Floor on the PBS node budget for small fleets.
+pub const PBS_MIN_NODE_LIMIT: usize = 50;
+
 /// Maximum PBS tree nodes before aborting (memory + compute safeguard).
 #[cfg(target_arch = "wasm32")]
 pub const PBS_MAX_NODE_LIMIT: usize = 1_000;
