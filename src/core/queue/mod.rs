@@ -598,10 +598,7 @@ impl QueueManager {
             }
         }
 
-        // Reset reservations before assignment pass
-        for state in &mut self.queues {
-            state.reserved = 0;
-        }
+        self.reserve_inbound(agents);
 
         for agent_idx in eligible {
             let decision = policy.choose_queue(agents[agent_idx].pos, queue_lines, &self.queues);
@@ -646,6 +643,22 @@ impl QueueManager {
         }
     }
 
+    /// Start each lane's `reserved` count at the agents already travelling to it
+    /// (sent on an earlier tick, not yet slotted). Without this a new joiner is
+    /// handed the same join cell as an inbound agent, and both target one slot.
+    fn reserve_inbound(&mut self, agents: &[SimAgent]) {
+        for state in &mut self.queues {
+            state.reserved = 0;
+        }
+        for agent in agents.iter().filter(|a| a.alive) {
+            if let TaskLeg::TravelToQueue { line_index, .. } = agent.task_leg
+                && let Some(state) = self.queues.get_mut(line_index)
+            {
+                state.reserved += 1;
+            }
+        }
+    }
+
     /// Handle fault rerouting: a lane is blocked when its delivery cell or any
     /// of its cells is no longer walkable (a robot died there). Every agent
     /// bound for a blocked lane — queued, travelling to it, or delivering at it —
@@ -687,6 +700,9 @@ impl QueueManager {
         }
 
         // Pass 2: reroute collected agents with reservation tracking
+        if !reroute_agents.is_empty() {
+            self.reserve_inbound(agents);
+        }
         for agent_idx in reroute_agents {
             if !agents[agent_idx].alive {
                 continue;
@@ -1241,5 +1257,40 @@ mod tests {
         assert!(matches!(agents[0].task_leg, TaskLeg::Queuing { line_index: 0, .. }));
         assert_eq!(mgr.queues[0].slots[0], Some(0));
         assert_eq!(mgr.reroutes, 0);
+    }
+
+    #[test]
+    fn new_joiner_is_not_sent_to_the_slot_an_inbound_agent_holds() {
+        use super::super::runner::SimAgent;
+        use rand::SeedableRng;
+
+        let grid = test_grid();
+        let lines = vec![QueueLine::compute(IVec2::new(8, 1), Direction::West, &grid).unwrap()];
+        let mut mgr = QueueManager::new(&lines);
+
+        // Agent 0 joined the lane on an earlier tick and is still on its way.
+        let mut agents = vec![SimAgent::new(IVec2::new(2, 2)), SimAgent::new(IVec2::new(3, 2))];
+        agents[0].task_leg = TaskLeg::TravelToQueue {
+            from: IVec2::new(2, 2),
+            to: lines[0].delivery_cell,
+            line_index: 0,
+        };
+        agents[0].goal = lines[0].join_cell(&mgr.queues[0]);
+        // Agent 1 has just finished loading.
+        agents[1].task_leg = TaskLeg::Loading(IVec2::new(3, 2));
+
+        let mut changed = Vec::new();
+        let mut rng = ChaCha8Rng::seed_from_u64(7);
+        mgr.process_new_joins(
+            &mut agents,
+            &lines,
+            &ClosestQueuePolicy,
+            &mut changed,
+            &[],
+            &mut rng,
+        );
+
+        assert!(matches!(agents[1].task_leg, TaskLeg::TravelToQueue { line_index: 0, .. }));
+        assert_ne!(agents[1].goal, agents[0].goal, "two agents sent to the same queue slot");
     }
 }
