@@ -213,7 +213,7 @@ pub fn topology_effect() -> Vec<ExperimentMatrix> {
         },
         ExperimentMatrix {
             solvers: vec!["pibt".into()],
-            topologies: vec!["fullfilment_center".into()],
+            topologies: vec!["fulfilment_center".into()],
             scenarios,
             schedulers: vec!["random".into()],
             agent_counts: vec![35],
@@ -325,7 +325,7 @@ pub fn all_legacy_experiments() -> Vec<(&'static str, ExperimentMatrix)> {
         "topology_warehouse_dual_dock",
         "topology_sorting_center",
         "topology_compact_grid",
-        "topology_fullfilment_center",
+        "topology_fulfilment_center",
     ];
     for (i, m) in topology_effect().into_iter().enumerate() {
         experiments.push((topo_names[i], m));
