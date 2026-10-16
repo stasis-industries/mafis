@@ -97,10 +97,10 @@ fn scale_rhcr_pbs_80_agents_warehouse_dual_dock() {
 }
 
 #[test]
-fn scale_pibt_120_agents_fullfilment_center() {
-    let (tasks, alive) = run_ticks("pibt", "fullfilment_center", 120, 300, 42);
+fn scale_pibt_120_agents_fulfilment_center() {
+    let (tasks, alive) = run_ticks("pibt", "fulfilment_center", 120, 300, 42);
     assert!(alive > 0, "all agents dead with no faults");
-    eprintln!("  pibt/fullfilment_center/120 agents: {tasks} tasks, {alive} alive");
+    eprintln!("  pibt/fulfilment_center/120 agents: {tasks} tasks, {alive} alive");
 }
 
 #[test]
