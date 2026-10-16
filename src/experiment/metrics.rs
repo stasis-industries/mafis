@@ -119,6 +119,11 @@ pub struct RunMetrics {
     /// permanent faults it largely echoes the kill fraction (`attack_rate` is
     /// the secondary rate that excludes directly faulted agents).
     pub attack_rate_total: f64,
+    // ── Collision accounting (set by the experiment runner) ───────
+    /// Agent-ticks where the runner overrode a solver move with a Wait.
+    pub forced_waits: u64,
+    /// Ticks with a vertex or edge-swap conflict after resolution. Must be 0.
+    pub collision_violations: u64,
 }
 
 /// Compute metrics for a baseline run (no faults, self-comparison).
@@ -191,6 +196,8 @@ pub fn compute_baseline_self_metrics(
         rapidity_recovered: None,
         baseline_gridlocked: baseline_gridlocked(&analysis.throughput_series),
         attack_rate_total: 0.0,
+        forced_waits: 0,
+        collision_violations: 0,
     }
 }
 
@@ -391,6 +398,8 @@ pub fn compute_run_metrics(
         rapidity_recovered,
         baseline_gridlocked: baseline_gridlocked(&baseline.throughput_series),
         attack_rate_total: 0.0,
+        forced_waits: 0,
+        collision_violations: 0,
     }
 }
 

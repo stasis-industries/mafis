@@ -25,6 +25,10 @@ pub enum FaultScenarioType {
     ZoneOutage,
     /// Each robot independently fails temporarily via exponential inter-arrival times.
     IntermittentFault,
+    /// Control: delay ONE robot by ONE tick at `burst_at_tick`. Measures the
+    /// chaotic noise floor of the paired-run metrics (how far FT/TWTE move
+    /// from parity for a perturbation that should not matter).
+    NullPerturb,
 }
 
 impl FaultScenarioType {
@@ -34,6 +38,7 @@ impl FaultScenarioType {
             Self::WearBased => "Wear-Based",
             Self::ZoneOutage => "Zone Outage",
             Self::IntermittentFault => "Intermittent Fault",
+            Self::NullPerturb => "Null Perturbation",
         }
     }
 
@@ -43,6 +48,7 @@ impl FaultScenarioType {
             Self::WearBased => "wear_based",
             Self::ZoneOutage => "zone_outage",
             Self::IntermittentFault => "intermittent_fault",
+            Self::NullPerturb => "null_perturb",
         }
     }
 }
@@ -56,6 +62,7 @@ impl FromStr for FaultScenarioType {
             "wear_based" => Self::WearBased,
             "zone_outage" => Self::ZoneOutage,
             "intermittent_fault" => Self::IntermittentFault,
+            "null_perturb" => Self::NullPerturb,
             _ => return Err(()),
         })
     }
@@ -67,14 +74,16 @@ impl FromStr for FaultScenarioType {
 
 /// Wear intensity preset for the WearBased scenario.
 ///
-/// Maps to Weibull (beta, eta) parameters calibrated to produce realistic failure
-/// distributions within a 500-tick experiment window:
+/// Maps to Weibull (beta, eta) parameters; the clock is ticks alive, and
+/// F(t) = 1 - exp(-(t/eta)^beta) is the fraction of the fleet dead by tick t:
 ///
-/// | Level  | beta | eta | MTTF  | ~% dead at tick 500 | Literature basis                |
-/// |--------|------|-----|-------|---------------------|---------------------------------|
-/// | Low    | 2.0  | 900 | ~800t |  ~27%               | Well-maintained warehouse AGV   |
-/// | Medium | 2.5  | 500 | ~445t |  ~63%               | Typical industrial AGV          |
-/// | High   | 3.5  | 150 | ~137t |  ~90%               | Carlson & Murphy 2005: MTBF~24h |
+/// | Level  | beta | eta | MTTF | dead at t=500 | 90% dead at | Literature basis                |
+/// |--------|------|-----|------|---------------|-------------|---------------------------------|
+/// | Low    | 2.0  | 900 | 798t | 26.6%         | t=1366      | Well-maintained warehouse AGV   |
+/// | Medium | 2.5  | 500 | 444t | 63.2%         | t=698       | Typical industrial AGV          |
+/// | High   | 3.5  | 150 | 135t | 100.0%        | t=190       | Carlson & Murphy 2005: MTBF~24h |
+///
+/// High is fleet extinction within a 500-tick run (99% dead by t=232).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub enum WearHeatRate {
     Low,
@@ -93,12 +102,12 @@ impl WearHeatRate {
     }
 
     /// Weibull (beta, eta) parameters for this intensity level.
-    /// beta = shape (wear-out acceleration); eta = scale (characteristic life in movement-ticks).
+    /// beta = shape (wear-out acceleration); eta = scale (characteristic life in ticks alive).
     pub fn weibull_params(&self) -> (f32, f32) {
         match self {
-            Self::Low => (2.0, 900.0),    // ~27% dead by tick 500
-            Self::Medium => (2.5, 500.0), // ~63% dead by tick 500
-            Self::High => (3.5, 150.0),   // ~90% dead by tick 500
+            Self::Low => (2.0, 900.0),    // 26.6% dead by tick 500
+            Self::Medium => (2.5, 500.0), // 63.2% dead by tick 500
+            Self::High => (3.5, 150.0),   // 100% dead by tick 500 (90% by tick 190)
         }
     }
 
@@ -232,10 +241,7 @@ impl FaultScenario {
         match self.scenario_type {
             FaultScenarioType::BurstFailure => {
                 let at_tick = self.burst_at_tick.min(total_ticks);
-                let count = ((num_agents as f32 * self.burst_kill_percent / 100.0).round()
-                    as usize)
-                    .max(1)
-                    .min(num_agents);
+                let count = burst_kill_count(num_agents, self.burst_kill_percent);
                 events.push(ScheduledEvent {
                     tick: at_tick,
                     action: ScheduledAction::KillRandomAgents(count),
@@ -256,10 +262,26 @@ impl FaultScenario {
                     fired: false,
                 });
             }
+            FaultScenarioType::NullPerturb => {
+                events.push(ScheduledEvent {
+                    tick: self.burst_at_tick.min(total_ticks),
+                    action: ScheduledAction::DelayRandomAgent { duration: 1 },
+                    fired: false,
+                });
+            }
         }
 
         FaultSchedule { events, initialized: true }
     }
+}
+
+/// Agents a burst of `percent`% kills: at least one for any positive percent,
+/// none for 0% (a zero-magnitude burst must leave the run untouched).
+fn burst_kill_count(num_agents: usize, percent: f32) -> usize {
+    if percent <= 0.0 {
+        return 0;
+    }
+    ((num_agents as f32 * percent / 100.0).round() as usize).max(1).min(num_agents)
 }
 
 // ---------------------------------------------------------------------------
@@ -366,9 +388,7 @@ impl FaultList {
             *burst_by_tick.entry(tick).or_insert(0.0) += item.burst_kill_percent;
         }
         for (tick, pct) in &burst_by_tick {
-            let clamped = pct.min(100.0);
-            let count =
-                ((num_agents as f32 * clamped / 100.0).round() as usize).max(1).min(num_agents);
+            let count = burst_kill_count(num_agents, pct.min(100.0));
             events.push(ScheduledEvent {
                 tick: *tick,
                 action: ScheduledAction::KillRandomAgents(count),
@@ -388,6 +408,14 @@ impl FaultList {
             events.push(ScheduledEvent {
                 tick: *tick,
                 action: ScheduledAction::ZoneLatency { duration: *duration },
+                fired: false,
+            });
+        }
+
+        for item in self.items.iter().filter(|i| i.fault_type == FaultScenarioType::NullPerturb) {
+            events.push(ScheduledEvent {
+                tick: item.burst_at_tick.min(total_ticks),
+                action: ScheduledAction::DelayRandomAgent { duration: 1 },
                 fired: false,
             });
         }
@@ -425,6 +453,8 @@ pub enum ScheduledAction {
     /// Inject latency on all agents in a randomly-selected vertical strip for N ticks
     /// (spatial, solver-independent).
     ZoneLatency { duration: u32 },
+    /// Inject latency on one random alive agent for N ticks (null-perturbation control).
+    DelayRandomAgent { duration: u32 },
 }
 
 #[derive(Resource, Debug, Clone, Default)]

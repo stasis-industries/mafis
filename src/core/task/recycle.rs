@@ -3,6 +3,7 @@ use rand::Rng;
 use rand_chacha::ChaCha8Rng;
 use std::collections::{HashMap, HashSet};
 
+use super::super::grid::GridMap;
 use super::super::topology::ZoneMap;
 use super::{TaskLeg, TaskScheduler};
 
@@ -62,11 +63,20 @@ pub struct RecycleResult {
 /// agents are batch-assigned via `TaskScheduler::assign_pickups_batch` so that
 /// schedulers like `ClosestFirst` can implement proper random-create/closest-assign
 /// semantics instead of converging on a positional hotspot.
+///
+/// `demand_rng` is consumed only by task creation; `shuffle_rng` only by the
+/// fairness shuffle. Keeping them apart stops the number of free agents (which
+/// a fault changes) from shifting the task-demand stream.
+///
+/// Pickup cells that are no longer walkable (a robot died on them) are never
+/// handed out, and trips already heading to one are cancelled.
 pub fn recycle_goals_core(
     agents: &[TaskAgentSnapshot],
     scheduler: &dyn TaskScheduler,
     zones: &ZoneMap,
-    rng: &mut ChaCha8Rng,
+    grid: &GridMap,
+    demand_rng: &mut ChaCha8Rng,
+    shuffle_rng: &mut ChaCha8Rng,
     tick: u64,
 ) -> RecycleResult {
     // Frozen (latency-injected) agents are excluded: their goals are stale
@@ -75,6 +85,7 @@ pub fn recycle_goals_core(
     // (e.g., 4 active agents cycling on 2 cells during a zone outage).
     let mut used_goals: HashSet<IVec2> =
         agents.iter().filter(|a| a.alive && !a.frozen && a.pos != a.goal).map(|a| a.goal).collect();
+    used_goals.extend(zones.pickup_cells.iter().copied().filter(|&c| !grid.is_walkable(c)));
 
     let mut updates: Vec<TaskUpdate> = agents
         .iter()
@@ -99,7 +110,7 @@ pub fn recycle_goals_core(
     // Shuffle so lower-index agents don't always get first pick.
     // Fisher-Yates in-place — O(n), negligible cost.
     for i in (1..free_agents.len()).rev() {
-        let j = rng.random_range(0..=i);
+        let j = shuffle_rng.random_range(0..=i);
         free_agents.swap(i, j);
     }
 
@@ -110,7 +121,7 @@ pub fn recycle_goals_core(
     let path_ends: HashSet<IVec2> =
         agents.iter().filter(|a| a.alive).flat_map(|a| [a.goal, a.pos]).collect();
     let pickup_assignments: HashMap<usize, IVec2> = scheduler
-        .assign_pickups_with_path_ends(&free_agents, zones, &mut used_goals, &path_ends, rng)
+        .assign_pickups_with_path_ends(&free_agents, zones, &mut used_goals, &path_ends, demand_rng)
         .into_iter()
         .collect();
 
@@ -120,6 +131,18 @@ pub fn recycle_goals_core(
 
     // ── Pass 2: apply assignments and process all other state transitions ─────
     for (i, agent) in agents.iter().enumerate() {
+        // A dead robot now blocks this pickup: drop the task, agent is Free again.
+        if agent.alive
+            && let TaskLeg::TravelEmpty(pickup) = agent.task_leg
+            && !grid.is_walkable(pickup)
+        {
+            updates[i].task_leg = TaskLeg::Free;
+            updates[i].goal = agent.pos;
+            updates[i].path_cleared = true;
+            needs_replan = true;
+            continue;
+        }
+
         // Skip dead or frozen agents — they must not consume scheduler
         // assignments or transition state while under latency injection.
         if !agent.alive || agent.frozen {

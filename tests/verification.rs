@@ -56,7 +56,7 @@ const TOPOLOGIES: &[(&str, usize)] = &[
     ("warehouse_dual_dock", 30),
     ("sorting_center", 15),
     ("compact_grid", 15),
-    ("fullfilment_center", 20),
+    ("fulfilment_center", 20),
 ];
 
 #[test]

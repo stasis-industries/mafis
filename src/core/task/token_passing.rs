@@ -77,6 +77,7 @@ impl TaskScheduler for TokenPassingTaskSelection {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::grid::GridMap;
     use crate::core::task::{TaskAgentSnapshot, TaskLeg, recycle_goals_core};
     use rand::SeedableRng;
 
@@ -105,7 +106,17 @@ mod tests {
         let agents = [agent(a, TaskLeg::Loading(a)), agent(IVec2::new(1, 0), TaskLeg::Free)];
         for seed in 0..50 {
             let mut rng = ChaCha8Rng::seed_from_u64(seed);
-            let r = recycle_goals_core(&agents, &TokenPassingTaskSelection, &z, &mut rng, 1);
+            let grid = GridMap::new(32, 32);
+            let mut shuffle_rng = ChaCha8Rng::seed_from_u64(seed);
+            let r = recycle_goals_core(
+                &agents,
+                &TokenPassingTaskSelection,
+                &z,
+                &grid,
+                &mut rng,
+                &mut shuffle_rng,
+                1,
+            );
             assert_eq!(pickup_of(&r.updates[1].task_leg), Some(b), "seed {seed}");
         }
     }
@@ -123,7 +134,17 @@ mod tests {
         let agents = [stuck, agent(IVec2::new(1, 0), TaskLeg::Free)];
         for seed in 0..50 {
             let mut rng = ChaCha8Rng::seed_from_u64(seed);
-            let r = recycle_goals_core(&agents, &TokenPassingTaskSelection, &z, &mut rng, 1);
+            let grid = GridMap::new(32, 32);
+            let mut shuffle_rng = ChaCha8Rng::seed_from_u64(seed);
+            let r = recycle_goals_core(
+                &agents,
+                &TokenPassingTaskSelection,
+                &z,
+                &grid,
+                &mut rng,
+                &mut shuffle_rng,
+                1,
+            );
             assert_eq!(pickup_of(&r.updates[1].task_leg), Some(b), "seed {seed}");
         }
     }
@@ -141,7 +162,17 @@ mod tests {
             [agent(IVec2::new(0, 0), TaskLeg::Free), agent(IVec2::new(4, 0), TaskLeg::Free)];
         for seed in 0..50 {
             let mut rng = ChaCha8Rng::seed_from_u64(seed);
-            let r = recycle_goals_core(&agents, &TokenPassingTaskSelection, &z, &mut rng, 1);
+            let grid = GridMap::new(32, 32);
+            let mut shuffle_rng = ChaCha8Rng::seed_from_u64(seed);
+            let r = recycle_goals_core(
+                &agents,
+                &TokenPassingTaskSelection,
+                &z,
+                &grid,
+                &mut rng,
+                &mut shuffle_rng,
+                1,
+            );
             assert_eq!(pickup_of(&r.updates[0].task_leg), Some(near), "seed {seed}");
             assert_eq!(pickup_of(&r.updates[1].task_leg), Some(far), "seed {seed}");
         }

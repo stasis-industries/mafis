@@ -821,6 +821,10 @@ pub(super) fn sync_state_to_js(
                         "zone_outage".to_string(),
                         format!("Spatial Zone Outage — {} tick latency", duration),
                     ),
+                    ScheduledAction::DelayRandomAgent { duration } => (
+                        "null_perturb".to_string(),
+                        format!("Null Perturbation — 1 robot, {} tick delay", duration),
+                    ),
                 };
                 ScheduleMarkerSnapshot { tick: ev.tick, marker_type, label, fired: ev.fired }
             })

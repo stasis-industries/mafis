@@ -27,7 +27,7 @@ pub struct SimAgent {
     pub latency_remaining: u32,
     /// Last action taken (for heat accumulation).
     pub last_action: Action,
-    /// Cumulative movement-tick count for Weibull failure model.
+    /// Ticks alive, the clock of the Weibull failure model.
     /// Increments only on Move actions -- captures mechanical wear from distance traveled.
     /// Basis: mechanical wear (encoders, tires, gears) dominates field robot
     /// failures and is distance-proportional (Carlson & Murphy 2005).

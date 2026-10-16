@@ -128,7 +128,7 @@ pub fn run_single_experiment(config: &ExperimentConfig) -> RunResult {
             actual_agents,
             config.rhcr_override.as_ref(),
         )
-        .unwrap_or_else(|| Box::new(crate::solver::pibt::PibtLifelongSolver::new()));
+        .unwrap_or_else(|| panic!("unknown solver '{}'", config.solver_name));
 
         let fault_config = FaultConfig { enabled: false, ..Default::default() };
 
@@ -160,6 +160,8 @@ pub fn run_single_experiment(config: &ExperimentConfig) -> RunResult {
         baseline_metrics =
             super::metrics::compute_baseline_self_metrics(&analysis, &step_times, bl_wall_ms);
         baseline_metrics.pbs_partial_rate = partial_rate;
+        baseline_metrics.forced_waits = runner.forced_waits;
+        baseline_metrics.collision_violations = runner.collision_violations;
 
         // Consume engine into baseline record (no clone!)
         baseline_record = analysis.into_baseline_record(
@@ -182,7 +184,7 @@ pub fn run_single_experiment(config: &ExperimentConfig) -> RunResult {
             actual_agents,
             config.rhcr_override.as_ref(),
         )
-        .unwrap_or_else(|| Box::new(crate::solver::pibt::PibtLifelongSolver::new()));
+        .unwrap_or_else(|| panic!("unknown solver '{}'", config.solver_name));
 
         let (fault_config, fault_schedule) = match &config.scenario {
             Some(scenario) => {
@@ -230,6 +232,8 @@ pub fn run_single_experiment(config: &ExperimentConfig) -> RunResult {
             faulted_wall_ms,
         );
         fm.pbs_partial_rate = partial_rate;
+        fm.forced_waits = runner.forced_waits;
+        fm.collision_violations = runner.collision_violations;
         cascade.apply(&mut fm);
 
         // Optional per-tick throughput export (set MAFIS_TICK_EXPORT_DIR to enable)
@@ -377,6 +381,9 @@ struct BaselineKey {
     /// RHCR ablation label (`"h5n3"`, `"default"`, etc.). Required so
     /// overridden-horizon baselines don't collide with default-horizon ones.
     rhcr_override_label: String,
+    tick_count: u64,
+    /// Fingerprint of an inline custom map (`None` = registry topology).
+    custom_map: Option<u64>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -389,8 +396,30 @@ impl BaselineKey {
             num_agents: config.num_agents,
             seed: config.seed,
             rhcr_override_label: config.rhcr_override_label(),
+            tick_count: config.tick_count,
+            custom_map: config.custom_map.as_ref().map(map_fingerprint),
         }
     }
+}
+
+/// Content hash of a custom map: dimensions, obstacles, zones and queue lanes.
+#[cfg(not(target_arch = "wasm32"))]
+fn map_fingerprint(
+    (grid, zones): &(crate::core::grid::GridMap, crate::core::topology::ZoneMap),
+) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    (grid.width, grid.height).hash(&mut h);
+    let mut obstacles: Vec<(i32, i32)> = grid.obstacles().iter().map(|p| (p.x, p.y)).collect();
+    obstacles.sort_unstable();
+    obstacles.hash(&mut h);
+    zones.pickup_cells.hash(&mut h);
+    zones.delivery_cells.hash(&mut h);
+    for line in &zones.queue_lines {
+        line.delivery_cell.hash(&mut h);
+        line.cells.hash(&mut h);
+    }
+    h.finish()
 }
 
 /// Cached result from a baseline run, reusable across fault scenarios.
@@ -429,7 +458,7 @@ fn run_baseline_only(config: &ExperimentConfig) -> CachedBaseline {
         actual_agents,
         config.rhcr_override.as_ref(),
     )
-    .unwrap_or_else(|| Box::new(crate::solver::pibt::PibtLifelongSolver::new()));
+    .unwrap_or_else(|| panic!("unknown solver '{}'", config.solver_name));
 
     let fault_config = FaultConfig { enabled: false, ..Default::default() };
     let mut runner = SimulationRunner::new(
@@ -458,6 +487,8 @@ fn run_baseline_only(config: &ExperimentConfig) -> CachedBaseline {
     let mut metrics =
         super::metrics::compute_baseline_self_metrics(&analysis, &step_times, bl_wall_ms);
     metrics.pbs_partial_rate = partial_rate;
+    metrics.forced_waits = runner.forced_waits;
+    metrics.collision_violations = runner.collision_violations;
     let record = analysis.into_baseline_record(0, config.tick_count, actual_agents);
 
     CachedBaseline { record, metrics }
@@ -493,7 +524,7 @@ fn run_faulted_only(config: &ExperimentConfig, cached: &CachedBaseline) -> RunRe
         actual_agents,
         config.rhcr_override.as_ref(),
     )
-    .unwrap_or_else(|| Box::new(crate::solver::pibt::PibtLifelongSolver::new()));
+    .unwrap_or_else(|| panic!("unknown solver '{}'", config.solver_name));
 
     let (fault_config, fault_schedule) = match &config.scenario {
         Some(scenario) => {
@@ -532,6 +563,8 @@ fn run_faulted_only(config: &ExperimentConfig, cached: &CachedBaseline) -> RunRe
         faulted_wall_ms,
     );
     fm.pbs_partial_rate = partial_rate;
+    fm.forced_waits = runner.forced_waits;
+    fm.collision_violations = runner.collision_violations;
     cascade.apply(&mut fm);
 
     RunResult {
@@ -937,6 +970,12 @@ fn parse_config_json(json: &str) -> Option<ExperimentConfig> {
                 intermittent_start_tick: s.get("start_tick").and_then(|t| t.as_u64()).unwrap_or(0),
                 ..Default::default()
             }),
+            "null_perturb" => Some(FaultScenario {
+                enabled: true,
+                scenario_type: FaultScenarioType::NullPerturb,
+                burst_at_tick: s.get("at_tick").and_then(|t| t.as_u64()).unwrap_or(100),
+                ..Default::default()
+            }),
             "none" | _ => None,
         }
     });
@@ -975,6 +1014,38 @@ mod tests {
     use super::*;
     use crate::experiment::config::ExperimentConfig;
     use crate::fault::scenario::{FaultScenario, FaultScenarioType};
+
+    #[test]
+    fn baseline_key_separates_tick_count_and_custom_map() {
+        use crate::core::grid::GridMap;
+        use crate::core::topology::ZoneMap;
+        use bevy::math::IVec2;
+
+        let base = ExperimentConfig {
+            solver_name: "pibt".into(),
+            topology_name: "warehouse_single_dock".into(),
+            scenario: None,
+            scheduler_name: "closest".into(),
+            num_agents: 10,
+            seed: 1,
+            tick_count: 100,
+            custom_map: None,
+            rhcr_override: None,
+        };
+        let key = BaselineKey::from_config;
+        let longer = ExperimentConfig { tick_count: 200, ..base.clone() };
+        assert_ne!(key(&base), key(&longer), "tick_count must split the baseline cache");
+
+        let map = (GridMap::new(4, 4), ZoneMap::default());
+        let mut walled = map.clone();
+        walled.0.set_obstacle(IVec2::new(1, 1));
+        let custom = ExperimentConfig { custom_map: Some(map.clone()), ..base.clone() };
+        let custom_walled = ExperimentConfig { custom_map: Some(walled), ..base.clone() };
+        let custom_again = ExperimentConfig { custom_map: Some(map), ..base.clone() };
+        assert_ne!(key(&base), key(&custom));
+        assert_ne!(key(&custom), key(&custom_walled), "different maps must not share a baseline");
+        assert_eq!(key(&custom), key(&custom_again), "identical maps should share a baseline");
+    }
 
     #[test]
     fn single_experiment_no_faults() {

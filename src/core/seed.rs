@@ -25,6 +25,17 @@ impl SeededRng {
     }
 }
 
+/// Counter-based stream for one purpose at one key (usually the tick).
+///
+/// Derived only from `(seed, salt, key)`, so its output does not depend on how
+/// many draws any other consumer made — a fault perturbs only the decisions it
+/// directly touches (common random numbers across the paired runs).
+pub fn keyed_rng(seed: u64, salt: u64, key: u64) -> ChaCha8Rng {
+    let mut rng = ChaCha8Rng::seed_from_u64(seed ^ salt);
+    rng.set_stream(key);
+    rng
+}
+
 impl Default for SeededRng {
     fn default() -> Self {
         Self::new(DEFAULT_SEED)

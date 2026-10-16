@@ -63,7 +63,7 @@ fn burst_50() -> FaultScenario {
 }
 
 fn wear_medium() -> FaultScenario {
-    // WearHeatRate::Medium -> Weibull beta=2.5, eta=500 -> ~63% fleet dead by tick 500.
+    // WearHeatRate::Medium -> Weibull beta=2.5, eta=500 -> 63.2% fleet dead by tick 500.
     // Models typical industrial AGV deployment (Canadian survey: 500-1,000 h MTBF).
     FaultScenario {
         enabled: true,
@@ -75,7 +75,8 @@ fn wear_medium() -> FaultScenario {
 }
 
 fn wear_high() -> FaultScenario {
-    // WearHeatRate::High -> Weibull beta=3.5, eta=150 -> ~90% fleet dead by tick 500.
+    // WearHeatRate::High -> Weibull beta=3.5, eta=150 -> 100% fleet dead by tick 500
+    // (90% by tick 190, 99% by tick 232).
     // Models high-stress operation (Carlson & Murphy 2005: field robot MTBF ~ 24 h).
     FaultScenario {
         enabled: true,
@@ -212,7 +213,7 @@ pub fn topology_effect() -> Vec<ExperimentMatrix> {
         },
         ExperimentMatrix {
             solvers: vec!["pibt".into()],
-            topologies: vec!["fullfilment_center".into()],
+            topologies: vec!["fulfilment_center".into()],
             scenarios,
             schedulers: vec!["random".into()],
             agent_counts: vec![35],
@@ -324,7 +325,7 @@ pub fn all_legacy_experiments() -> Vec<(&'static str, ExperimentMatrix)> {
         "topology_warehouse_dual_dock",
         "topology_sorting_center",
         "topology_compact_grid",
-        "topology_fullfilment_center",
+        "topology_fulfilment_center",
     ];
     for (i, m) in topology_effect().into_iter().enumerate() {
         experiments.push((topo_names[i], m));
@@ -609,9 +610,10 @@ mod tests {
     fn experiment_counts() {
         let experiments = core_experiment_suite();
         let total: usize = experiments.iter().map(|(_, m)| m.total_runs()).sum();
-        // E1: 3 solvers × 6 scenarios × 3 counts × 30 seeds × 2 topos = 3,240
+        // E1: 3 solvers × 6 scenarios × 3 counts × 30 seeds × 2 topos = 3,240,
+        //     minus Token Passing at DD n=120 (above its 100-agent cap): 180 → 3,060
         // E2: 3 solvers × 6 scenarios × 2 schedulers × 30 seeds = 1,080
-        assert_eq!(total, 4320);
+        assert_eq!(total, 4140);
     }
 
     #[test]

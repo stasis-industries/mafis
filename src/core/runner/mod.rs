@@ -22,7 +22,7 @@ use rand::Rng;
 use super::action::Action;
 use super::grid::GridMap;
 use super::queue::{DeliveryQueuePolicy, QueueManager};
-use super::seed::SeededRng;
+use super::seed::{SeededRng, keyed_rng};
 use super::task::{TaskAgentSnapshot, TaskLeg, TaskScheduler, recycle_goals_core};
 use super::topology::ZoneMap;
 use crate::constants::THROUGHPUT_WINDOW_SIZE;
@@ -39,11 +39,17 @@ use crate::solver::lifelong::{
 
 /// XOR salt used to derive the fault RNG seed from the main seed.
 ///
-/// By using a dedicated RNG stream for fault detection (Weibull + intermittent),
-/// the task/solver RNG stream is identical between baseline and faulted runs.
-/// This makes baseline comparison valid: same seed → same task assignments,
-/// same solver decisions; only fault outcomes differ.
+/// Every random purpose has its own stream so a fault only perturbs the
+/// decisions it directly touches: `rng` draws task demand only, `fault_rng`
+/// draws fault decisions (Weibull, intermittent, zone strip, burst victims),
+/// and shuffles and the solver use per-tick keyed streams (`keyed_rng`).
 pub const FAULT_RNG_SALT: u64 = 0x9e37_79b9_7f4a_7c15;
+/// Salt for the per-tick free-agent shuffle in task recycling.
+const RECYCLE_SHUFFLE_SALT: u64 = 0x2545_f491_4f6c_dd1d;
+/// Salt for the per-tick fairness shuffle of queue joins.
+const QUEUE_SHUFFLE_SALT: u64 = 0x5851_f42d_4c95_7f2d;
+/// Salt for the per-tick stream handed to the solver.
+const SOLVER_RNG_SALT: u64 = 0xd1b5_4a32_d192_ed03;
 
 pub struct SimulationRunner {
     // ── Map (owned — faults can mutate grid) ──────────────────────────
@@ -74,7 +80,10 @@ pub struct SimulationRunner {
     command_queue: Vec<SimCommand>,
 
     // ── State ─────────────────────────────────────────────────────────
+    /// Task-demand stream: consumed only by pickup-task creation.
     rng: SeededRng,
+    /// Solver stream, re-keyed to the current tick before every `step()`.
+    solver_rng: SeededRng,
     /// Separate RNG stream for fault detection (Weibull + intermittent).
     ///
     /// Seeded with `rng.seed() ^ FAULT_RNG_SALT` so it is independent of the
@@ -104,9 +113,13 @@ pub struct SimulationRunner {
     available_agents_buf: Vec<usize>,
     /// Reusable buffer for detected fault decisions.
     faults_buf: Vec<(usize, FaultType)>,
-    /// Number of post-hoc collision violations detected (release mode only).
-    /// Always 0 if solver and collision resolution are correct.
+    /// Ticks with a vertex or edge-swap conflict after resolution (release
+    /// builds; debug builds panic instead). Always 0 if resolution is correct.
     pub collision_violations: u64,
+    /// Agent-ticks where the runner overrode a solver move with a Wait: a
+    /// conflict the resolver had to break, or a move into an obstacle.
+    /// Zero means the solver's own plans were conflict-free.
+    pub forced_waits: u64,
     /// Active spatial zone strip bounds (x_min, x_max) during a zone outage.
     /// Set when ZoneLatency fires, cleared when all latency expires.
     pub zone_strip: Option<(i32, i32)>,
@@ -132,6 +145,7 @@ impl SimulationRunner {
         fault_schedule: FaultSchedule,
     ) -> Self {
         let mut fault_rng = SeededRng::new(rng.seed() ^ FAULT_RNG_SALT);
+        let solver_rng = SeededRng::new(rng.seed() ^ SOLVER_RNG_SALT);
         let queue_manager = QueueManager::new(&zones.queue_lines);
         let weibull_failure_ticks = if fault_config.weibull_enabled {
             Self::sample_weibull_ticks(
@@ -155,6 +169,7 @@ impl SimulationRunner {
             weibull_failure_ticks,
             command_queue: Vec::new(),
             rng,
+            solver_rng,
             fault_rng,
             tick: 0,
             tasks_completed: 0,
@@ -168,6 +183,7 @@ impl SimulationRunner {
             available_agents_buf: Vec::new(),
             faults_buf: Vec::new(),
             collision_violations: 0,
+            forced_waits: 0,
             zone_strip: None,
             fault_snapshots: Vec::new(),
         }
@@ -252,6 +268,11 @@ impl SimulationRunner {
 
     pub fn solver(&self) -> &dyn LifelongSolver {
         self.solver.as_ref()
+    }
+
+    /// Agents ejected from blocked delivery-queue lanes so far.
+    pub fn queue_reroutes(&self) -> u64 {
+        self.queue_manager.reroutes
     }
 
     pub fn solver_mut(&mut self) -> &mut dyn LifelongSolver {
@@ -492,7 +513,8 @@ impl SimulationRunner {
                         if self.available_agents_buf.is_empty() {
                             break;
                         }
-                        let idx = self.rng.rng.random_range(0..self.available_agents_buf.len());
+                        let idx =
+                            self.fault_rng.rng.random_range(0..self.available_agents_buf.len());
                         let agent_idx = self.available_agents_buf.swap_remove(idx);
                         self.fault_snapshots[snapshot_idx].sources.push(agent_idx);
                         let pos = self.agents[agent_idx].pos;
@@ -507,6 +529,24 @@ impl SimulationRunner {
                             tick,
                             position: pos,
                             paths_invalidated: invalidated,
+                        });
+                    }
+                }
+                ScheduledAction::DelayRandomAgent { duration } => {
+                    self.available_agents_buf.clear();
+                    self.available_agents_buf.extend((0..n).filter(|&i| self.agents[i].alive));
+                    if !self.available_agents_buf.is_empty() {
+                        let pick =
+                            self.fault_rng.rng.random_range(0..self.available_agents_buf.len());
+                        let i = self.available_agents_buf[pick];
+                        self.agents[i].latency_remaining = duration;
+                        fault_events.push(FaultRecord {
+                            agent_index: i,
+                            fault_type: FaultType::Latency,
+                            source: FaultSource::Scheduled,
+                            tick,
+                            position: self.agents[i].pos,
+                            paths_invalidated: 0,
                         });
                     }
                 }
@@ -586,6 +626,8 @@ impl SimulationRunner {
                 let (target, effective_action) = if self.grid.is_walkable(new_pos) {
                     (new_pos, action)
                 } else {
+                    // The solver planned into an obstacle: the runner overrides it.
+                    self.forced_waits += 1;
                     (a.pos, Action::Wait)
                 };
                 col.moves.push((a.pos, effective_action, target, false));
@@ -704,6 +746,9 @@ impl SimulationRunner {
             let (_, action, target, was_forced) = self.collision.moves[i];
             let agent = &mut self.agents[i];
             if agent.alive {
+                if was_forced {
+                    self.forced_waits += 1;
+                }
                 agent.planned_path.pop_front();
 
                 if target != agent.pos && !self.grid.is_walkable(target) {
@@ -724,62 +769,66 @@ impl SimulationRunner {
         }
 
         // ── Post-hoc collision validator (LoRR-inspired) ────────────────
-        // Independent safety net: verify no two alive agents share a position
-        // AFTER collision resolution applied moves. This catches bugs in the
-        // resolution logic itself, not just in the solver.
-        #[cfg(debug_assertions)]
-        {
-            let mut seen_positions: std::collections::HashMap<IVec2, usize> =
-                std::collections::HashMap::with_capacity(n);
-            for (i, a) in self.agents.iter().enumerate() {
-                if !a.alive {
-                    continue;
-                }
-                if let Some(&prev) = seen_positions.get(&a.pos) {
-                    panic!(
-                        "POST-HOC COLLISION VALIDATOR: tick {} — agents {} and {} \
-                         both at {:?} after collision resolution. \
-                         This is a bug in resolve_collisions_fast().",
-                        self.tick, prev, i, a.pos
-                    );
-                }
-                seen_positions.insert(a.pos, i);
-            }
-        }
-
-        // Release-mode: lightweight check with counter (no HashMap)
-        #[cfg(not(debug_assertions))]
-        {
-            // Use the collision grid we already have for O(1) duplicate detection
-            let col = &mut self.collision;
-            col.clear_targets();
-            let mut collision_found = false;
-            for (_i, a) in self.agents.iter().enumerate() {
-                if !a.alive {
-                    continue;
-                }
-                let idx = col.idx(a.pos);
-                if idx < col.grid_size {
-                    if col.target_count[idx] > 0 {
-                        collision_found = true;
-                        // Log but don't panic in release — the simulation can
-                        // continue, but the collision is recorded for analysis.
-                        #[cfg(not(target_arch = "wasm32"))]
-                        eprintln!(
-                            "WARNING: post-hoc collision at tick {} pos {:?} (agent {})",
-                            self.tick, a.pos, _i
-                        );
-                    }
-                    col.target_count[idx] += 1;
-                    col.dirty_targets.push(idx);
-                }
-            }
-            if collision_found {
+        // Independent safety net on the APPLIED positions: catches bugs in the
+        // resolution logic itself. Debug builds panic; release builds keep
+        // running and count the tick in `collision_violations`.
+        if let Some(violation) = self.find_post_hoc_collision() {
+            #[cfg(debug_assertions)]
+            panic!(
+                "POST-HOC COLLISION VALIDATOR: tick {} — {violation} after collision \
+                 resolution. This is a bug in resolve_collisions_fast().",
+                self.tick
+            );
+            #[cfg(not(debug_assertions))]
+            {
+                #[cfg(not(target_arch = "wasm32"))]
+                eprintln!("WARNING: post-hoc collision at tick {}: {violation}", self.tick);
                 self.collision_violations += 1;
             }
         }
 
         moves
+    }
+
+    /// Vertex (two alive agents on one cell) or edge (two agents swapped cells)
+    /// conflict in the positions just applied. Reuses the flat collision grid.
+    fn find_post_hoc_collision(&mut self) -> Option<String> {
+        let col = &mut self.collision;
+        col.clear_targets();
+        col.clear_sources();
+        for (i, a) in self.agents.iter().enumerate() {
+            if !a.alive {
+                continue;
+            }
+            let idx = col.idx(a.pos);
+            if col.target_count[idx] > 0 {
+                return Some(format!(
+                    "agents {} and {i} both at {:?}",
+                    col.target_agent[idx], a.pos
+                ));
+            }
+            col.target_count[idx] = 1;
+            col.target_agent[idx] = i as u32;
+            col.dirty_targets.push(idx);
+            let src = col.moves[i].0;
+            if src != a.pos {
+                let s = col.idx(src);
+                col.source_agent[s] = i as u32;
+                col.dirty_sources.push(s);
+            }
+        }
+        for (i, a) in self.agents.iter().enumerate() {
+            let src = col.moves[i].0;
+            if !a.alive || src == a.pos {
+                continue;
+            }
+            // j left the cell i entered; if j entered the cell i left, they swapped.
+            let j = col.source_agent[col.idx(a.pos)] as usize;
+            if j < self.agents.len() && j != i && self.agents[j].pos == src {
+                return Some(format!("agents {i} and {j} swapped {src:?} <-> {:?}", a.pos));
+            }
+        }
+        None
     }
 
     /// Task state machine: recycle goals, assign new tasks.
@@ -799,8 +848,16 @@ impl SimulationRunner {
 
         // Token Passing selects its own tasks (Ma et al. 2017).
         let scheduler = self.solver.task_scheduler().unwrap_or(scheduler);
-        let recycle =
-            recycle_goals_core(&task_input, scheduler, &self.zones, &mut self.rng.rng, self.tick);
+        let mut shuffle_rng = keyed_rng(self.rng.seed(), RECYCLE_SHUFFLE_SALT, self.tick);
+        let recycle = recycle_goals_core(
+            &task_input,
+            scheduler,
+            &self.zones,
+            &self.grid,
+            &mut self.rng.rng,
+            &mut shuffle_rng,
+            self.tick,
+        );
 
         // Put scratch buffer back
         self.task_snapshots_buf = task_input;
@@ -843,6 +900,7 @@ impl SimulationRunner {
             &mut self.agents,
             &self.zones.queue_lines,
             queue_policy,
+            &self.grid,
             &mut reroute_changed,
         );
 
@@ -852,7 +910,7 @@ impl SimulationRunner {
             &self.zones.queue_lines,
             queue_policy,
             just_loaded,
-            &mut self.rng.rng,
+            &mut keyed_rng(self.rng.seed(), QUEUE_SHUFFLE_SALT, self.tick),
         );
     }
 
@@ -900,7 +958,7 @@ impl SimulationRunner {
                 .delivery_cells
                 .iter()
                 .copied()
-                .filter(|c| !used_goals.contains(c) && *c != agent.pos)
+                .filter(|&c| !used_goals.contains(&c) && c != agent.pos && self.grid.is_walkable(c))
                 .min_by_key(|c| (c.x - agent.pos.x).abs() + (c.y - agent.pos.y).abs());
 
             if let Some(delivery_cell) = delivery {
@@ -934,7 +992,9 @@ impl SimulationRunner {
         let ctx =
             SolverContext { grid: &self.grid, zones: &self.zones, tick: self.tick, num_agents: n };
 
-        match self.solver.step(&ctx, &agent_states, &mut self.dist_cache, &mut self.rng) {
+        self.solver_rng.rng.set_stream(self.tick);
+        self.solver_rng.rng.set_word_pos(0);
+        match self.solver.step(&ctx, &agent_states, &mut self.dist_cache, &mut self.solver_rng) {
             StepResult::Replan(plans) => {
                 for (idx, actions) in plans {
                     if *idx < n {
@@ -979,9 +1039,9 @@ impl SimulationRunner {
 
     /// Update each alive agent's operational age and visual stress indicator.
     ///
-    /// `operational_age` increments only on actual moves (distance-based wear).
-    /// Grid-blocked moves (e.g., obstacle from a dead agent) are converted to
-    /// `Action::Wait` during collision resolution, so they do not count as wear.
+    /// `operational_age` counts every tick the agent is alive, so a given seed
+    /// kills the same agents at the same ticks under every solver: the wear
+    /// fault is an exogenous event, not a function of how much a solver moves.
     /// `heat` shows individual progress toward this agent's sampled failure tick:
     /// 0.0 = fresh, 1.0 = about to fail. This replaces the old Weibull CDF which
     /// showed population-level failure probability, causing agents to visually die
@@ -991,9 +1051,7 @@ impl SimulationRunner {
             if !self.agents[i].alive {
                 continue;
             }
-            if matches!(self.agents[i].last_action, Action::Move(_)) {
-                self.agents[i].operational_age = self.agents[i].operational_age.saturating_add(1);
-            }
+            self.agents[i].operational_age = self.agents[i].operational_age.saturating_add(1);
             // Visual stress: progress toward individual failure tick (0 → 1 at death).
             if i < self.weibull_failure_ticks.len() && self.weibull_failure_ticks[i] > 0 {
                 self.agents[i].heat = (self.agents[i].operational_age as f32
@@ -1399,6 +1457,23 @@ mod tests {
             runner.tick(&RandomScheduler, &ClosestQueuePolicy);
             assert_ne!(runner.agents[1].pos, IVec2::new(2, 1));
         }
+    }
+
+    #[test]
+    fn post_hoc_validator_flags_vertex_and_edge_conflicts() {
+        let mut runner =
+            make_runner(vec![SimAgent::new(IVec2::new(1, 1)), SimAgent::new(IVec2::new(2, 1))]);
+        runner.tick(&RandomScheduler, &ClosestQueuePolicy);
+        // Fake an applied swap: sources (1,1),(2,1) -> positions (2,1),(1,1).
+        runner.collision.moves[0].0 = IVec2::new(1, 1);
+        runner.collision.moves[1].0 = IVec2::new(2, 1);
+        runner.agents[0].pos = IVec2::new(2, 1);
+        runner.agents[1].pos = IVec2::new(1, 1);
+        assert!(runner.find_post_hoc_collision().unwrap().contains("swapped"));
+        runner.agents[1].pos = IVec2::new(2, 1);
+        assert!(runner.find_post_hoc_collision().unwrap().contains("both at"));
+        runner.agents[1].pos = IVec2::new(3, 1);
+        assert!(runner.find_post_hoc_collision().is_none());
     }
 
     // ── Commands ─────────────────────────────────────────────────────
