@@ -783,6 +783,8 @@ impl SimulationRunner {
             {
                 #[cfg(not(target_arch = "wasm32"))]
                 eprintln!("WARNING: post-hoc collision at tick {}: {violation}", self.tick);
+                #[cfg(target_arch = "wasm32")]
+                let _ = violation; // no stderr in the browser; the count below is the record
                 self.collision_violations += 1;
             }
         }
