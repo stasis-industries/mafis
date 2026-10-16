@@ -124,6 +124,14 @@ pub trait LifelongSolver: Send + Sync + 'static {
         Vec::new()
     }
 
+    /// Largest fleet this solver supports on the given map. Token Passing
+    /// derives it from the instance (one parking endpoint per agent, Ma et
+    /// al. 2017 well-formedness condition 2). Default: the static
+    /// `info().recommended_max_agents`.
+    fn max_agents(&self, _zones: &crate::core::topology::ZoneMap) -> Option<usize> {
+        self.info().recommended_max_agents
+    }
+
     /// Solver-specific telemetry: fraction of replan windows that could not
     /// close the full fleet plan within the node budget. RHCR-PBS overrides
     /// this to expose the `WindowResult::Partial` fire rate — used as an

@@ -103,22 +103,22 @@ impl Default for ExperimentMatrix {
 
 impl ExperimentMatrix {
     /// Expand into the Cartesian product of experiment configs, skipping
-    /// solver × fleet-size cells above the solver's `recommended_max_agents`
+    /// cells whose fleet exceeds the solver's `max_agents` on that topology
     /// (with a warning) so no matrix runs a solver outside its supported range.
     pub fn expand(&self) -> Vec<ExperimentConfig> {
         let mut configs = Vec::new();
         let overrides: &[Option<RhcrConfigOverride>] =
             if self.rhcr_overrides.is_empty() { &[None] } else { &self.rhcr_overrides };
         for solver in &self.solvers {
-            let cap = solver_agent_cap(solver);
-            #[cfg(not(target_arch = "wasm32"))]
-            for &n in self.agent_counts.iter().filter(|&&n| cap.is_some_and(|c| n > c)) {
-                eprintln!(
-                    "WARNING: skipping {solver} at {n} agents (recommended max {})",
-                    cap.unwrap_or_default()
-                );
-            }
             for topology in &self.topologies {
+                let cap = solver_agent_cap(solver, topology);
+                #[cfg(not(target_arch = "wasm32"))]
+                for &n in self.agent_counts.iter().filter(|&&n| cap.is_some_and(|c| n > c)) {
+                    eprintln!(
+                        "WARNING: skipping {solver} at {n} agents on {topology} (max {})",
+                        cap.unwrap_or_default()
+                    );
+                }
                 for scenario in &self.scenarios {
                     for scheduler in &self.schedulers {
                         for &num_agents in &self.agent_counts {
@@ -151,27 +151,50 @@ impl ExperimentMatrix {
     /// Total number of runs this matrix will produce (same skips as `expand`).
     pub fn total_runs(&self) -> usize {
         let ov_len = self.rhcr_overrides.len().max(1);
-        let solver_agent_cells: usize = self
-            .solvers
-            .iter()
-            .map(|s| {
-                let cap = solver_agent_cap(s);
-                self.agent_counts.iter().filter(|&&n| cap.is_none_or(|c| n <= c)).count()
-            })
-            .sum();
-        solver_agent_cells
-            * self.topologies.len()
-            * self.scenarios.len()
-            * self.schedulers.len()
-            * self.seeds.len()
-            * ov_len
+        let mut cells = 0;
+        for solver in &self.solvers {
+            for topology in &self.topologies {
+                let cap = solver_agent_cap(solver, topology);
+                cells += self.agent_counts.iter().filter(|&&n| cap.is_none_or(|c| n <= c)).count();
+            }
+        }
+        cells * self.scenarios.len() * self.schedulers.len() * self.seeds.len() * ov_len
     }
 }
 
-/// Fleet-size cap from the solver's own `SolverInfo` (`None` = uncapped or unknown).
-fn solver_agent_cap(solver: &str) -> Option<usize> {
-    crate::solver::lifelong_solver_from_name(solver, 0, 0)
-        .and_then(|s| s.info().recommended_max_agents)
+/// Largest fleet `solver` supports on `topology`, from the solver's own
+/// `max_agents(&zones)` (`None` = uncapped, unknown solver or unknown topology;
+/// the run itself then fails loudly). Memoized: the desktop UI recounts runs
+/// every frame and topologies do not change at runtime.
+fn solver_agent_cap(solver: &str, topology: &str) -> Option<usize> {
+    use std::collections::HashMap;
+    use std::sync::{Mutex, OnceLock};
+    static CAPS: OnceLock<Mutex<HashMap<(String, String), Option<usize>>>> = OnceLock::new();
+    let key = (solver.to_string(), topology.to_string());
+    let caps = CAPS.get_or_init(Default::default);
+    if let Some(cap) = caps.lock().ok().and_then(|m| m.get(&key).copied()) {
+        return cap;
+    }
+    let cap = crate::solver::lifelong_solver_from_name(solver, 0, 0)
+        .and_then(|s| s.max_agents(&topology_zones(topology)?));
+    if let Ok(mut m) = caps.lock() {
+        m.insert(key, cap);
+    }
+    cap
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn topology_zones(topology: &str) -> Option<ZoneMap> {
+    use crate::core::topology::TopologyRegistry;
+    let registry = TopologyRegistry::load_from_dir(std::path::Path::new("topologies"));
+    TopologyRegistry::parse_entry(registry.find(topology)?).map(|(_, zones)| zones)
+}
+
+/// shortcut: WASM has no topology registry on disk here, so only solver caps
+/// that ignore the map apply; upgrade if matrices ever expand inside WASM.
+#[cfg(target_arch = "wasm32")]
+fn topology_zones(_topology: &str) -> Option<ZoneMap> {
+    Some(ZoneMap::default())
 }
 
 /// Helper to build common fault scenarios for experiment matrices.
@@ -237,12 +260,13 @@ mod tests {
 
     #[test]
     fn expand_skips_cells_above_the_solver_fleet_cap() {
+        // RHCR-PBS caps at 200 agents (the SolverInfo default of `max_agents`).
         let matrix = ExperimentMatrix {
-            solvers: vec!["pibt".into(), "token_passing".into()],
+            solvers: vec!["pibt".into(), "rhcr_pbs".into()],
             topologies: vec!["warehouse_dual_dock".into()],
             scenarios: vec![None],
             schedulers: vec!["closest".into()],
-            agent_counts: vec![40, 120],
+            agent_counts: vec![40, 250],
             seeds: vec![1],
             tick_count: 100,
             rhcr_overrides: vec![None],
@@ -250,7 +274,7 @@ mod tests {
         let configs = matrix.expand();
         let cells: Vec<(&str, usize)> =
             configs.iter().map(|c| (c.solver_name.as_str(), c.num_agents)).collect();
-        assert_eq!(cells, vec![("pibt", 40), ("pibt", 120), ("token_passing", 40)]);
+        assert_eq!(cells, vec![("pibt", 40), ("pibt", 250), ("rhcr_pbs", 40)]);
         assert_eq!(matrix.total_runs(), 3);
     }
 
