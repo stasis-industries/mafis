@@ -610,10 +610,11 @@ mod tests {
     fn experiment_counts() {
         let experiments = core_experiment_suite();
         let total: usize = experiments.iter().map(|(_, m)| m.total_runs()).sum();
-        // E1: 3 solvers × 6 scenarios × 3 counts × 30 seeds × 2 topos = 3,240,
-        //     minus Token Passing at DD n=120 (above its 100-agent cap): 180 → 3,060
+        // E1: 3 solvers × 6 scenarios × 3 counts × 30 seeds × 2 topos = 3,240
+        //     (Token Passing's cap is the map's parking count: 60 on SD, 120 on
+        //     DD, so every E1 density fits)
         // E2: 3 solvers × 6 scenarios × 2 schedulers × 30 seeds = 1,080
-        assert_eq!(total, 4140);
+        assert_eq!(total, 4320);
     }
 
     #[test]
@@ -626,8 +627,11 @@ mod tests {
         //   SD-w2 out-env:  2 × 1 × 6 × 30 =  360
         //   SD-w3 in-env:   3 × 2 × 6 × 30 = 1080
         //   SD-w3 out-env:  2 × 1 × 6 × 30 =  360
-        //   Total                           = 4500
-        assert_eq!(total, 4500);
+        //   Subtotal                        = 4500
+        //   minus Token Passing above its parking cap (SD-w2 66 < n=72,
+        //   SD-w3 78 < n=100): 2 × 1 × 6 × 30 = 360
+        //   Total                           = 4140
+        assert_eq!(total, 4140);
     }
 
     #[test]
@@ -648,7 +652,9 @@ mod tests {
     #[test]
     fn braess_resilience_count() {
         let m = braess_resilience();
-        assert_eq!(m.total_runs(), 3600); // 3 solvers × 4 densities × 6 scenarios × 50 seeds
+        // 3 solvers × 4 densities × 6 scenarios × 50 seeds = 3600, minus Token
+        // Passing at n=80 (above SD-w1's 60 parking cells): 6 × 50 = 300
+        assert_eq!(m.total_runs(), 3300);
     }
 
     /// Cross-topology validation: does the Braess effect replicate on other layouts?
