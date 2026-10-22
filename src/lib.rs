@@ -4,6 +4,7 @@ pub mod core;
 pub mod experiment;
 pub mod export;
 pub mod fault;
+pub mod planning;
 #[cfg(any(target_arch = "wasm32", not(feature = "headless")))]
 pub mod render;
 pub mod solver;
