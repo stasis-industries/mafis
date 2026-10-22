@@ -3130,87 +3130,10 @@ input[type="range"]:disabled::-webkit-slider-thumb {
    Phase-Driven UI
    ========================================================================== */
 
-/* --- Verdict Banner (overlaid on viewport) --- */
-.verdict-banner {
-    position: absolute;
-    top: 12px;
-    right: 12px;
-    width: 192px;
-    box-sizing: border-box;
-    background: var(--bg-overlay);
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
-    padding: 10px 14px;
-    z-index: 20;
-    opacity: 0;
-    transform: translateY(-8px);
-    transition: opacity 300ms ease, transform 300ms ease;
-    pointer-events: none;
-}
-
-.verdict-banner.visible {
-    opacity: 1;
-    transform: translateY(0);
-    pointer-events: auto;
-    cursor: pointer;
-}
-
-.verdict-label {
-    font-family: 'DM Mono', monospace;
-    font-size: 13px;
-    font-weight: 500;
-    letter-spacing: 1px;
-    text-transform: uppercase;
-    color: var(--text-on-dark);
-    margin-bottom: 4px;
-}
-
-.verdict-dots {
-    display: flex;
-    gap: 4px;
-    margin-bottom: 2px;
-}
-
-.verdict-dot {
-    width: 8px;
-    height: 8px;
-    border: 1px solid rgba(255, 255, 255, 0.3);
-    background: transparent;
-    transition: background 300ms ease, border-color 300ms ease;
-}
-
-.verdict-dot.filled {
-    background: currentColor;
-    border-color: currentColor;
-}
-
-.verdict-detail {
-    font-family: 'DM Mono', monospace;
-    font-size: 10px;
-    color: rgba(255, 255, 255, 0.5);
-    letter-spacing: 0.3px;
-}
-
-/* Verdict color states */
-.verdict-banner[data-verdict="running"] .verdict-label { color: var(--text-muted); }
-.verdict-banner[data-verdict="running"] .verdict-dots { color: var(--text-muted); }
-
-.verdict-banner[data-verdict="resilient"] .verdict-label { color: rgb(45, 200, 60); }
-.verdict-banner[data-verdict="resilient"] .verdict-dots { color: rgb(45, 200, 60); }
-
-.verdict-banner[data-verdict="moderate"]  .verdict-label { color: rgb(200, 185, 0); }
-.verdict-banner[data-verdict="moderate"]  .verdict-dots  { color: rgb(200, 185, 0); }
-
-.verdict-banner[data-verdict="degraded"]  .verdict-label { color: rgb(230, 140, 0); }
-.verdict-banner[data-verdict="degraded"]  .verdict-dots  { color: rgb(230, 140, 0); }
-
-.verdict-banner[data-verdict="fragile"]   .verdict-label { color: rgb(230, 44, 2);  }
-.verdict-banner[data-verdict="fragile"]   .verdict-dots  { color: rgb(230, 44, 2);  }
-
-/* --- Live Stats (overlaid on viewport, top-right, below verdict banner) --- */
+/* --- Live Stats (overlaid on viewport, top-right) --- */
 .live-stats {
     position: absolute;
-    top: 100px;
+    top: 12px;
     right: 12px;
     width: 192px;
     box-sizing: border-box;
@@ -3533,56 +3456,16 @@ body[data-phase="results"] #panel-right > .view-results-wrapper {
     margin-bottom: 14px;
 }
 
-/* Verdict + Scorecard side by side */
-.results-verdict-row {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 12px;
+/* Scorecard row */
+.results-scorecard-row {
     margin-bottom: 28px;
 }
 
-.results-verdict-card,
 .results-scorecard-card {
     background: var(--bg-card);
     border: 1px solid var(--border);
     padding: 12px;
 }
-
-.results-verdict-label {
-    font-family: 'DM Mono', monospace;
-    font-size: 18px;
-    font-weight: 500;
-    color: var(--text-primary);
-    margin-bottom: 4px;
-}
-
-.results-verdict-dots {
-    display: flex;
-    gap: 4px;
-}
-
-.results-verdict-dots .dot {
-    width: 10px;
-    height: 10px;
-    border: 1px solid var(--border);
-    background: var(--bg-card);
-}
-
-.results-verdict-dots .dot.filled {
-    background: var(--state-moving);
-    border-color: var(--state-moving);
-}
-
-/* Results verdict label color — text only, no background */
-.results-verdict-row[data-verdict="resilient"] .results-verdict-label { color: rgb(45, 200, 60); }
-.results-verdict-row[data-verdict="moderate"]  .results-verdict-label { color: rgb(200, 185, 0); }
-.results-verdict-row[data-verdict="degraded"]  .results-verdict-label { color: rgb(230, 140, 0); }
-.results-verdict-row[data-verdict="fragile"]   .results-verdict-label { color: rgb(230, 44, 2);  }
-/* Results verdict dots — background fill */
-.results-verdict-row[data-verdict="resilient"] .dot.filled { background: rgb(45, 200, 60); border-color: rgb(45, 200, 60); }
-.results-verdict-row[data-verdict="moderate"]  .dot.filled { background: rgb(200, 185, 0); border-color: rgb(200, 185, 0); }
-.results-verdict-row[data-verdict="degraded"]  .dot.filled { background: rgb(230, 140, 0); border-color: rgb(230, 140, 0); }
-.results-verdict-row[data-verdict="fragile"]   .dot.filled { background: rgb(230, 44, 2);  border-color: rgb(230, 44, 2);  }
 
 /* Summary table */
 .results-table {
@@ -5756,22 +5639,6 @@ body.demo-active .demo-skip-btn {
     font-style: italic;
     letter-spacing: 0.3px;
 }
-.composite-formula {
-    display: flex;
-    align-items: baseline;
-    gap: 6px;
-    padding: 10px 12px;
-    margin: 8px 0;
-    background: var(--bg-inset, rgba(0,0,0,0.06));
-    border-left: 2px solid var(--border-strong);
-    font-family: 'Georgia', 'Times New Roman', serif;
-    font-style: italic;
-    font-size: 0.88rem;
-    letter-spacing: 0.3px;
-    flex-wrap: wrap;
-}
-.formula-var { font-weight: 600; }
-.formula-op { color: var(--text-secondary); }
 .composite-note {
     font-size: 0.75rem;
     color: var(--text-secondary);

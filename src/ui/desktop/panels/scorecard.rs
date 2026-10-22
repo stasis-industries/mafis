@@ -63,29 +63,4 @@ pub fn scorecard_panel(ui: &mut egui::Ui, scorecard: &ResilienceScorecard) {
         ui.colored_label(ct_color, format!("{ct:.2}"));
         ui.end_row();
     });
-
-    // Composite score dots (0–5)
-    let composite = composite_score(scorecard);
-    ui.add_space(4.0);
-    ui.horizontal(|ui| {
-        ui.label("Score");
-        for i in 0..5 {
-            let color = if i < composite { theme::TEXT_PRIMARY } else { theme::TEXT_MUTED };
-            ui.colored_label(color, "●");
-        }
-    });
-}
-
-/// Coarse 0–5 verdict for the desktop scorecard panel.
-///
-/// ⚠ NOT a research-grade metric. The implicit weights are hand-picked for
-/// at-a-glance UI feedback and have no theoretical derivation. Do not cite
-/// in research output — report the 4 primary metrics directly instead.
-fn composite_score(sc: &ResilienceScorecard) -> usize {
-    let mut score = 0.0_f32;
-    score += sc.fault_tolerance.map_or(0.0, |ft| ft.min(1.0));
-    score += sc.nrr.unwrap_or(0.0);
-    score += sc.survival_rate;
-    score += (1.0 - sc.critical_time).max(0.0);
-    ((score / 4.0) * 5.0).round() as usize
 }
