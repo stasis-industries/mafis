@@ -1,11 +1,10 @@
 use bevy::prelude::*;
 
 use super::super::theme;
-use crate::constants;
 use crate::core::state::SimState;
-use crate::planning::params::ParamValues;
+use crate::planning::params::{ParamKind, ParamValue};
 use crate::planning::registry;
-use crate::ui::controls::UiState;
+use crate::ui::controls::{UiState, select_planner, set_planner_param};
 
 pub fn solver_panel(ui: &mut egui::Ui, ui_state: &mut UiState, sim_state: SimState) {
     let idle = sim_state == SimState::Idle;
@@ -25,11 +24,7 @@ pub fn solver_panel(ui: &mut egui::Ui, ui_state: &mut UiState, sim_state: SimSta
                         && !is_selected
                         && idle
                     {
-                        ui_state.solver_name = entry.info.id.to_string();
-                        ui_state.planner_params = ParamValues::default();
-                        // Clear RHCR overrides when switching solver
-                        ui_state.rhcr_horizon = None;
-                        ui_state.rhcr_replan_interval = None;
+                        select_planner(ui_state, entry.info.id.to_string());
                     }
                 }
             },
@@ -53,51 +48,27 @@ pub fn solver_panel(ui: &mut egui::Ui, ui_state: &mut UiState, sim_state: SimSta
             }
         });
 
-    // ── RHCR settings (only for RHCR solvers) ──────────────────────
-    let is_rhcr = ui_state.solver_name.starts_with("rhcr");
-    if is_rhcr {
+    // ── Planner parameters, one slider per declared parameter ──────
+    let Some(entry) = selected else {
+        return;
+    };
+    if !entry.info.params.is_empty() {
         ui.add_space(4.0);
-        ui.label("RHCR Settings");
-        ui.indent("rhcr_indent", |ui| {
-            // Horizon
-            ui.horizontal(|ui| {
-                ui.label("Horizon (H)");
-                let mut h = ui_state.rhcr_horizon.unwrap_or(0) as u32;
-                let auto = ui_state.rhcr_horizon.is_none();
-                let slider = egui::Slider::new(
-                    &mut h,
-                    constants::RHCR_MIN_HORIZON as u32..=constants::RHCR_MAX_HORIZON as u32,
-                )
-                .suffix(if auto { " (auto)" } else { "" });
-                if ui.add_enabled(idle, slider).changed() {
-                    ui_state.rhcr_horizon = Some(h as usize);
+    }
+    for spec in entry.info.params {
+        let ParamKind::Int { min, max, default } = spec.kind;
+        let ParamValue::Int(mut value) =
+            ui_state.planner_params.get(spec.key).unwrap_or(ParamValue::Int(default));
+        ui.horizontal(|ui| {
+            ui.label(spec.label);
+            let slider = egui::Slider::new(&mut value, min..=max);
+            if ui.add_enabled(idle, slider).on_hover_text(spec.help).changed() {
+                // The slider stays within the declared bounds, so this only
+                // fails if the planner changed under it.
+                if let Err(e) = set_planner_param(ui_state, spec.key, ParamValue::Int(value)) {
+                    error!("{e}");
                 }
-                if auto {
-                    ui.weak("auto");
-                }
-            });
-
-            // Replan interval
-            ui.horizontal(|ui| {
-                ui.label("Replan (W)");
-                let mut w = ui_state.rhcr_replan_interval.unwrap_or(0) as u32;
-                let auto = ui_state.rhcr_replan_interval.is_none();
-                let slider = egui::Slider::new(
-                    &mut w,
-                    constants::RHCR_MIN_REPLAN_INTERVAL as u32
-                        ..=constants::RHCR_MAX_REPLAN_INTERVAL as u32,
-                );
-                if ui.add_enabled(idle, slider).changed() {
-                    ui_state.rhcr_replan_interval = Some(w as usize);
-                }
-                if auto {
-                    ui.weak("auto");
-                }
-            });
-
-            ui.weak(
-                "Auto-tuned for current grid and agent count. PBS uses per-agent LRA fallback.",
-            );
+            }
         });
     }
 }

@@ -1,5 +1,6 @@
 #[cfg(any(target_arch = "wasm32", not(feature = "headless")))]
-use crate::planning::params::ParamValues;
+use crate::planning::params::{ParamValue, ParamValues};
+use crate::planning::registry::{self, PlannerError};
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use std::collections::HashSet;
@@ -42,8 +43,6 @@ use crate::planners::pibt::PibtSolver;
 use crate::planners::pibt::planner::MAPFSolver;
 #[cfg(any(target_arch = "wasm32", not(feature = "headless")))]
 use crate::planning::heuristics::DistanceMapCache;
-#[cfg(any(target_arch = "wasm32", not(feature = "headless")))]
-use crate::planning::registry;
 #[cfg(any(target_arch = "wasm32", not(feature = "headless")))]
 use crate::render::environment::{
     EnvironmentMarker, ObstacleMarker, spawn_floor_and_lines, spawn_queue_arrows,
@@ -124,10 +123,6 @@ pub struct UiState {
     pub planner_params: ParamValues,
     pub topology_name: String,
     pub imported_scenario: Option<ImportedScenario>,
-    /// User override for RHCR horizon (None = auto).
-    pub rhcr_horizon: Option<usize>,
-    /// User override for RHCR replan interval (None = auto).
-    pub rhcr_replan_interval: Option<usize>,
     /// Whether fault injection is enabled.
     pub fault_enabled: bool,
     /// Fault scenario type.
@@ -154,12 +149,10 @@ impl Default for UiState {
             obstacle_density: 0.15,
             grid_width: 25,
             grid_height: 15,
-            solver_name: "pibt".to_string(),
+            solver_name: crate::planners::DEFAULT.to_string(),
             planner_params: ParamValues::default(),
             topology_name: "warehouse_single_dock".to_string(),
             imported_scenario: None,
-            rhcr_horizon: None,
-            rhcr_replan_interval: None,
             fault_enabled: false,
             fault_scenario_type: "burst_failure".to_string(),
             burst_kill_percent: 20.0,
@@ -170,6 +163,32 @@ impl Default for UiState {
             zone_latency_duration: 50,
         }
     }
+}
+
+/// Selects planner `id` and drops the previous planner's parameters, which
+/// another planner would not accept.
+pub fn select_planner(ui: &mut UiState, id: String) {
+    ui.solver_name = id;
+    ui.planner_params = ParamValues::default();
+}
+
+/// Sets one parameter of the selected planner. The values stay unchanged when
+/// the planner does not accept the result.
+pub fn set_planner_param(
+    ui: &mut UiState,
+    key: &str,
+    value: ParamValue,
+) -> Result<(), PlannerError> {
+    let values = ui.planner_params.clone().with(key, value);
+    registry::resolve(&ui.solver_name, &values)?;
+    ui.planner_params = values;
+    Ok(())
+}
+
+/// The planner and parameters a run starts with. The live run and its twin
+/// both build from it.
+pub fn planner_choice(ui: &UiState) -> (String, ParamValues) {
+    (ui.solver_name.clone(), ui.planner_params.clone())
 }
 
 // Everything below is observatory-only (render-dependent).
@@ -234,7 +253,8 @@ mod observatory_controls {
             Query<Entity, With<EnvironmentMarker>>,
         ),
     ) {
-        if let Err(e) = registry::resolve(&res.ui_state.solver_name, &res.ui_state.planner_params) {
+        let (planner_id, planner_params) = planner_choice(&res.ui_state);
+        if let Err(e) = registry::resolve(&planner_id, &planner_params) {
             error!("{e}: loading stopped");
             // A `Done` progress left by the previous load would make `loading_tick`
             // request Running in this same frame, overriding the Idle request.
@@ -307,8 +327,8 @@ mod observatory_controls {
                 let baseline_config = BaselineConfig {
                     topology_name: res.ui_state.topology_name.clone(),
                     num_agents: res.ui_state.num_agents,
-                    solver_name: res.ui_state.solver_name.clone(),
-                    planner_params: res.ui_state.planner_params.clone(),
+                    solver_name: planner_id.clone(),
+                    planner_params: planner_params.clone(),
                     scheduler_name: res.active_scheduler.name().to_string(),
                     seed: res.ui_state.seed,
                     tick_count: total_ticks,
@@ -368,12 +388,8 @@ mod observatory_controls {
 
             // Build the planner for actual_agents (clamped), the fleet the
             // experiment runner and the twin build theirs for.
-            let runner_solver = registry::build(
-                &res.ui_state.solver_name,
-                &res.ui_state.planner_params,
-                actual_agents,
-            )
-            .expect("planner and parameters checked at the start of begin_loading");
+            let runner_solver = registry::build(&planner_id, &planner_params, actual_agents)
+                .expect("planner and parameters checked at the start of begin_loading");
 
             let runner = SimulationRunner::new(
                 runner_grid,
@@ -1080,3 +1096,71 @@ mod observatory_controls {
 
 #[cfg(any(target_arch = "wasm32", not(feature = "headless")))]
 pub use observatory_controls::*;
+
+#[cfg(test)]
+mod planner_tests {
+    use super::*;
+    use crate::planning::params::{ParamKind, ParamValue};
+    use crate::planning::registry::{self, PlannerEntry};
+
+    /// The first registered planner that declares a parameter, and that
+    /// parameter's key and bounds.
+    fn planner_with_param() -> (&'static PlannerEntry, &'static str, i64, i64) {
+        let entry = registry::entries()
+            .iter()
+            .find(|entry| !entry.info.params.is_empty())
+            .expect("a registered planner declares a parameter");
+        let spec = entry.info.params[0];
+        let ParamKind::Int { min, max, .. } = spec.kind;
+        (entry, spec.key, min, max)
+    }
+
+    #[test]
+    fn select_planner_clears_params() {
+        let (entry, key, min, _) = planner_with_param();
+        let mut ui = UiState::default();
+        select_planner(&mut ui, entry.info.id.to_string());
+        set_planner_param(&mut ui, key, ParamValue::Int(min)).unwrap();
+        select_planner(&mut ui, crate::planners::DEFAULT.to_string());
+        assert_eq!(ui.solver_name, crate::planners::DEFAULT);
+        assert!(ui.planner_params.is_empty());
+    }
+
+    #[test]
+    fn set_planner_param_rejects_undeclared_key() {
+        let (entry, _, _, _) = planner_with_param();
+        let mut ui = UiState::default();
+        select_planner(&mut ui, entry.info.id.to_string());
+        assert!(set_planner_param(&mut ui, "undeclared_key", ParamValue::Int(1)).is_err());
+        assert!(ui.planner_params.is_empty());
+    }
+
+    #[test]
+    fn set_planner_param_rejects_out_of_range() {
+        let (entry, key, _, max) = planner_with_param();
+        let mut ui = UiState::default();
+        select_planner(&mut ui, entry.info.id.to_string());
+        assert!(set_planner_param(&mut ui, key, ParamValue::Int(max + 1)).is_err());
+        assert!(ui.planner_params.is_empty());
+    }
+
+    #[test]
+    fn set_planner_param_stores_valid_value() {
+        let (entry, key, min, _) = planner_with_param();
+        let mut ui = UiState::default();
+        select_planner(&mut ui, entry.info.id.to_string());
+        set_planner_param(&mut ui, key, ParamValue::Int(min)).unwrap();
+        assert_eq!(ui.planner_params.get(key), Some(ParamValue::Int(min)));
+    }
+
+    #[test]
+    fn planner_choice_carries_ui_params() {
+        let (entry, key, min, _) = planner_with_param();
+        let mut ui = UiState::default();
+        select_planner(&mut ui, entry.info.id.to_string());
+        set_planner_param(&mut ui, key, ParamValue::Int(min)).unwrap();
+        let (id, params) = planner_choice(&ui);
+        assert_eq!(id, entry.info.id);
+        assert_eq!(params.get(key), Some(ParamValue::Int(min)));
+    }
+}

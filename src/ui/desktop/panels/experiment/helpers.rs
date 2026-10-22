@@ -3,6 +3,7 @@ use egui::Color32;
 use crate::experiment::config::ExperimentMatrix;
 use crate::experiment::export::MetricColumn;
 use crate::experiment::runner::{ConfigSummary, MatrixResult, RunResult};
+use crate::planning::registry;
 
 use super::SortColumn;
 
@@ -61,7 +62,7 @@ pub struct PresetConfig {
 
 fn preset_solver_resilience() -> PresetConfig {
     PresetConfig {
-        solvers: vec!["pibt".into(), "rhcr_pbs".into(), "token_passing".into()],
+        solvers: registry::entries().iter().map(|entry| entry.info.id.to_string()).collect(),
         topologies: vec!["warehouse_single_dock".into()],
         schedulers: vec!["random".into()],
         agent_counts: "40".into(),
@@ -73,7 +74,7 @@ fn preset_solver_resilience() -> PresetConfig {
 
 fn preset_scale_sensitivity() -> PresetConfig {
     PresetConfig {
-        solvers: vec!["pibt".into()],
+        solvers: vec![crate::planners::DEFAULT.into()],
         topologies: vec!["warehouse_single_dock".into()],
         schedulers: vec!["random".into()],
         agent_counts: "10, 20, 40, 80".into(),
@@ -85,7 +86,7 @@ fn preset_scale_sensitivity() -> PresetConfig {
 
 fn preset_scheduler_effect() -> PresetConfig {
     PresetConfig {
-        solvers: vec!["pibt".into()],
+        solvers: vec![crate::planners::DEFAULT.into()],
         topologies: vec!["warehouse_single_dock".into()],
         schedulers: vec!["random".into(), "closest".into()],
         agent_counts: "40".into(),
@@ -97,7 +98,7 @@ fn preset_scheduler_effect() -> PresetConfig {
 
 fn preset_smoke_test() -> PresetConfig {
     PresetConfig {
-        solvers: vec!["pibt".into()],
+        solvers: vec![crate::planners::DEFAULT.into()],
         topologies: vec!["warehouse_single_dock".into()],
         schedulers: vec!["random".into()],
         agent_counts: "8".into(),

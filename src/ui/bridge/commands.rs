@@ -25,7 +25,7 @@ use crate::core::topology::{CustomMap, ZoneMap, ZoneType};
 #[cfg(target_arch = "wasm32")]
 use crate::export::config::ExportTrigger;
 #[cfg(target_arch = "wasm32")]
-use crate::planning::params::ParamValues;
+use crate::planning::params::ParamValue;
 use crate::planning::registry;
 #[cfg(target_arch = "wasm32")]
 use crate::render::orbit_camera as orbit_camera_fns;
@@ -33,6 +33,8 @@ use crate::render::orbit_camera as orbit_camera_fns;
 use crate::ui::controls::ImportedScenario;
 #[cfg(target_arch = "wasm32")]
 use crate::ui::controls::PreviewMap;
+#[cfg(target_arch = "wasm32")]
+use crate::ui::controls::{select_planner, set_planner_param};
 
 // ---------------------------------------------------------------------------
 // JS commands
@@ -78,8 +80,7 @@ pub(crate) enum JsCommand {
     JumpNextFault,
     ClearSelection,
     SelectAgent(usize),
-    SetRhcrHorizon(usize),
-    SetRhcrReplanInterval(usize),
+    SetPlannerParam { key: String, value: ParamValue },
     SetQueuePolicy(String),
     SetFaultList(String),
     SetTheme(String),
@@ -168,10 +169,10 @@ pub(super) fn parse_command(json: &str) -> Option<JsCommand> {
             let id = v.get("value")?.as_u64()? as usize;
             Some(JsCommand::SelectAgent(id))
         }
-        "set_rhcr_horizon" => Some(JsCommand::SetRhcrHorizon(v.get("value")?.as_u64()? as usize)),
-        "set_rhcr_replan_interval" => {
-            Some(JsCommand::SetRhcrReplanInterval(v.get("value")?.as_u64()? as usize))
-        }
+        "set_planner_param" => Some(JsCommand::SetPlannerParam {
+            key: v.get("key")?.as_str()?.to_string(),
+            value: serde_json::from_value(v.get("value")?.clone()).ok()?,
+        }),
         "set_queue_policy" => {
             Some(JsCommand::SetQueuePolicy(v.get("value")?.as_str()?.to_string()))
         }
@@ -465,11 +466,7 @@ pub(super) fn process_js_commands(
                         }
                         // Kept even when unknown, so the next start is refused
                         // (begin_loading) instead of running the previous planner.
-                        sim_res.ui_state.solver_name = name;
-                        sim_res.ui_state.planner_params = ParamValues::default();
-                        // Clear RHCR overrides when switching solver
-                        sim_res.ui_state.rhcr_horizon = None;
-                        sim_res.ui_state.rhcr_replan_interval = None;
+                        select_planner(&mut sim_res.ui_state, name);
                     }
                 }
                 JsCommand::KillAgent(id) => {
@@ -716,22 +713,11 @@ pub(super) fn process_js_commands(
                     click_selection.cell = None;
                     click_selection.fresh = false;
                 }
-                JsCommand::SetRhcrHorizon(h) => {
-                    if current == SimState::Idle {
-                        let h = h.clamp(
-                            crate::constants::RHCR_MIN_HORIZON,
-                            crate::constants::RHCR_MAX_HORIZON,
-                        );
-                        sim_res.ui_state.rhcr_horizon = Some(h);
-                    }
-                }
-                JsCommand::SetRhcrReplanInterval(w) => {
-                    if current == SimState::Idle {
-                        let w = w.clamp(
-                            crate::constants::RHCR_MIN_REPLAN_INTERVAL,
-                            crate::constants::RHCR_MAX_REPLAN_INTERVAL,
-                        );
-                        sim_res.ui_state.rhcr_replan_interval = Some(w);
+                JsCommand::SetPlannerParam { key, value } => {
+                    if current == SimState::Idle
+                        && let Err(e) = set_planner_param(&mut sim_res.ui_state, &key, value)
+                    {
+                        error!("{e}");
                     }
                 }
                 JsCommand::SetFaultList(json) => {

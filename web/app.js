@@ -1,7 +1,11 @@
 // MAFIS — App Controller
 // Polls Bevy simulation state via wasm_bindgen bridge and updates the HTML UI.
 
-import { get_simulation_state as wasmGetState, send_command as wasmSendCommand } from './mafis.js';
+import {
+    get_simulation_state as wasmGetState,
+    send_command as wasmSendCommand,
+    get_planners as wasmGetPlanners,
+} from './mafis.js';
 // Re-export for module-scoped usage
 const get_simulation_state = wasmGetState;
 // Debug backdoor — only attached when window.__MAFIS_DEBUG === true is set in console
@@ -126,6 +130,76 @@ function simStateToPhase(simState) {
 // Init — called from index.html after WASM init() completes
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Planners — the registry's list, read once the WASM module is ready
+// ---------------------------------------------------------------------------
+
+let PLANNERS = [];
+
+function plannerLabel(id) {
+    const planner = PLANNERS.find(p => p.id === id);
+    return planner ? planner.label : id;
+}
+
+// Planner ids a preset asks for: the first registered planner, or all of them.
+function presetPlanners(which) {
+    return (which === 'all' ? PLANNERS : PLANNERS.slice(0, 1)).map(p => p.id);
+}
+
+// Fills the planner picker and the experiment planner checkboxes.
+function initPlanners() {
+    PLANNERS = JSON.parse(wasmGetPlanners());
+    const select = document.getElementById('input-solver');
+    if (select) {
+        select.replaceChildren(...PLANNERS.map(p => new Option(p.label, p.id)));
+    }
+    const grid = document.getElementById('exp-solvers');
+    if (grid) {
+        grid.replaceChildren(...PLANNERS.map((p, i) => {
+            const label = document.createElement('label');
+            label.className = 'checkbox-label';
+            const input = document.createElement('input');
+            input.type = 'checkbox';
+            input.value = p.id;
+            input.checked = i === 0;
+            const span = document.createElement('span');
+            span.textContent = p.label;
+            label.append(input, span);
+            return label;
+        }));
+    }
+    renderPlannerParams(select ? select.value : '');
+}
+
+// One number input per parameter the selected planner declares. Switching
+// planner resets them to their defaults, as the bridge does.
+function renderPlannerParams(id) {
+    const container = document.getElementById('planner-params');
+    if (!container) return;
+    const planner = PLANNERS.find(p => p.id === id);
+    container.replaceChildren(...(planner ? planner.params : []).map(param => {
+        const group = document.createElement('div');
+        group.className = 'input-group';
+        group.title = param.help;
+        const label = document.createElement('label');
+        label.className = 'input-label';
+        label.htmlFor = `input-param-${param.key}`;
+        label.textContent = param.label;
+        const input = document.createElement('input');
+        input.type = 'number';
+        input.className = 'input-field';
+        input.id = `input-param-${param.key}`;
+        input.min = param.min;
+        input.max = param.max;
+        input.value = param.default;
+        input.addEventListener('change', () => {
+            sendCommand({ type: 'set_planner_param', key: param.key, value: parseInt(input.value, 10) });
+        });
+        group.append(label, input);
+        return group;
+    }));
+}
+
 export function initApp() {
     // Set initial phase
     document.body.dataset.phase = 'configure';
@@ -133,6 +207,7 @@ export function initApp() {
 
     initTheme();
     initCollapsible();
+    initPlanners();
 
     initSettingsModal();
     initPerfWarning();
@@ -256,7 +331,6 @@ let demoController = null;
 const DEMO_CONFIG = {
     topology: 'compact-grid',
     agents: 20,
-    solver: 'pibt',
     scheduler: 'random',
     seed: 42,
     tickHz: 12,
@@ -434,10 +508,12 @@ class DemoController {
             }},
             { action: () => {
                 expandSection('solver-sched-content');
-                sendCommand({ type: 'set_solver', value: DEMO_CONFIG.solver });
+                const [planner] = presetPlanners('first');
+                sendCommand({ type: 'set_solver', value: planner });
                 const sel = document.getElementById('input-solver');
-                if (sel) sel.value = DEMO_CONFIG.solver;
-                return spotlight('input-solver', '<strong>Algorithm</strong> \u2014 PIBT: reactive priority inheritance. Replans every tick.');
+                if (sel) sel.value = planner;
+                renderPlannerParams(planner);
+                return spotlight('input-solver', '<strong>Algorithm</strong> \u2014 The planner that moves the agents. Its summary and reference show below the picker.');
             }},
             { action: () => {
                 sendCommand({ type: 'set_scheduler', value: DEMO_CONFIG.scheduler });
@@ -1375,6 +1451,7 @@ function updateUI(s) {
     const solverEl = document.getElementById('input-solver');
     if (solverEl && s.solver && solverEl.value !== s.solver) {
         solverEl.value = s.solver;
+        renderPlannerParams(s.solver);
     }
     const infoCard = document.getElementById('solver-info-card');
     if (infoCard && s.solver_info) {
@@ -4231,37 +4308,12 @@ function bindControls() {
         sendCommand({ type: 'set_obstacle_density', value: parseFloat(v) });
     });
 
-    // Solver selection + RHCR params toggle
+    // Planner selection: its declared parameters follow the choice
     const solverSelect = document.getElementById('input-solver');
-    const rhcrParams = document.getElementById('rhcr-params');
-    const rhcrHorizon = document.getElementById('input-rhcr-horizon');
-    const rhcrReplan = document.getElementById('input-rhcr-replan');
-    const rhcrAutoHint = document.getElementById('rhcr-auto-hint');
-
-    function updateRhcrVisibility() {
-        const isRhcr = solverSelect && solverSelect.value.startsWith('rhcr_');
-        if (rhcrParams) rhcrParams.style.display = isRhcr ? '' : 'none';
-        if (isRhcr && rhcrAutoHint) {
-            rhcrAutoHint.textContent = 'Auto-tuned for current grid and agent count.';
-        }
-    }
-
     if (solverSelect) {
         solverSelect.addEventListener('change', () => {
             sendCommand({ type: 'set_solver', value: solverSelect.value });
-            updateRhcrVisibility();
-        });
-        updateRhcrVisibility();
-    }
-
-    if (rhcrHorizon) {
-        rhcrHorizon.addEventListener('change', () => {
-            sendCommand({ type: 'set_rhcr_horizon', value: parseInt(rhcrHorizon.value) || 10 });
-        });
-    }
-    if (rhcrReplan) {
-        rhcrReplan.addEventListener('change', () => {
-            sendCommand({ type: 'set_rhcr_replan_interval', value: parseInt(rhcrReplan.value) || 5 });
+            renderPlannerParams(solverSelect.value);
         });
     }
 
@@ -4831,22 +4883,22 @@ function showCustomParams(type) {
 
 const EXPERIMENT_PRESETS = {
     smoke: {
-        solvers: ['pibt'], topologies: ['warehouse-medium'], schedulers: ['random'],
+        planners: 'first', topologies: ['warehouse-medium'], schedulers: ['random'],
         scenarios: ['burst_20'], agents: '8', seeds: '42, 123', ticks: 50,
     },
     solver: {
-        // RHCR (PBS) is desktop-only — excluded from the web sweep.
-        solvers: ['pibt', 'token_passing'], topologies: ['warehouse-medium'],
+        // Every planner this build offers.
+        planners: 'all', topologies: ['warehouse-medium'],
         schedulers: ['random'], scenarios: ['none', 'burst_20', 'burst_50', 'wear_medium', 'wear_high', 'zone'],
         agents: '40', seeds: '42, 123, 456, 789, 1024', ticks: 500,
     },
     scale: {
-        solvers: ['pibt'], topologies: ['warehouse-medium'], schedulers: ['random'],
+        planners: 'first', topologies: ['warehouse-medium'], schedulers: ['random'],
         scenarios: ['none', 'burst_20', 'burst_50', 'wear_medium', 'wear_high', 'zone'],
         agents: '10, 20, 40, 80', seeds: '42, 123, 456, 789, 1024', ticks: 500,
     },
     scheduler: {
-        solvers: ['pibt'], topologies: ['warehouse-medium'], schedulers: ['random', 'closest'],
+        planners: 'first', topologies: ['warehouse-medium'], schedulers: ['random', 'closest'],
         scenarios: ['none', 'burst_20', 'burst_50', 'wear_medium', 'wear_high', 'zone'],
         agents: '40', seeds: '42, 123, 456, 789, 1024', ticks: 500,
     },
@@ -5066,7 +5118,7 @@ function initExperimentMode() {
             // Highlight active preset
             document.querySelectorAll('.exp-preset-btn').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
-            setCheckedValues('exp-solvers', preset.solvers);
+            setCheckedValues('exp-solvers', presetPlanners(preset.planners));
             setCheckedValues('exp-topologies', preset.topologies);
             setCheckedValues('exp-schedulers', preset.schedulers);
             setCheckedValues('exp-scenarios', preset.scenarios);
@@ -5234,8 +5286,7 @@ let padlockState = null;
 function padlockFormatValue(key, value) {
     const v = String(value);
     if (key === 'solver') {
-        const map = { pibt: 'PIBT', token_passing: 'Token Pass', rhcr_pbs: 'RHCR-PBS' };
-        return map[v] || v;
+        return plannerLabel(v);
     }
     if (key === 'scenario_key') {
         const map = { none: 'none', burst_20: 'burst 20%', burst_50: 'burst 50%',

@@ -5,7 +5,9 @@
 use std::fmt;
 
 use crate::core::topology::ZoneMap;
-use crate::planning::params::{self, ParamError, ParamSpec, ParamValues, ResolvedParams};
+use crate::planning::params::{
+    self, ParamError, ParamKind, ParamSpec, ParamValues, ResolvedParams,
+};
 use crate::planning::planner::Planner;
 
 /// What a planner is, for pickers, result records and validation.
@@ -84,6 +86,43 @@ pub fn build(
     Ok((entry.build)(&resolved, fleet))
 }
 
+/// Every planner as JSON for the web pickers, in registry order: id, label,
+/// summary, reference, `assigns_tasks`, and each declared parameter with its
+/// kind, bounds and default.
+pub fn planners_json() -> String {
+    let planners: Vec<serde_json::Value> = entries()
+        .iter()
+        .map(|entry| {
+            let params: Vec<serde_json::Value> = entry
+                .info
+                .params
+                .iter()
+                .map(|spec| {
+                    let ParamKind::Int { min, max, default } = spec.kind;
+                    serde_json::json!({
+                        "key": spec.key,
+                        "label": spec.label,
+                        "help": spec.help,
+                        "kind": "int",
+                        "min": min,
+                        "max": max,
+                        "default": default,
+                    })
+                })
+                .collect();
+            serde_json::json!({
+                "id": entry.info.id,
+                "label": entry.info.label,
+                "summary": entry.info.summary,
+                "reference": entry.info.reference,
+                "assigns_tasks": entry.info.assigns_tasks,
+                "params": params,
+            })
+        })
+        .collect();
+    serde_json::Value::Array(planners).to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -134,6 +173,28 @@ mod tests {
     fn declared_defaults_lie_within_bounds() {
         for entry in entries() {
             assert!(resolve(entry.info.id, &ParamValues::default()).is_ok(), "{}", entry.info.id);
+        }
+    }
+
+    #[test]
+    fn planners_json_lists_every_entry() {
+        let json: serde_json::Value = serde_json::from_str(&planners_json()).unwrap();
+        let listed = json.as_array().unwrap();
+        let ids: Vec<&str> = listed.iter().map(|p| p["id"].as_str().unwrap()).collect();
+        let expected: Vec<&str> = entries().iter().map(|e| e.info.id).collect();
+        assert_eq!(ids, expected);
+        for (planner, entry) in listed.iter().zip(entries()) {
+            let params = planner["params"].as_array().unwrap();
+            assert_eq!(params.len(), entry.info.params.len(), "{}", entry.info.id);
+            for (param, spec) in params.iter().zip(entry.info.params) {
+                let ParamKind::Int { min, max, default } = spec.kind;
+                assert_eq!(param["key"], spec.key);
+                assert_eq!(param["kind"], "int");
+                assert_eq!(
+                    (param["min"].as_i64(), param["max"].as_i64(), param["default"].as_i64()),
+                    (Some(min), Some(max), Some(default))
+                );
+            }
         }
     }
 

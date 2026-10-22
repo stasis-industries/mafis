@@ -24,7 +24,7 @@ impl Default for PersistedSettings {
     fn default() -> Self {
         Self {
             last_topology: "warehouse_single_dock".to_string(),
-            last_solver: "pibt".to_string(),
+            last_solver: crate::planners::DEFAULT.to_string(),
             last_scheduler: "random".to_string(),
             last_agent_count: 15,
             last_seed: 42,

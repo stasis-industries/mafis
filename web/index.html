@@ -261,30 +261,15 @@
                         title="MAPF algorithm used for path planning. RHCR (PBS) is native-only — it needs rayon parallelism that WASM can't provide. Run the desktop build to use RHCR.">
                         <label class="input-label" for="input-solver">Algorithm</label>
                         <select class="input-select" id="input-solver" aria-label="Solver algorithm">
-                            <optgroup label="Reactive (suboptimal, fast)">
-                                <option value="pibt">PIBT — Priority Inheritance</option>
-                            </optgroup>
-                            <optgroup label="Decentralized (suboptimal, sequential)">
-                                <option value="token_passing">Token Passing</option>
-                            </optgroup>
+                            <!-- Filled from get_planners() -->
                         </select>
                         <div class="input-hint" style="color: var(--text-dim); font-size: 0.75em; margin-top: 4px;">
                             RHCR (PBS) is desktop-only — needs multi-threaded planning.
                         </div>
                     </div>
 
-                    <!-- RHCR advanced params — shown only when an RHCR variant is selected -->
-                    <div id="rhcr-params" style="display:none;">
-                        <div class="input-group" title="Planning horizon — how many steps ahead to plan each window (H)">
-                            <label class="input-label" for="input-rhcr-horizon">Horizon (H)</label>
-                            <input type="number" class="input-field" id="input-rhcr-horizon" min="5" max="40" value="10">
-                        </div>
-                        <div class="input-group" title="Replan interval — ticks between replans (W)">
-                            <label class="input-label" for="input-rhcr-replan">Replan (W)</label>
-                            <input type="number" class="input-field" id="input-rhcr-replan" min="2" max="40" value="5">
-                        </div>
-                        <div class="input-hint" id="rhcr-auto-hint" style="color: var(--text-dim); font-size: 0.8em; margin-top: 4px;"></div>
-                    </div>
+                    <!-- The selected planner's declared parameters, filled by app.js -->
+                    <div id="planner-params"></div>
 
                     <div id="solver-info-card" class="solver-info-card"
                         style="display: none; font-size: 0.85em; padding: 8px; background: var(--bg-hover); border-radius: 4px; margin-top: 8px;">
@@ -936,8 +921,7 @@
                             <div class="exp-check-group">
                                 <label class="exp-check-label">Solvers</label>
                                 <div class="exp-check-grid" id="exp-solvers">
-                                    <label class="checkbox-label"><input type="checkbox" value="pibt" checked><span>PIBT</span></label>
-                                    <label class="checkbox-label"><input type="checkbox" value="token_passing"><span>Token Passing</span></label>
+                                    <!-- Filled from get_planners() -->
                                 </div>
                             </div>
                             <div class="exp-check-group">

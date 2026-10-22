@@ -9,6 +9,12 @@ pub fn get_simulation_state() -> String {
     })
 }
 
+/// Every planner this build offers, as JSON (`registry::planners_json`).
+#[wasm_bindgen]
+pub fn get_planners() -> String {
+    crate::planning::registry::planners_json()
+}
+
 #[wasm_bindgen]
 pub fn get_version() -> String {
     crate::constants::VERSION.to_string()
