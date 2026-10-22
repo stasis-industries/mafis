@@ -6,6 +6,7 @@
 use crate::analysis::baseline::{BaselineDiff, BaselineRecord};
 use crate::analysis::engine::AnalysisEngine;
 use crate::analysis::fault_metrics::FaultMetrics;
+use crate::analysis::ft;
 
 /// All scalar metrics from a single experiment run.
 #[derive(Debug, Clone)]
@@ -245,24 +246,13 @@ pub fn compute_run_metrics(
 
     let fault_tolerance = match first_fault_idx {
         Some(start) => {
-            // Average throughput from fault onset to end, for both runs.
-            let faulted_post = &faulted_analysis.throughput_series[start..];
             let baseline_post = if start < baseline.throughput_series.len() {
                 &baseline.throughput_series[start..]
             } else {
                 &baseline.throughput_series[..]
             };
-            let avg_faulted: f64 = if faulted_post.is_empty() {
-                0.0
-            } else {
-                faulted_post.iter().sum::<f64>() / faulted_post.len() as f64
-            };
-            let avg_baseline: f64 = if baseline_post.is_empty() {
-                0.0
-            } else {
-                baseline_post.iter().sum::<f64>() / baseline_post.len() as f64
-            };
-            if avg_baseline > 0.0 { avg_faulted / avg_baseline } else { f64::NAN }
+            ft::fault_tolerance(&faulted_analysis.throughput_series[start..], baseline_post)
+                .unwrap_or(f64::NAN)
         }
         None => {
             // No faults occurred → system retained full capability → FT = 1.0

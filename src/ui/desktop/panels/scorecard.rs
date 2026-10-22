@@ -22,8 +22,14 @@ pub fn scorecard_panel(ui: &mut egui::Ui, scorecard: &ResilienceScorecard) {
     egui::Grid::new("scorecard_grid").show(ui, |ui| {
         // Fault Tolerance
         ui.label("Fault Tolerance");
-        let ft = scorecard.fault_tolerance;
-        ui.colored_label(score_color(ft), format!("{ft:.2}"));
+        match scorecard.fault_tolerance {
+            Some(ft) => {
+                ui.colored_label(score_color(ft), format!("{ft:.2}"));
+            }
+            None => {
+                ui.weak("N/A (the twin completed no task after the fault)");
+            }
+        }
         ui.end_row();
 
         // NRR
@@ -77,7 +83,7 @@ pub fn scorecard_panel(ui: &mut egui::Ui, scorecard: &ResilienceScorecard) {
 /// in research output — report the 4 primary metrics directly instead.
 fn composite_score(sc: &ResilienceScorecard) -> usize {
     let mut score = 0.0_f32;
-    score += sc.fault_tolerance.min(1.0);
+    score += sc.fault_tolerance.map_or(0.0, |ft| ft.min(1.0));
     score += sc.nrr.unwrap_or(0.0);
     score += sc.survival_rate;
     score += (1.0 - sc.critical_time).max(0.0);

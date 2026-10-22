@@ -10,4 +10,5 @@
 //! Add new test modules here and reference them below.
 
 pub mod common;
+pub mod scorecard_parity;
 pub mod simulation;

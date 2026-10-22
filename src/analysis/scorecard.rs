@@ -1,7 +1,7 @@
 //! Resilience Scorecard — live 4-metric assessment (literature-backed).
 //!
-//! - **Fault Tolerance**: `P_fault / P_nominal` — adapted from classical reliability
-//!   degradation ratio (fraction of baseline throughput retained under faults)
+//! - **Fault Tolerance**: post-fault mean throughput ÷ the twin's post-fault mean
+//!   (`super::ft`, shared with the experiment runner)
 //! - **NRR**: `1 - MTTR/MTBF` — Normalized Recovery Ratio (Or 2025)
 //! - **Survival Rate**: `alive / initial_fleet` — fraction of initial fleet still alive post-fault
 //! - **Critical Time**: fraction of post-fault ticks below critical threshold
@@ -17,6 +17,7 @@ use crate::core::state::SimulationConfig;
 use super::TimeSeriesAccessor;
 use super::baseline::{BaselineDiff, BaselineStore};
 use super::fault_metrics::FaultMetrics;
+use super::ft;
 
 // ---------------------------------------------------------------------------
 // ResilienceScorecard resource
@@ -24,8 +25,9 @@ use super::fault_metrics::FaultMetrics;
 
 #[derive(Resource, Debug, Clone, Serialize)]
 pub struct ResilienceScorecard {
-    /// Swarm FT = P_fault / P_nominal. 0-1+. (classical reliability degradation ratio)
-    pub fault_tolerance: f32,
+    /// Post-fault mean throughput ÷ the twin's post-fault mean (`super::ft`). 0-1+.
+    /// 1.0 before any fault; `None` when the twin completed nothing after the fault.
+    pub fault_tolerance: Option<f32>,
     /// NRR = 1 - MTTR/MTBF. 0-1. (Or 2025)
     pub nrr: Option<f32>,
     /// Survival Rate: alive agents / initial fleet size, measured post-fault.
@@ -42,7 +44,7 @@ pub struct ResilienceScorecard {
 impl Default for ResilienceScorecard {
     fn default() -> Self {
         Self {
-            fault_tolerance: 1.0,
+            fault_tolerance: Some(1.0),
             nrr: None,
             survival_rate: 1.0,
             critical_time: 0.0,
@@ -62,9 +64,7 @@ impl ResilienceScorecard {
 pub struct ScorecardState {
     /// Tick at which first fault occurred.
     first_fault_tick: Option<u64>,
-    /// Running sum of live throughput during fault period (for FT average).
-    fault_throughput_sum: f64,
-    /// Count of ticks in fault period (for FT average).
+    /// Count of ticks in fault period (Critical Time denominator).
     fault_tick_count: u64,
     /// Count of ticks where throughput was below critical threshold.
     ticks_below_critical: u64,
@@ -73,7 +73,7 @@ pub struct ScorecardState {
     /// Initial fleet size captured on first fault tick.
     initial_fleet: usize,
     /// Per-tick live and baseline throughput since the first fault, fed to the
-    /// shared windowed ratio (`super::ct::ratio_at`) for Critical Time.
+    /// shared Fault Tolerance (`super::ft`) and windowed ratio (`super::ct`).
     post_fault_live_tp: Vec<f64>,
     post_fault_baseline_tp: Vec<f64>,
 }
@@ -114,11 +114,7 @@ pub fn update_resilience_scorecard(
         state.prev_fault_count = current_event_count;
     }
 
-    // --- Get baseline avg throughput for FT ---
-    let baseline_avg_tp = baseline_store.record.as_ref().map(|r| r.avg_throughput).unwrap_or(0.0);
-
-    // --- Fault Tolerance: P_fault / P_nominal (classical reliability ratio) ---
-    // Track live throughput from first fault onwards.
+    // Track live and baseline throughput from the first fault onwards.
     if state.first_fault_tick.is_some() {
         // Use the instantaneous throughput from baseline_diff (live side).
         // baseline_diff.rate_delta = baseline_tp - live_tp, so:
@@ -127,20 +123,19 @@ pub fn update_resilience_scorecard(
             baseline_store.record.as_ref().map(|r| r.throughput_at(tick)).unwrap_or(0.0);
         let live_tp = bl_tp_at_tick - baseline_diff.rate_delta;
 
-        state.fault_throughput_sum += live_tp;
         state.fault_tick_count += 1;
+        state.post_fault_live_tp.push(live_tp);
+        state.post_fault_baseline_tp.push(bl_tp_at_tick);
 
-        if baseline_avg_tp > 0.0 && state.fault_tick_count > 0 {
-            let p_fault = state.fault_throughput_sum / state.fault_tick_count as f64;
-            scorecard.fault_tolerance = (p_fault / baseline_avg_tp) as f32;
-        }
+        // --- Fault Tolerance: same formula as the experiment runner (`crate::analysis::ft`) ---
+        scorecard.fault_tolerance =
+            ft::fault_tolerance(&state.post_fault_live_tp, &state.post_fault_baseline_tp)
+                .map(|v| v as f32);
 
         // --- Critical Time: ticks below threshold (operational SLA heuristic) ---
         // Same windowed ratio as the experiment runner (`crate::analysis::ct`):
         // live and baseline throughput summed over the same post-fault window,
         // so a single zero-completion tick is not automatically critical.
-        state.post_fault_live_tp.push(live_tp);
-        state.post_fault_baseline_tp.push(bl_tp_at_tick);
         let t = state.post_fault_live_tp.len() - 1;
         let ratio =
             super::ct::ratio_at(&state.post_fault_baseline_tp, &state.post_fault_live_tp, 0, t);
@@ -192,14 +187,14 @@ mod tests {
     #[test]
     fn clear_resets_all_fields_to_defaults() {
         let mut sc = ResilienceScorecard {
-            fault_tolerance: 0.5,
+            fault_tolerance: Some(0.5),
             nrr: Some(0.8),
             survival_rate: 0.5,
             critical_time: 0.2,
             has_faults: true,
         };
         sc.clear();
-        assert_eq!(sc.fault_tolerance, 1.0);
+        assert_eq!(sc.fault_tolerance, Some(1.0));
         assert_eq!(sc.nrr, None);
         assert_eq!(sc.survival_rate, 1.0);
         assert_eq!(sc.critical_time, 0.0);

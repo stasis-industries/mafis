@@ -1519,7 +1519,8 @@ function updateUI(s) {
             scorecardSection.style.display = '';
             const sc = s.scorecard;
 
-            document.getElementById('sc-ft').textContent = sc.fault_tolerance.toFixed(2);
+            document.getElementById('sc-ft').textContent =
+                sc.fault_tolerance != null ? sc.fault_tolerance.toFixed(2) : '—';
             updateScZone('sc-ft', 'ft', sc.fault_tolerance);
 
             // NRR: 0-1, higher=better. Hidden entirely when < 2 fault events.
@@ -1866,6 +1867,16 @@ function updateScZone(prefix, metricKey, value) {
     const cfg = SC_METRIC_CONFIG[metricKey];
     const zoneEl   = document.getElementById(prefix + '-zone');
     const markerEl = document.getElementById(prefix + '-marker');
+
+    if (value == null) {
+        if (zoneEl) {
+            zoneEl.textContent = 'N/A';
+            delete zoneEl.dataset.zone;
+        }
+        if (markerEl) markerEl.style.display = 'none';
+        return;
+    }
+    if (markerEl) markerEl.style.display = '';
 
     const tier = scTier(value, cfg);
     const zoneNames  = ['poor', 'low',  'fair', 'good'];
@@ -2437,7 +2448,7 @@ function populateResultsFromState(s) {
     if (s.scorecard && scorecardBars && hadFaults) {
         const sc = s.scorecard;
         const metrics = [
-            { key: 'ft',   name: 'Fault Tolerance',  value: sc.fault_tolerance || 0 },
+            { key: 'ft',   name: 'Fault Tolerance',  value: sc.fault_tolerance },
             { key: 'crit', name: 'Critical Time',     value: sc.critical_time || 0 },
             { key: 'sr',   name: 'Survival Rate',     value: sc.survival_rate || 0 },
         ];
