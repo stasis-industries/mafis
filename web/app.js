@@ -16,10 +16,6 @@ const POLL_INTERVAL = 100; // ms
 // Centralized scorecard constants (single source of truth)
 // ---------------------------------------------------------------------------
 
-// Composite score weights (sum to 1.0 per branch)
-const SCORECARD_WEIGHTS_NRR    = { ft: 0.40, nrr: 0.35, crit: 0.25 };
-const SCORECARD_WEIGHTS_NO_NRR = { ft: 0.65,             crit: 0.35 };
-
 // Per-metric scorecard config — single source of truth
 // thresholds: [t1,t2,t3] → 4 tiers: poor(<t1) | low(<t2) | fair(<t3) | good(>=t3)
 // inverted: lower-is-better reverses tier ordering
@@ -29,14 +25,6 @@ const SC_METRIC_CONFIG = {
     sr:  { thresholds: [0.5, 0.7, 0.9], inverted: false },
     crit:{ thresholds: [0.1, 0.2, 0.4], inverted: true  },
 };
-
-// Unified 4-tier verdict — used by both 3D banner and results panel
-const VERDICT_TIERS = [
-    { key: 'resilient', label: 'RESILIENT', display: 'Resilient', threshold: 0.75 },
-    { key: 'moderate',  label: 'MODERATE',  display: 'Moderate',  threshold: 0.55 },
-    { key: 'degraded',  label: 'DEGRADED',  display: 'Degraded',  threshold: 0.35 },
-    { key: 'fragile',   label: 'FRAGILE',   display: 'Fragile',   threshold: 0.0  },
-];
 
 // CSS vars per tier index (0=worst → 3=best): red / orange / yellow / green
 const SC_TIER_VARS = ['var(--sc-poor)', 'var(--sc-low)', 'var(--sc-fair)', 'var(--sc-good)'];
@@ -102,29 +90,6 @@ const METRIC_KEYS = [
     'throughput', 'tasks_completed',
     'fault_count', 'fault_mttr', 'fault_mtbf', 'propagation_rate', 'survival_rate',
 ];
-
-// Compute composite resilience score from scorecard fields.
-// Returns { composite, filledDots } where composite is 0-1 and filledDots is 0-5.
-// When NRR is N/A (permanent deaths, no cascade recovery), its weight is
-// redistributed proportionally to the remaining three metrics.
-//
-// ⚠ NOT A RESEARCH-GRADE METRIC. The weights are hand-picked for the live
-// observatory dashboard and have no theoretical derivation. Used here only
-// as an at-a-glance UI verdict — DO NOT cite in papers.
-// See RELIABILITY.md for scorecard weight rationale.
-function computeCompositeScore(sc) {
-    const ft = Math.min(sc.fault_tolerance || 0, 1.0); // Cap FT at 1.0 for composite (Braess doesn't inflate verdict)
-    const critNorm = Math.max(0, Math.min(1, 1.0 - (sc.critical_time || 0)));
-    let composite;
-    if (sc.nrr != null) {
-        composite = ft * SCORECARD_WEIGHTS_NRR.ft + sc.nrr * SCORECARD_WEIGHTS_NRR.nrr
-                  + critNorm * SCORECARD_WEIGHTS_NRR.crit;
-    } else {
-        // NRR unavailable — redistribute weights to remaining metrics
-        composite = ft * SCORECARD_WEIGHTS_NO_NRR.ft + critNorm * SCORECARD_WEIGHTS_NO_NRR.crit;
-    }
-    return { composite, filledDots: Math.round(composite * 5) };
-}
 
 // Benchmark import state
 // (parsedMap/parsedScen removed — replaced by map maker JSON flow)
@@ -739,7 +704,7 @@ class DemoController {
             { action: () => { expandSection('scorecard-content'); return spotlight('scorecard-content', '<strong>Resilience Scorecard</strong> \u2014 Four metrics that grade how well the system handles faults.', 'left'); }, after: () => collapseSection('scorecard-content') },
             { action: async () => { expandSection('system-perf-content'); const c = document.getElementById('chart-throughput'); if (!c) return; c.scrollIntoView({ behavior: 'smooth', block: 'end' }); await delay(500); return spotlight(c, '<strong>Throughput Chart</strong> \u2014 Tasks completed per tick. Watch for the dip at tick 100.', 'left'); }},
             { action: () => { const mt = document.getElementById('metric-throughput'); const row = mt?.closest('.metric-row') || mt?.parentElement; return row ? spotlight(row, '<strong>Metrics</strong> \u2014 Throughput, completed tasks, and idle ratio with delta indicators.', 'left') : Promise.resolve(); }, after: () => collapseSection('system-perf-content') },
-            { action: () => { expandSection('fault-response-content'); return spotlight('fault-response-content', '<strong>Fault Response</strong> \u2014 Live verdict, MTTR/MTBF, survival rate, and fault event timeline.', 'left'); }, after: () => collapseSection('fault-response-content') },
+            { action: () => { expandSection('fault-response-content'); return spotlight('fault-response-content', '<strong>Fault Response</strong> \u2014 MTTR/MTBF, survival rate, and fault event timeline.', 'left'); }, after: () => collapseSection('fault-response-content') },
             { action: () => { expandSection('fault-events-content'); return spotlight('fault-events-content', '<strong>Fault Timeline</strong> \u2014 Every fault event logged with tick, agent ID, and type.', 'left'); }, after: () => collapseSection('fault-events-content') },
             { action: () => { const btn = document.getElementById('btn-view-results'); if (btn) btn.classList.add('demo-pulse'); return btn ? spotlight(btn, '<strong>View Results</strong> \u2014 Full analysis dashboard with exportable charts and data.', 'left') : Promise.resolve(); }},
         ];
@@ -1519,7 +1484,8 @@ function updateUI(s) {
             scorecardSection.style.display = '';
             const sc = s.scorecard;
 
-            document.getElementById('sc-ft').textContent = sc.fault_tolerance.toFixed(2);
+            document.getElementById('sc-ft').textContent =
+                sc.fault_tolerance != null ? sc.fault_tolerance.toFixed(2) : '—';
             updateScZone('sc-ft', 'ft', sc.fault_tolerance);
 
             // NRR: 0-1, higher=better. Hidden entirely when < 2 fault events.
@@ -1601,7 +1567,6 @@ function updateUI(s) {
     }
 
     // Phase-Driven UI overlays
-    updateVerdictBanner(s);
     updateLiveStats(s);
 
     // Charts
@@ -1617,40 +1582,8 @@ function updateUI(s) {
 }
 
 // ---------------------------------------------------------------------------
-// Phase-Driven UI: Verdict Banner + Live Stats
+// Phase-Driven UI: Live Stats
 // ---------------------------------------------------------------------------
-
-function updateVerdictBanner(s) {
-    const banner = document.getElementById('verdict-banner');
-    if (!banner) return;
-
-    const phase = currentPhase;
-    const isVisible = phase === 'observe' || phase === 'analyze';
-    banner.classList.toggle('visible', isVisible);
-    if (!isVisible) return;
-
-    const label = document.getElementById('verdict-label');
-    const detail = document.getElementById('verdict-detail');
-    const dots = document.querySelectorAll('#verdict-dots .verdict-dot');
-
-    // Compute verdict from scorecard — only when faults are/were active
-    const _vFaultEnabled = s.fault_config && s.fault_config.enabled;
-    const _vHasFaults = s.metrics && s.metrics.fault_count > 0;
-    const _vFaultActive = _vFaultEnabled || _vHasFaults;
-    if (s.scorecard && _vFaultActive) {
-        const { composite, filledDots } = computeCompositeScore(s.scorecard);
-        const tier = VERDICT_TIERS.find(t => composite >= t.threshold);
-        banner.dataset.verdict = tier.key;
-        label.textContent = tier.label;
-        detail.textContent = `Score ${composite.toFixed(2)}`;
-        dots.forEach((d, i) => d.classList.toggle('filled', i < filledDots));
-    } else {
-        banner.dataset.verdict = 'running';
-        label.textContent = s.state === 'running' ? `TICK ${s.tick}/${s.duration}` : s.state.toUpperCase();
-        detail.textContent = '';
-        dots.forEach(d => d.classList.remove('filled'));
-    }
-}
 
 function updateLiveStats(s) {
     const panel = document.getElementById('live-stats');
@@ -1866,6 +1799,16 @@ function updateScZone(prefix, metricKey, value) {
     const cfg = SC_METRIC_CONFIG[metricKey];
     const zoneEl   = document.getElementById(prefix + '-zone');
     const markerEl = document.getElementById(prefix + '-marker');
+
+    if (value == null) {
+        if (zoneEl) {
+            zoneEl.textContent = 'N/A';
+            delete zoneEl.dataset.zone;
+        }
+        if (markerEl) markerEl.style.display = 'none';
+        return;
+    }
+    if (markerEl) markerEl.style.display = '';
 
     const tier = scTier(value, cfg);
     const zoneNames  = ['poor', 'low',  'fair', 'good'];
@@ -2417,27 +2360,16 @@ function populateResultsFromState(s) {
     const faultCount = s.metrics ? s.metrics.fault_count : 0;
     const hadFaults = faultEvents.length > 0 || faultCount > 0;
 
-    // Verdict — only show resilience verdict when faults occurred
-    const verdictLabel = document.getElementById('results-verdict-label');
-    const verdictDots = document.getElementById('results-verdict-dots');
-    const verdictRow = document.querySelector('.results-verdict-row');
-    if (verdictRow) verdictRow.style.display = hadFaults ? '' : 'none';
-    if (s.scorecard && verdictLabel && hadFaults) {
-        const { composite: avg, filledDots: filled } = computeCompositeScore(s.scorecard);
-        const tier = VERDICT_TIERS.find(t => avg >= t.threshold);
-        verdictLabel.textContent = tier.display;
-        if (verdictRow) verdictRow.dataset.verdict = tier.key;
-        verdictDots.innerHTML = Array.from({length: 5}, (_, i) =>
-            `<div class="dot${i < filled ? ' filled' : ''}"></div>`
-        ).join('');
-    }
+    // Scorecard row — only when faults occurred
+    const scorecardRow = document.querySelector('.results-scorecard-row');
+    if (scorecardRow) scorecardRow.style.display = hadFaults ? '' : 'none';
 
     // Scorecard bars — only when faults occurred
     const scorecardBars = document.getElementById('results-scorecard-bars');
     if (s.scorecard && scorecardBars && hadFaults) {
         const sc = s.scorecard;
         const metrics = [
-            { key: 'ft',   name: 'Fault Tolerance',  value: sc.fault_tolerance || 0 },
+            { key: 'ft',   name: 'Fault Tolerance',  value: sc.fault_tolerance },
             { key: 'crit', name: 'Critical Time',     value: sc.critical_time || 0 },
             { key: 'sr',   name: 'Survival Rate',     value: sc.survival_rate || 0 },
         ];

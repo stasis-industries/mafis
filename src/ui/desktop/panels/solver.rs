@@ -80,7 +80,7 @@ pub fn solver_panel(ui: &mut egui::Ui, ui_state: &mut UiState, sim_state: SimSta
     ui.add_space(4.0);
     egui::Frame::new()
         .fill(theme::BG_CARD)
-        .stroke(egui::Stroke::new(1.0, theme::BORDER))
+        .stroke(egui::Stroke::new(1.0f32, theme::BORDER))
         .inner_margin(egui::Margin::same(6))
         .show(ui, |ui| {
             ui.horizontal(|ui| {

@@ -544,19 +544,6 @@
                 <button class="ctx-menu-item" id="ctx-place-wall">Place Wall</button>
             </div>
 
-            <!-- Phase-Driven UI: Verdict Banner (observe + analyze overlay) -->
-            <div id="verdict-banner" class="verdict-banner" data-verdict="running">
-                <div class="verdict-label" id="verdict-label">RUNNING</div>
-                <div class="verdict-dots" id="verdict-dots">
-                    <span class="verdict-dot"></span>
-                    <span class="verdict-dot"></span>
-                    <span class="verdict-dot"></span>
-                    <span class="verdict-dot"></span>
-                    <span class="verdict-dot"></span>
-                </div>
-                <div class="verdict-detail" id="verdict-detail"></div>
-            </div>
-
             <!-- Phase-Driven UI: Live Stats (observe overlay, top-right) -->
             <div id="live-stats" class="live-stats">
                 <div class="live-stat-row">
@@ -864,13 +851,8 @@
                     </div>
                 </div>
 
-                <!-- Verdict + Scorecard -->
-                <div class="results-verdict-row">
-                    <div class="results-verdict-card">
-                        <div class="results-section-title">Verdict</div>
-                        <div class="results-verdict-label" id="results-verdict-label">&mdash;</div>
-                        <div class="results-verdict-dots" id="results-verdict-dots"></div>
-                    </div>
+                <!-- Scorecard -->
+                <div class="results-scorecard-row">
                     <div class="results-scorecard-card">
                         <div class="results-section-title">Resilience Scorecard</div>
                         <div id="results-scorecard-bars"></div>
@@ -1475,18 +1457,6 @@
                     </tr>
                 </tbody>
             </table>
-            <h3>Composite Score</h3>
-            <div class="composite-formula">
-                <span class="formula-term"><span class="formula-var">FT</span>&thinsp;&times;&thinsp;0.3</span>
-                <span class="formula-op">+</span>
-                <span class="formula-term"><span class="formula-var">NRR</span>&thinsp;&times;&thinsp;0.25</span>
-                <span class="formula-op">+</span>
-                <span class="formula-term"><span class="formula-var">FUR</span>&thinsp;&times;&thinsp;0.25</span>
-                <span class="formula-op">+</span>
-                <span class="formula-term">(1 &minus; <span class="formula-var">CritTime</span>)&thinsp;&times;&thinsp;0.2</span>
-            </div>
-            <p class="composite-note">When NRR is N/A, weights redistribute: FT&thinsp;40%, FUR&thinsp;33%, CritTime&thinsp;27%. FT capped at 1.0 in composite (Braess gain does not inflate the score).</p>
-
             <!-- ── SECTION 3: Supporting / display metrics ── -->
             <h3>Supporting Metrics</h3>
             <table class="metrics-ref-table">

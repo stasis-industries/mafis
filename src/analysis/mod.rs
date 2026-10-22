@@ -4,6 +4,7 @@ pub mod ct;
 pub mod dependency;
 pub mod engine;
 pub mod fault_metrics;
+pub mod ft;
 pub mod heatmap;
 pub mod history;
 pub mod metrics;
@@ -226,6 +227,8 @@ impl Plugin for AnalysisPlugin {
                     scorecard::update_resilience_scorecard
                         .in_set(AnalysisSet::Metrics)
                         .after(fault_metrics::update_fault_metrics)
+                        // Reads this tick's `BaselineDiff::rate_delta`.
+                        .after(baseline::update_baseline_diff)
                         .run_if(in_state(SimState::Running))
                         .run_if(|m: Res<MetricsConfig>| m.any_fault()),
                     baseline::update_baseline_diff

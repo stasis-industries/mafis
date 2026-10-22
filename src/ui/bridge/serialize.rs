@@ -122,7 +122,7 @@ pub(super) struct FaultEventSnapshot {
 
 #[derive(Serialize)]
 pub(super) struct ScorecardSnapshot {
-    fault_tolerance: f32,
+    fault_tolerance: Option<f32>,
     nrr: Option<f32>,
     survival_rate: f32,
     critical_time: f32,

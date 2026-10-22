@@ -22,8 +22,14 @@ pub fn scorecard_panel(ui: &mut egui::Ui, scorecard: &ResilienceScorecard) {
     egui::Grid::new("scorecard_grid").show(ui, |ui| {
         // Fault Tolerance
         ui.label("Fault Tolerance");
-        let ft = scorecard.fault_tolerance;
-        ui.colored_label(score_color(ft), format!("{ft:.2}"));
+        match scorecard.fault_tolerance {
+            Some(ft) => {
+                ui.colored_label(score_color(ft), format!("{ft:.2}"));
+            }
+            None => {
+                ui.weak("N/A (the twin completed no task after the fault)");
+            }
+        }
         ui.end_row();
 
         // NRR
@@ -57,29 +63,4 @@ pub fn scorecard_panel(ui: &mut egui::Ui, scorecard: &ResilienceScorecard) {
         ui.colored_label(ct_color, format!("{ct:.2}"));
         ui.end_row();
     });
-
-    // Composite score dots (0–5)
-    let composite = composite_score(scorecard);
-    ui.add_space(4.0);
-    ui.horizontal(|ui| {
-        ui.label("Score");
-        for i in 0..5 {
-            let color = if i < composite { theme::TEXT_PRIMARY } else { theme::TEXT_MUTED };
-            ui.colored_label(color, "●");
-        }
-    });
-}
-
-/// Coarse 0–5 verdict for the desktop scorecard panel.
-///
-/// ⚠ NOT a research-grade metric. The implicit weights are hand-picked for
-/// at-a-glance UI feedback and have no theoretical derivation. Do not cite
-/// in research output — report the 4 primary metrics directly instead.
-fn composite_score(sc: &ResilienceScorecard) -> usize {
-    let mut score = 0.0_f32;
-    score += sc.fault_tolerance.min(1.0);
-    score += sc.nrr.unwrap_or(0.0);
-    score += sc.survival_rate;
-    score += (1.0 - sc.critical_time).max(0.0);
-    ((score / 4.0) * 5.0).round() as usize
 }

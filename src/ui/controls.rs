@@ -224,12 +224,22 @@ mod observatory_controls {
         mut materials: ResMut<Assets<StandardMaterial>>,
         mut res: LoadingResources,
         mut reset: ResetResources,
+        mut next_state: ResMut<NextState<SimState>>,
         queries: (
             Query<Entity, With<LogicalAgent>>,
             Query<Entity, With<ObstacleMarker>>,
             Query<Entity, With<EnvironmentMarker>>,
         ),
     ) {
+        if !crate::solver::is_known_planner(&res.ui_state.solver_name) {
+            error!("unknown planner '{}': loading stopped", res.ui_state.solver_name);
+            // A `Done` progress left by the previous load would make `loading_tick`
+            // request Running in this same frame, overriding the Idle request.
+            *res.progress = LoadingProgress::default();
+            next_state.set(SimState::Idle);
+            return;
+        }
+
         let (existing_agents, existing_obstacles, existing_env) = queries;
 
         let new_fp = compute_fingerprint(&res.ui_state);
@@ -253,16 +263,14 @@ mod observatory_controls {
             let grid_w = res.ui_state.grid_width as usize;
             let grid_h = res.ui_state.grid_height as usize;
             let num_agents = res.ui_state.num_agents;
-            if let Some(fresh) = crate::solver::lifelong_solver_from_name_sized(
+            let fresh = crate::solver::lifelong_solver_from_name_sized(
                 &res.ui_state.solver_name,
                 grid_w,
                 grid_h,
                 num_agents,
-            ) {
-                *reset.solver = ActiveSolver::new(fresh);
-            } else {
-                reset.solver.reset();
-            }
+            )
+            .expect("planner id checked at the start of begin_loading");
+            *reset.solver = ActiveSolver::new(fresh);
         }
         reset.dist_cache.clear();
         reset.cascade.clear();
@@ -384,7 +392,7 @@ mod observatory_controls {
                 runner_grid.height as usize,
                 actual_agents,
             )
-            .unwrap_or_else(|| Box::new(crate::solver::pibt::PibtLifelongSolver::new()));
+            .expect("planner id checked at the start of begin_loading");
 
             let runner = SimulationRunner::new(
                 runner_grid,
@@ -987,6 +995,105 @@ mod observatory_controls {
                     ),
                 )
                 .add_systems(OnEnter(SimState::Idle), despawn_on_reset);
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use crate::render::orbit_camera::CameraMode;
+
+        /// Headless app with the loading pipeline (no window, no renderer).
+        fn app() -> App {
+            let mut app = App::new();
+            app.add_plugins((
+                MinimalPlugins,
+                bevy::state::app::StatesPlugin,
+                bevy::asset::AssetPlugin::default(),
+                crate::core::CorePlugin,
+                crate::solver::SolverPlugin,
+                crate::fault::FaultPlugin,
+                crate::analysis::AnalysisPlugin,
+                ControlsPlugin,
+            ));
+            app.init_asset::<Mesh>();
+            app.init_asset::<StandardMaterial>();
+            app.insert_resource(OrbitCamera {
+                yaw: 0.0,
+                pitch: 0.5,
+                distance: 10.0,
+                focus: Vec3::ZERO,
+                default_focus: Vec3::ZERO,
+                target_yaw: 0.0,
+                target_pitch: 0.5,
+                target_distance: 10.0,
+                animating: false,
+                mode: CameraMode::Perspective,
+                ortho_scale: 10.0,
+                min_ortho_scale: 1.0,
+                max_ortho_scale: 40.0,
+                min_distance: 1.0,
+                max_distance: 100.0,
+                min_pitch: 0.05,
+                max_pitch: 1.5,
+                orbit_sensitivity: 0.003,
+                zoom_sensitivity: 1.0,
+                pan_sensitivity: 0.005,
+                key_pan_speed: 15.0,
+                lerp_speed: 6.0,
+            });
+            app.world_mut().resource_mut::<SimulationConfig>().duration = 100;
+            app.update();
+            app
+        }
+
+        fn state(app: &App) -> SimState {
+            *app.world().resource::<State<SimState>>().get()
+        }
+
+        fn request(app: &mut App, s: SimState) {
+            app.world_mut().resource_mut::<NextState<SimState>>().set(s);
+        }
+
+        /// Requests a load and pumps frames until the state leaves Loading.
+        fn start_and_settle(app: &mut App) -> Vec<SimState> {
+            request(app, SimState::Loading);
+            let mut seen = Vec::new();
+            for _ in 0..500 {
+                app.update();
+                let s = state(app);
+                seen.push(s);
+                if s != SimState::Loading && seen.len() > 1 {
+                    break;
+                }
+            }
+            seen
+        }
+
+        #[test]
+        fn unknown_planner_stops_the_first_load() {
+            let mut app = app();
+            app.world_mut().resource_mut::<UiState>().solver_name = "rhcr_pibt".into();
+            let seen = start_and_settle(&mut app);
+            assert_eq!(state(&app), SimState::Idle, "states seen: {seen:?}");
+        }
+
+        #[test]
+        fn unknown_planner_stops_a_load_after_a_run() {
+            let mut app = app();
+            let seen = start_and_settle(&mut app);
+            assert_eq!(state(&app), SimState::Running, "normal load: {seen:?}");
+            request(&mut app, SimState::Idle);
+            app.update();
+            app.update();
+            assert_eq!(state(&app), SimState::Idle);
+
+            app.world_mut().resource_mut::<UiState>().solver_name = "rhcr_pibt".into();
+            let seen = start_and_settle(&mut app);
+            for _ in 0..20 {
+                app.update();
+            }
+            assert_eq!(state(&app), SimState::Idle, "states seen: {seen:?}");
         }
     }
 } // mod observatory_controls

@@ -257,9 +257,7 @@ impl QueueManager {
         for state in &mut self.queues {
             state.delivery_occupied_by = None;
             state.reserved = 0;
-            for slot in &mut state.slots {
-                *slot = None;
-            }
+            state.slots.fill(None);
         }
     }
 

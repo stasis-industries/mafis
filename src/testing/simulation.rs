@@ -148,7 +148,7 @@ fn cascade_no_faults_when_disabled() {
 #[test]
 fn scorecard_defaults_no_faults() {
     let h = SimHarness::new(4);
-    assert_eq!(h.scorecard().fault_tolerance, 1.0);
+    assert_eq!(h.scorecard().fault_tolerance, Some(1.0));
     assert!(!h.scorecard().has_faults);
 }
 
@@ -156,7 +156,7 @@ fn scorecard_defaults_no_faults() {
 fn scorecard_stable_after_ticks() {
     let mut h = SimHarness::new(4);
     h.run_ticks(5);
-    assert_eq!(h.scorecard().fault_tolerance, 1.0);
+    assert_eq!(h.scorecard().fault_tolerance, Some(1.0));
     assert!(!h.scorecard().has_faults);
 }
 
@@ -165,7 +165,7 @@ fn scorecard_clear_resets() {
     let mut h = SimHarness::new(4);
     h.run_ticks(10);
     h.app.world_mut().resource_mut::<crate::analysis::scorecard::ResilienceScorecard>().clear();
-    assert_eq!(h.scorecard().fault_tolerance, 1.0);
+    assert_eq!(h.scorecard().fault_tolerance, Some(1.0));
     assert_eq!(h.scorecard().nrr, None);
     assert_eq!(h.scorecard().survival_rate, 1.0);
 }

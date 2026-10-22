@@ -70,6 +70,11 @@ pub const SOLVER_NAMES: &[(&str, &str)] = &[
     ("token_passing", "Token Passing — Decentralized Sequential Planning"),
 ];
 
+/// Whether `id` names a planner available on this target (`SOLVER_NAMES`).
+pub fn is_known_planner(id: &str) -> bool {
+    SOLVER_NAMES.iter().any(|&(name, _)| name == id)
+}
+
 /// Create a LifelongSolver by name with auto-computed defaults.
 /// `grid_area` and `num_agents` are used for RHCR auto-config.
 ///
@@ -167,6 +172,20 @@ mod factory_tests {
     #[test]
     fn factory_unknown_returns_none() {
         assert!(lifelong_solver_from_name("unknown", 100, 10).is_none());
+    }
+
+    #[test]
+    fn registered_ids_are_planners() {
+        for &(id, _) in SOLVER_NAMES {
+            assert!(is_known_planner(id), "{id}");
+        }
+    }
+
+    #[test]
+    fn unknown_ids_are_not_planners() {
+        for id in ["", "PIBT", "rhcr_pibt", "nope"] {
+            assert!(!is_known_planner(id), "{id}");
+        }
     }
 
     #[test]

@@ -26,7 +26,7 @@ pub fn tasks_chart(
         .y_axis_label("Tasks")
         .legend(egui_plot::Legend::default())
         .show(ui, |plot_ui| {
-            plot_ui.line(Line::new("Live", live).color(CHART_SECONDARY).width(2.0));
+            plot_ui.line(Line::new("Live", live).color(CHART_SECONDARY).width(2.0f32));
 
             if let Some(bl) = baseline {
                 let bl_points: PlotPoints = bl
@@ -38,7 +38,7 @@ pub fn tasks_chart(
                 plot_ui.line(
                     Line::new("Baseline", bl_points)
                         .color(CHART_BASELINE)
-                        .width(1.5)
+                        .width(1.5f32)
                         .style(egui_plot::LineStyle::dashed_dense()),
                 );
             }
