@@ -1,0 +1,11 @@
+# cargo-audit configuration, read by `cargo audit` from the project root.
+
+[advisories]
+ignore = [
+    # ruzstd 0.8.2, decompression bomb. The fix is ruzstd 0.9.1, but
+    # bevy_image 0.18 requires the 0.8 series. ruzstd only decodes KTX2
+    # textures, and MAFIS loads no image files: the only KTX2 data it
+    # decodes is the lookup tables compiled into Bevy.
+    # Remove this entry at the next Bevy upgrade.
+    "RUSTSEC-2026-0344",
+]
