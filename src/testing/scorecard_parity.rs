@@ -12,7 +12,6 @@ use crate::core::seed::SeededRng;
 use crate::core::task::ActiveScheduler;
 use crate::core::topology::ZoneMap;
 use crate::fault::config::{FaultConfig, FaultSource};
-use crate::planners::pibt::PibtPlanner;
 
 const AGENTS: usize = 12;
 const TICKS: u64 = 60;
@@ -28,14 +27,15 @@ fn observatory_ft_matches_experiment_formula() {
     let mut h = SimHarness::new(AGENTS);
     assert_eq!(h.tick(), 0);
 
-    // Twin: the harness's own start state (same grid, agents, PIBT, seed), no faults.
+    // Twin: the harness's own start state (same grid, agents, planner, seed), no faults.
     let twin_record = {
         let world = h.app.world();
         let mut twin = SimulationRunner::new(
             world.resource::<GridMap>().clone(),
             world.resource::<ZoneMap>().clone(),
             world.resource::<LiveSim>().runner.agents.clone(),
-            Box::new(PibtPlanner::new()),
+            crate::planning::registry::build(crate::planners::DEFAULT, &Default::default(), AGENTS)
+                .expect("the default planner builds"),
             SeededRng::new(42),
             FaultConfig { enabled: false, ..Default::default() },
             Default::default(),

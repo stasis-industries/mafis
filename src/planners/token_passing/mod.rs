@@ -1,6 +1,8 @@
 pub(crate) mod common;
 pub mod planner;
 pub mod task_selection;
+#[cfg(test)]
+mod tests;
 pub use planner::TokenPassingPlanner;
 pub use task_selection::TokenPassingTaskSelection;
 

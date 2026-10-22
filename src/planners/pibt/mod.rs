@@ -1,4 +1,6 @@
 pub mod planner;
+#[cfg(test)]
+mod tests;
 pub use planner::PibtPlanner;
 #[cfg(any(target_arch = "wasm32", not(feature = "headless")))]
 pub(crate) use planner::PibtSolver;

@@ -603,7 +603,7 @@ mod tests {
         let config = BaselineConfig {
             topology_name: "warehouse_single_dock".into(),
             num_agents: 8,
-            solver_name: "pibt".into(),
+            solver_name: crate::planners::DEFAULT.into(),
             planner_params: Default::default(),
             scheduler_name: "random".into(),
             seed: 42,
@@ -625,7 +625,7 @@ mod tests {
         let config = BaselineConfig {
             topology_name: "warehouse_single_dock".into(),
             num_agents: 10,
-            solver_name: "pibt".into(),
+            solver_name: crate::planners::DEFAULT.into(),
             planner_params: Default::default(),
             scheduler_name: "random".into(),
             seed: 123,
@@ -646,7 +646,7 @@ mod tests {
         let config = BaselineConfig {
             topology_name: "warehouse_single_dock".into(),
             num_agents: 0,
-            solver_name: "pibt".into(),
+            solver_name: crate::planners::DEFAULT.into(),
             planner_params: Default::default(),
             scheduler_name: "random".into(),
             seed: 42,
@@ -661,44 +661,26 @@ mod tests {
     }
 
     #[test]
-    fn headless_rhcr_solver() {
-        // RHCR-PBS needs higher density + more ticks than PIBT to produce
-        // measurable throughput because PBS node limit (clamp(N*3, 50, max))
-        // constrains low-density planning. Match production density (40 agents, 300 ticks).
-        let config = BaselineConfig {
-            topology_name: "warehouse_single_dock".into(),
-            num_agents: 40,
-            solver_name: "rhcr_pbs".into(),
-            planner_params: Default::default(),
-            scheduler_name: "random".into(),
-            seed: 42,
-            tick_count: 300,
-            grid_override: None,
-            fault_enabled: false,
-            agent_positions: None,
-        };
-        let record = run_headless(&config);
-        assert_eq!(record.num_agents, 40);
-        assert!(record.total_tasks > 0);
-    }
-
-    #[test]
-    fn headless_token_passing_solver() {
-        let config = BaselineConfig {
-            topology_name: "warehouse_single_dock".into(),
-            num_agents: 5,
-            solver_name: "token_passing".into(),
-            planner_params: Default::default(),
-            scheduler_name: "random".into(),
-            seed: 42,
-            tick_count: 60,
-            grid_override: None,
-            fault_enabled: false,
-            agent_positions: None,
-        };
-        let record = run_headless(&config);
-        assert_eq!(record.num_agents, 5);
-        // Token passing may produce fewer tasks due to sequential planning overhead
+    fn headless_runs_every_planner() {
+        // Production density (40 agents, 300 ticks): windowed planners need it
+        // to produce measurable throughput.
+        for entry in crate::planning::registry::entries() {
+            let config = BaselineConfig {
+                topology_name: "warehouse_single_dock".into(),
+                num_agents: 40,
+                solver_name: entry.info.id.into(),
+                planner_params: Default::default(),
+                scheduler_name: "random".into(),
+                seed: 42,
+                tick_count: 300,
+                grid_override: None,
+                fault_enabled: false,
+                agent_positions: None,
+            };
+            let record = run_headless(&config);
+            assert_eq!(record.num_agents, 40, "{}", entry.info.id);
+            assert!(record.total_tasks > 0, "{} completed no task", entry.info.id);
+        }
     }
 
     #[test]
@@ -706,7 +688,7 @@ mod tests {
         let c1 = BaselineConfig {
             topology_name: "warehouse_single_dock".into(),
             num_agents: 10,
-            solver_name: "pibt".into(),
+            solver_name: crate::planners::DEFAULT.into(),
             planner_params: Default::default(),
             scheduler_name: "random".into(),
             seed: 42,
@@ -724,7 +706,7 @@ mod tests {
         let c1 = BaselineConfig {
             topology_name: "warehouse_single_dock".into(),
             num_agents: 10,
-            solver_name: "pibt".into(),
+            solver_name: crate::planners::DEFAULT.into(),
             planner_params: Default::default(),
             scheduler_name: "random".into(),
             seed: 42,
@@ -743,7 +725,7 @@ mod tests {
         let config = BaselineConfig {
             topology_name: "warehouse_single_dock".into(),
             num_agents: 5,
-            solver_name: "pibt".into(),
+            solver_name: crate::planners::DEFAULT.into(),
             planner_params: Default::default(),
             scheduler_name: "random".into(),
             seed: 42,
@@ -768,7 +750,7 @@ mod tests {
         let config = BaselineConfig {
             topology_name: "warehouse_single_dock".into(),
             num_agents: 8,
-            solver_name: "pibt".into(),
+            solver_name: crate::planners::DEFAULT.into(),
             planner_params: Default::default(),
             scheduler_name: "random".into(),
             seed: 42,
@@ -790,7 +772,7 @@ mod tests {
         let config = BaselineConfig {
             topology_name: "warehouse_single_dock".into(),
             num_agents: 12,
-            solver_name: "pibt".into(),
+            solver_name: crate::planners::DEFAULT.into(),
             planner_params: Default::default(),
             scheduler_name: "random".into(),
             seed: 999,
@@ -847,7 +829,7 @@ mod tests {
         let config = BaselineConfig {
             topology_name: "warehouse_single_dock".into(),
             num_agents: 20,
-            solver_name: "pibt".into(),
+            solver_name: crate::planners::DEFAULT.into(),
             planner_params: Default::default(),
             scheduler_name: "closest".into(),
             seed: 7777,
@@ -870,7 +852,7 @@ mod tests {
         let config = BaselineConfig {
             topology_name: "warehouse_single_dock".into(),
             num_agents: 15,
-            solver_name: "pibt".into(),
+            solver_name: crate::planners::DEFAULT.into(),
             planner_params: Default::default(),
             scheduler_name: "random".into(),
             seed: 42,
@@ -925,7 +907,7 @@ mod tests {
         let config = BaselineConfig {
             topology_name: "warehouse_single_dock".into(),
             num_agents: 8,
-            solver_name: "pibt".into(),
+            solver_name: crate::planners::DEFAULT.into(),
             planner_params: Default::default(),
             scheduler_name: "random".into(),
             seed: 42,
@@ -949,7 +931,7 @@ mod tests {
         let config = BaselineConfig {
             topology_name: "warehouse_single_dock".into(),
             num_agents: 15,
-            solver_name: "pibt".into(),
+            solver_name: crate::planners::DEFAULT.into(),
             planner_params: Default::default(),
             scheduler_name: "random".into(),
             seed: 42,
@@ -1027,7 +1009,7 @@ mod tests {
         let config = BaselineConfig {
             topology_name: "warehouse_single_dock".into(),
             num_agents: 8,
-            solver_name: "pibt".into(),
+            solver_name: crate::planners::DEFAULT.into(),
             planner_params: Default::default(),
             scheduler_name: "random".into(),
             seed: 42,

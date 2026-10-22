@@ -1,6 +1,8 @@
 pub mod constants;
 pub mod pbs_planner;
 pub mod planner;
+#[cfg(test)]
+mod tests;
 pub mod windowed;
 pub use planner::{PARAMS, RhcrConfig, RhcrPlanner};
 pub use windowed::{PlanFragment, WindowAgent, WindowContext, WindowResult, WindowedPlanner};

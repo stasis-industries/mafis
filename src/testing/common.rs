@@ -135,7 +135,12 @@ impl SimHarness {
                 sa
             })
             .collect();
-        let runner_solver = Box::new(crate::planners::pibt::PibtPlanner::new());
+        let runner_solver = crate::planning::registry::build(
+            crate::planners::DEFAULT,
+            &Default::default(),
+            runner_agents.len(),
+        )
+        .expect("the default planner builds");
         let runner_rng = crate::core::seed::SeededRng::new(42);
         let fault_config = app.world().resource::<FaultConfig>().clone();
         let runner = crate::core::runner::SimulationRunner::new(

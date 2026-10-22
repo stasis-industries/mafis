@@ -1015,7 +1015,7 @@ mod tests {
         use bevy::math::IVec2;
 
         let base = ExperimentConfig {
-            solver_name: "pibt".into(),
+            solver_name: crate::planners::DEFAULT.into(),
             topology_name: "warehouse_single_dock".into(),
             scenario: None,
             scheduler_name: "closest".into(),
@@ -1043,7 +1043,7 @@ mod tests {
     #[test]
     fn single_experiment_no_faults() {
         let config = ExperimentConfig {
-            solver_name: "pibt".into(),
+            solver_name: crate::planners::DEFAULT.into(),
             topology_name: "warehouse_single_dock".into(),
             scenario: None,
             scheduler_name: "random".into(),
@@ -1063,7 +1063,7 @@ mod tests {
     #[test]
     fn single_experiment_deterministic() {
         let config = ExperimentConfig {
-            solver_name: "pibt".into(),
+            solver_name: crate::planners::DEFAULT.into(),
             topology_name: "warehouse_single_dock".into(),
             scenario: None,
             scheduler_name: "random".into(),
@@ -1082,7 +1082,7 @@ mod tests {
     #[test]
     fn single_experiment_with_burst_fault() {
         let config = ExperimentConfig {
-            solver_name: "pibt".into(),
+            solver_name: crate::planners::DEFAULT.into(),
             topology_name: "warehouse_single_dock".into(),
             scenario: Some(FaultScenario {
                 enabled: true,
@@ -1117,7 +1117,7 @@ mod tests {
         // 30% burst kill → total AR ≥ 0.3 from direct deaths. The secondary
         // rate excludes the dead, so it must not just echo 1 − survival.
         let config = ExperimentConfig {
-            solver_name: "pibt".into(),
+            solver_name: crate::planners::DEFAULT.into(),
             topology_name: "warehouse_single_dock".into(),
             scenario: Some(FaultScenario {
                 enabled: true,
@@ -1150,7 +1150,7 @@ mod tests {
     fn single_experiment_no_fault_attack_rate_zero() {
         // No scenario → no fault events → ever_affected all false → AR = 0.
         let config = ExperimentConfig {
-            solver_name: "pibt".into(),
+            solver_name: crate::planners::DEFAULT.into(),
             topology_name: "warehouse_single_dock".into(),
             scenario: None,
             scheduler_name: "random".into(),
@@ -1173,7 +1173,7 @@ mod tests {
         // After the fix: fault_rng is isolated, so FT must be <= 1.0.
         use crate::fault::scenario::FaultScenarioType;
         let config = ExperimentConfig {
-            solver_name: "pibt".into(),
+            solver_name: crate::planners::DEFAULT.into(),
             topology_name: "warehouse_single_dock".into(),
             scenario: Some(FaultScenario {
                 enabled: true,
@@ -1211,7 +1211,7 @@ mod tests {
         let seed = 42u64;
         let num_agents = 10;
         let tick_count = 200u64;
-        let solver_name = "pibt";
+        let solver_name = crate::planners::DEFAULT;
         let scheduler_name = "random";
         let topology_name = "warehouse_single_dock";
 
@@ -1275,7 +1275,7 @@ mod tests {
         let seed = 77u64;
         let num_agents = 10;
         let tick_count = 200u64;
-        let solver_name = "pibt";
+        let solver_name = crate::planners::DEFAULT;
         let scheduler_name = "random";
         let topology_name = "warehouse_single_dock";
 
@@ -1323,59 +1323,61 @@ mod tests {
         );
     }
 
-    /// Same parity test with token_passing + compact_grid to cover the user's
-    /// reported divergence scenario.
+    /// Same parity test on compact_grid for every registered planner.
     #[test]
-    fn experiment_baseline_parity_token_passing_compact_grid() {
+    fn experiment_baseline_parity_compact_grid_every_planner() {
         use crate::analysis::baseline::{BaselineConfig, run_headless};
 
         let seed = 42u64;
         let num_agents = 20;
         let tick_count = 500u64;
-        let solver_name = "token_passing";
         let scheduler_name = "random";
         let topology_name = "compact_grid";
 
-        // Path A: experiment runner baseline
-        let config = ExperimentConfig {
-            solver_name: solver_name.into(),
-            topology_name: topology_name.into(),
-            scenario: None,
-            scheduler_name: scheduler_name.into(),
-            num_agents,
-            seed,
-            tick_count,
-            custom_map: None,
-            planner_params: Default::default(),
-        };
-        let experiment_result = run_single_experiment(&config);
+        for entry in crate::planning::registry::entries() {
+            let solver_name = entry.info.id;
 
-        // Path B: observatory baseline (run_headless)
-        let baseline_config = BaselineConfig {
-            topology_name: topology_name.into(),
-            num_agents,
-            solver_name: solver_name.into(),
-            planner_params: Default::default(),
-            scheduler_name: scheduler_name.into(),
-            seed,
-            tick_count,
-            grid_override: None,
-            fault_enabled: false,
-            agent_positions: None,
-        };
-        let observatory_baseline = run_headless(&baseline_config);
+            // Path A: experiment runner baseline
+            let config = ExperimentConfig {
+                solver_name: solver_name.into(),
+                topology_name: topology_name.into(),
+                scenario: None,
+                scheduler_name: scheduler_name.into(),
+                num_agents,
+                seed,
+                tick_count,
+                custom_map: None,
+                planner_params: Default::default(),
+            };
+            let experiment_result = run_single_experiment(&config);
 
-        assert_eq!(
-            experiment_result.baseline_metrics.total_tasks, observatory_baseline.total_tasks,
-            "token_passing + compact_grid: experiment baseline ({}) vs observatory baseline ({}) diverged",
-            experiment_result.baseline_metrics.total_tasks, observatory_baseline.total_tasks,
-        );
+            // Path B: observatory baseline (run_headless)
+            let baseline_config = BaselineConfig {
+                topology_name: topology_name.into(),
+                num_agents,
+                solver_name: solver_name.into(),
+                planner_params: Default::default(),
+                scheduler_name: scheduler_name.into(),
+                seed,
+                tick_count,
+                grid_override: None,
+                fault_enabled: false,
+                agent_positions: None,
+            };
+            let observatory_baseline = run_headless(&baseline_config);
+
+            assert_eq!(
+                experiment_result.baseline_metrics.total_tasks, observatory_baseline.total_tasks,
+                "{solver_name} + compact_grid: experiment baseline ({}) vs observatory baseline ({}) diverged",
+                experiment_result.baseline_metrics.total_tasks, observatory_baseline.total_tasks,
+            );
+        }
     }
 
     /// Verify faulted run parity: experiment faulted run vs a manual runner
-    /// with burst_20pct on token_passing + compact_grid (matches user's report).
+    /// with burst_20pct on compact_grid, for every registered planner.
     #[test]
-    fn experiment_faulted_parity_token_passing_burst() {
+    fn experiment_faulted_parity_burst_every_planner() {
         use crate::analysis::baseline::place_agents;
         use crate::core::queue::ActiveQueuePolicy;
         use crate::core::runner::SimulationRunner;
@@ -1384,7 +1386,6 @@ mod tests {
         let seed = 42u64;
         let num_agents = 20;
         let tick_count = 500u64;
-        let solver_name = "token_passing";
         let scheduler_name = "random";
         let topology_name = "compact_grid";
 
@@ -1396,57 +1397,68 @@ mod tests {
             ..Default::default()
         };
 
-        // Path A: experiment
-        let config = ExperimentConfig {
-            solver_name: solver_name.into(),
-            topology_name: topology_name.into(),
-            scenario: Some(scenario.clone()),
-            scheduler_name: scheduler_name.into(),
-            num_agents,
-            seed,
-            tick_count,
-            custom_map: None,
-            planner_params: Default::default(),
-        };
-        let experiment_result = run_single_experiment(&config);
+        for entry in crate::planning::registry::entries() {
+            let solver_name = entry.info.id;
 
-        // Path B: manual runner (mirrors observatory LiveSim path)
-        let topo = crate::core::topology::ActiveTopology::from_name(topology_name);
-        let output = topo.topology().generate(seed);
-        let (grid, zones) = (output.grid, output.zones);
-        let actual_agents = num_agents.min(grid.walkable_count());
+            // Path A: experiment
+            let config = ExperimentConfig {
+                solver_name: solver_name.into(),
+                topology_name: topology_name.into(),
+                scenario: Some(scenario.clone()),
+                scheduler_name: scheduler_name.into(),
+                num_agents,
+                seed,
+                tick_count,
+                custom_map: None,
+                planner_params: Default::default(),
+            };
+            let experiment_result = run_single_experiment(&config);
 
-        let scheduler = ActiveScheduler::from_name(scheduler_name);
-        let queue_policy = ActiveQueuePolicy::from_name("closest");
+            // Path B: manual runner (mirrors observatory LiveSim path)
+            let topo = crate::core::topology::ActiveTopology::from_name(topology_name);
+            let output = topo.topology().generate(seed);
+            let (grid, zones) = (output.grid, output.zones);
+            let actual_agents = num_agents.min(grid.walkable_count());
 
-        let mut rng = SeededRng::new(seed);
-        let agents = place_agents(actual_agents, &grid, &zones, &mut rng);
+            let scheduler = ActiveScheduler::from_name(scheduler_name);
+            let queue_policy = ActiveQueuePolicy::from_name("closest");
 
-        let solver =
-            crate::planning::registry::build(solver_name, &Default::default(), actual_agents)
-                .unwrap();
+            let mut rng = SeededRng::new(seed);
+            let agents = place_agents(actual_agents, &grid, &zones, &mut rng);
 
-        let fault_config = scenario.to_fault_config();
-        let fault_schedule = scenario.generate_schedule(tick_count, num_agents);
+            let solver =
+                crate::planning::registry::build(solver_name, &Default::default(), actual_agents)
+                    .unwrap();
 
-        let mut runner =
-            SimulationRunner::new(grid, zones, agents, solver, rng, fault_config, fault_schedule);
+            let fault_config = scenario.to_fault_config();
+            let fault_schedule = scenario.generate_schedule(tick_count, num_agents);
 
-        for _ in 0..tick_count {
-            runner.tick(scheduler.scheduler(), queue_policy.policy());
+            let mut runner = SimulationRunner::new(
+                grid,
+                zones,
+                agents,
+                solver,
+                rng,
+                fault_config,
+                fault_schedule,
+            );
+
+            for _ in 0..tick_count {
+                runner.tick(scheduler.scheduler(), queue_policy.policy());
+            }
+
+            assert_eq!(
+                experiment_result.faulted_metrics.total_tasks, runner.tasks_completed,
+                "faulted parity: experiment ({}) vs manual runner ({}) — {solver_name} burst_20pct",
+                experiment_result.faulted_metrics.total_tasks, runner.tasks_completed,
+            );
         }
-
-        assert_eq!(
-            experiment_result.faulted_metrics.total_tasks, runner.tasks_completed,
-            "faulted parity: experiment ({}) vs manual runner ({}) — token_passing burst_20pct",
-            experiment_result.faulted_metrics.total_tasks, runner.tasks_completed,
-        );
     }
 
     #[test]
     fn mini_matrix() {
         let matrix = ExperimentMatrix {
-            solvers: vec!["pibt".into()],
+            solvers: vec![crate::planners::DEFAULT.into()],
             topologies: vec!["warehouse_single_dock".into()],
             scenarios: vec![None],
             schedulers: vec!["random".into()],
@@ -1481,7 +1493,7 @@ mod tests {
 
         // Cached path: run_matrix with 2 scenarios sharing same baseline
         let matrix = ExperimentMatrix {
-            solvers: vec!["pibt".into()],
+            solvers: vec![crate::planners::DEFAULT.into()],
             topologies: vec!["warehouse_single_dock".into()],
             scenarios: vec![None, Some(burst.clone())],
             schedulers: vec!["random".into()],
@@ -1495,7 +1507,7 @@ mod tests {
 
         // Uncached path: individual run_single_experiment calls
         let config_none = ExperimentConfig {
-            solver_name: "pibt".into(),
+            solver_name: crate::planners::DEFAULT.into(),
             topology_name: "warehouse_single_dock".into(),
             scenario: None,
             scheduler_name: "random".into(),
@@ -1547,7 +1559,7 @@ mod tests {
     #[test]
     fn baseline_self_metrics_match() {
         let config = ExperimentConfig {
-            solver_name: "pibt".into(),
+            solver_name: crate::planners::DEFAULT.into(),
             topology_name: "warehouse_single_dock".into(),
             scenario: None,
             scheduler_name: "random".into(),

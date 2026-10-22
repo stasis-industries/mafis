@@ -1342,8 +1342,10 @@ mod tests {
         }
     }
 
-    fn test_solver() -> Box<dyn Planner> {
-        Box::new(crate::planners::pibt::PibtPlanner::new())
+    /// The default planner for `fleet` agents.
+    fn test_solver(fleet: usize) -> Box<dyn Planner> {
+        crate::planning::registry::build(crate::planners::DEFAULT, &Default::default(), fleet)
+            .expect("the default planner builds")
     }
 
     fn disabled_fault_config() -> FaultConfig {
@@ -1359,11 +1361,12 @@ mod tests {
     }
 
     fn make_runner(agents: Vec<SimAgent>) -> SimulationRunner {
+        let planner = test_solver(agents.len());
         SimulationRunner::new(
             test_grid(),
             test_zones(),
             agents,
-            test_solver(),
+            planner,
             test_rng(),
             disabled_fault_config(),
             default_schedule(),
@@ -1448,11 +1451,12 @@ mod tests {
         let mut grid = test_grid();
         grid.set_obstacle(IVec2::new(2, 1));
 
+        let planner = test_solver(agents.len());
         let mut runner = SimulationRunner::new(
             grid,
             test_zones(),
             agents,
-            test_solver(),
+            planner,
             test_rng(),
             disabled_fault_config(),
             default_schedule(),
@@ -1568,11 +1572,12 @@ mod tests {
             ],
             initialized: true,
         };
+        let planner = test_solver(agents.len());
         let mut runner = SimulationRunner::new(
             test_grid(),
             test_zones(),
             agents,
-            test_solver(),
+            planner,
             test_rng(),
             fault_config,
             schedule,
@@ -1611,11 +1616,12 @@ mod tests {
     fn latency_command_forces_wait_and_decrements() {
         let mut agents = vec![SimAgent::new(IVec2::new(1, 1))];
         agents[0].goal = IVec2::new(5, 5);
+        let planner = test_solver(agents.len());
         let mut runner = SimulationRunner::new(
             test_grid(),
             test_zones(),
             agents,
-            test_solver(),
+            planner,
             test_rng(),
             disabled_fault_config(),
             default_schedule(),
@@ -1648,11 +1654,12 @@ mod tests {
             }],
             initialized: true,
         };
+        let planner = test_solver(agents.len());
         let mut runner = SimulationRunner::new(
             test_grid(),
             test_zones(),
             agents,
-            test_solver(),
+            planner,
             test_rng(),
             disabled_fault_config(),
             schedule,
@@ -1669,11 +1676,12 @@ mod tests {
 
     #[test]
     fn wear_accumulates_heat_indicator() {
+        let planner = test_solver(1);
         let mut runner = SimulationRunner::new(
             test_grid(),
             test_zones(),
             vec![SimAgent::new(IVec2::new(1, 1))],
-            test_solver(),
+            planner,
             test_rng(),
             FaultConfig {
                 enabled: true,
@@ -1695,11 +1703,12 @@ mod tests {
         // Set operational_age above the pre-sampled failure tick to trigger death.
         let agents = vec![SimAgent::new(IVec2::new(1, 1))];
 
+        let planner = test_solver(agents.len());
         let mut runner = SimulationRunner::new(
             test_grid(),
             test_zones(),
             agents,
-            test_solver(),
+            planner,
             test_rng(),
             FaultConfig {
                 enabled: true,
@@ -1756,11 +1765,12 @@ mod tests {
                 }],
                 initialized: true,
             };
+            let planner = test_solver(agents.len());
             SimulationRunner::new(
                 test_grid(),
                 test_zones(),
                 agents,
-                test_solver(),
+                planner,
                 test_rng(),
                 FaultConfig {
                     enabled: true,
@@ -1867,11 +1877,12 @@ mod tests {
             }],
             initialized: true,
         };
+        let planner = test_solver(agents.len());
         let mut runner = SimulationRunner::new(
             test_grid(),
             test_zones(),
             agents,
-            test_solver(),
+            planner,
             test_rng(),
             disabled_fault_config(),
             schedule,
@@ -1908,11 +1919,12 @@ mod tests {
     #[test]
     fn weibull_presampled_ticks_deterministic_after_reset() {
         let agents = vec![SimAgent::new(IVec2::new(1, 1)), SimAgent::new(IVec2::new(3, 3))];
+        let planner = test_solver(agents.len());
         let mut runner = SimulationRunner::new(
             test_grid(),
             test_zones(),
             agents.clone(),
-            test_solver(),
+            planner,
             test_rng(),
             FaultConfig {
                 enabled: true,

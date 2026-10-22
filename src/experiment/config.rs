@@ -260,7 +260,7 @@ mod tests {
     #[test]
     fn expand_cartesian_product() {
         let matrix = ExperimentMatrix {
-            solvers: vec!["pibt".into()],
+            solvers: vec![crate::planners::DEFAULT.into()],
             topologies: vec!["warehouse_single_dock".into()],
             scenarios: vec![None],
             schedulers: vec!["random".into()],
@@ -275,29 +275,31 @@ mod tests {
     }
 
     #[test]
-    fn expand_skips_cells_above_the_solver_fleet_cap() {
-        // RHCR-PBS caps at 200 agents (the SolverInfo default of `max_agents`).
+    fn expand_skips_cells_above_a_fleet_limit() {
+        let zones = topology_zones("warehouse_dual_dock").expect("the map exists");
+        let (entry, limit) = registry::entries()
+            .iter()
+            .find_map(|entry| (entry.fleet_limit)(&zones).map(|limit| (entry, limit)))
+            .expect("a registered planner has a fleet limit on this map");
         let matrix = ExperimentMatrix {
-            solvers: vec!["pibt".into(), "rhcr_pbs".into()],
+            solvers: vec![entry.info.id.into()],
             topologies: vec!["warehouse_dual_dock".into()],
             scenarios: vec![None],
             schedulers: vec!["closest".into()],
-            agent_counts: vec![40, 250],
+            agent_counts: vec![limit, limit + 1],
             seeds: vec![1],
             tick_count: 100,
             planner_params: vec![Default::default()],
         };
-        let configs = matrix.expand();
-        let cells: Vec<(&str, usize)> =
-            configs.iter().map(|c| (c.solver_name.as_str(), c.num_agents)).collect();
-        assert_eq!(cells, vec![("pibt", 40), ("pibt", 250), ("rhcr_pbs", 40)]);
-        assert_eq!(matrix.total_runs(), 3);
+        let fleets: Vec<usize> = matrix.expand().iter().map(|c| c.num_agents).collect();
+        assert_eq!(fleets, vec![limit]);
+        assert_eq!(matrix.total_runs(), 1);
     }
 
     #[test]
     fn expand_full_product() {
         let matrix = ExperimentMatrix {
-            solvers: vec!["pibt".into(), "rhcr_pbs".into()],
+            solvers: vec![crate::planners::DEFAULT.into()],
             topologies: vec!["compact_grid".into(), "warehouse_single_dock".into()],
             scenarios: standard_scenarios(),
             schedulers: vec!["random".into()],
@@ -306,43 +308,45 @@ mod tests {
             tick_count: 500,
             planner_params: vec![Default::default()],
         };
-        // 2 x 2 x 5 x 1 x 1 x 1 x 1 = 20
-        assert_eq!(matrix.total_runs(), 20);
+        // 1 x 2 x 5 x 1 x 1 x 1 x 1 = 10
+        assert_eq!(matrix.total_runs(), 10);
         let configs = matrix.expand();
-        assert_eq!(configs.len(), 20);
+        assert_eq!(configs.len(), 10);
     }
 
     #[test]
     fn expand_with_planner_params_multiplies_axes() {
+        use crate::planning::params::ParamKind;
+        let entry = registry::entries()
+            .iter()
+            .find(|entry| !entry.info.params.is_empty())
+            .expect("a registered planner declares a parameter");
+        let spec = entry.info.params[0];
+        let ParamKind::Int { min, max, default } = spec.kind;
         let matrix = ExperimentMatrix {
-            solvers: vec!["rhcr_pbs".into()],
+            solvers: vec![entry.info.id.into()],
             topologies: vec!["warehouse_single_dock".into()],
             scenarios: vec![None],
             schedulers: vec!["closest".into()],
-            agent_counts: vec![60],
+            agent_counts: vec![20],
             seeds: vec![1, 2],
             tick_count: 100,
-            planner_params: [(5, 3), (10, 3), (20, 6)]
-                .map(|(h, m)| {
-                    ParamValues::default()
-                        .with("horizon", ParamValue::Int(h))
-                        .with("nodes_per_agent", ParamValue::Int(m))
-                })
+            planner_params: [min, default, max]
+                .map(|v| ParamValues::default().with(spec.key, ParamValue::Int(v)))
                 .to_vec(),
         };
         assert_eq!(matrix.total_runs(), 6);
         let configs = matrix.expand();
         assert_eq!(configs.len(), 6);
-        let texts: Vec<String> = configs.iter().map(|c| c.planner_params_text()).collect();
-        assert!(texts.contains(&"horizon=5,nodes_per_agent=3,replan_interval=5".to_string()));
-        assert!(texts.contains(&"horizon=10,nodes_per_agent=3,replan_interval=5".to_string()));
-        assert!(texts.contains(&"horizon=20,nodes_per_agent=6,replan_interval=5".to_string()));
+        let texts: std::collections::BTreeSet<String> =
+            configs.iter().map(|c| c.planner_params_text()).collect();
+        assert_eq!(texts.len(), 3, "{texts:?}");
     }
 
     #[test]
     fn scenario_label() {
         let cfg = ExperimentConfig {
-            solver_name: "pibt".into(),
+            solver_name: crate::planners::DEFAULT.into(),
             topology_name: "warehouse_single_dock".into(),
             scenario: None,
             scheduler_name: "random".into(),

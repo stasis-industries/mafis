@@ -1069,7 +1069,7 @@ mod observatory_controls {
         #[test]
         fn unknown_planner_stops_the_first_load() {
             let mut app = app();
-            app.world_mut().resource_mut::<UiState>().solver_name = "rhcr_pibt".into();
+            app.world_mut().resource_mut::<UiState>().solver_name = "no_such_planner".into();
             let seen = start_and_settle(&mut app);
             assert_eq!(state(&app), SimState::Idle, "states seen: {seen:?}");
         }
@@ -1084,7 +1084,7 @@ mod observatory_controls {
             app.update();
             assert_eq!(state(&app), SimState::Idle);
 
-            app.world_mut().resource_mut::<UiState>().solver_name = "rhcr_pibt".into();
+            app.world_mut().resource_mut::<UiState>().solver_name = "no_such_planner".into();
             let seen = start_and_settle(&mut app);
             for _ in 0..20 {
                 app.update();

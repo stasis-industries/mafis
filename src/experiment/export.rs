@@ -958,7 +958,7 @@ mod tests {
 
     fn dummy_run() -> RunResult {
         crate::experiment::runner::run_single_experiment(&ExperimentConfig {
-            solver_name: "pibt".into(),
+            solver_name: crate::planners::DEFAULT.into(),
             topology_name: "warehouse_single_dock".into(),
             scenario: None,
             scheduler_name: "random".into(),
@@ -1065,7 +1065,7 @@ mod tests {
         let run = dummy_run();
         let result = MatrixResult {
             matrix: crate::experiment::config::ExperimentMatrix {
-                solvers: vec!["pibt".into()],
+                solvers: vec![crate::planners::DEFAULT.into()],
                 topologies: vec!["warehouse_single_dock".into()],
                 scenarios: vec![None],
                 schedulers: vec!["random".into()],
@@ -1091,7 +1091,7 @@ mod tests {
     #[test]
     fn json_roundtrip_summaries() {
         let matrix = crate::experiment::config::ExperimentMatrix {
-            solvers: vec!["pibt".into()],
+            solvers: vec![crate::planners::DEFAULT.into()],
             topologies: vec!["warehouse_single_dock".into()],
             scenarios: vec![None],
             schedulers: vec!["random".into()],
@@ -1108,7 +1108,7 @@ mod tests {
 
         let parsed = parse_summaries_from_json(&json).unwrap();
         assert_eq!(parsed.len(), result.summaries.len());
-        assert_eq!(parsed[0].solver_name, "pibt");
+        assert_eq!(parsed[0].solver_name, crate::planners::DEFAULT);
         assert_eq!(parsed[0].num_seeds, 2);
         assert!((parsed[0].throughput.mean - result.summaries[0].throughput.mean).abs() < 0.001);
     }
@@ -1116,7 +1116,7 @@ mod tests {
     #[test]
     fn latex_table_output() {
         let matrix = crate::experiment::config::ExperimentMatrix {
-            solvers: vec!["pibt".into()],
+            solvers: vec![crate::planners::DEFAULT.into()],
             topologies: vec!["warehouse_single_dock".into()],
             scenarios: vec![None],
             schedulers: vec!["random".into()],
@@ -1143,7 +1143,7 @@ mod tests {
     #[test]
     fn typst_table_output() {
         let matrix = crate::experiment::config::ExperimentMatrix {
-            solvers: vec!["pibt".into()],
+            solvers: vec![crate::planners::DEFAULT.into()],
             topologies: vec!["warehouse_single_dock".into()],
             scenarios: vec![None],
             schedulers: vec!["random".into()],
@@ -1164,7 +1164,7 @@ mod tests {
     #[test]
     fn svg_chart_output() {
         let matrix = crate::experiment::config::ExperimentMatrix {
-            solvers: vec!["pibt".into()],
+            solvers: vec![crate::planners::DEFAULT.into()],
             topologies: vec!["warehouse_single_dock".into()],
             scenarios: vec![None],
             schedulers: vec!["random".into()],
