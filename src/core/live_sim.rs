@@ -156,7 +156,6 @@ pub fn sync_runner_to_ecs(
     mut lifelong: ResMut<LifelongConfig>,
     mut grid: ResMut<GridMap>,
     mut ecs_rng: ResMut<SeededRng>,
-    mut ecs_solver: ResMut<crate::planning::ActiveSolver>,
     mut commands: Commands,
     dead_query: Query<Entity, With<Dead>>,
     latency_query: Query<Entity, With<LatencyFault>>,
@@ -175,10 +174,6 @@ pub fn sync_runner_to_ecs(
 
     // Sync RNG state (for tick history snapshots)
     ecs_rng.rng.set_word_pos(runner.rng().rng.get_word_pos());
-
-    // Sync solver priorities (for tick history snapshots)
-    let priorities = runner.planner().save_priorities();
-    ecs_solver.restore_priorities(&priorities);
 
     // Sync grid (faults may add/remove obstacles via temp blockages)
     // Only clone if obstacle count differs (cheap check to avoid unnecessary clones)

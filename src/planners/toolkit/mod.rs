@@ -1,5 +1,8 @@
 pub mod astar;
+pub mod bytes;
 pub mod pibt_core;
+#[cfg(test)]
+pub mod testing;
 
 // Re-export commonly used types
 pub use astar::{

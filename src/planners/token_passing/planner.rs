@@ -74,9 +74,7 @@ use crate::core::task::TaskLeg;
 use super::common::{MasterConstraintIndex, Token};
 use crate::planners::toolkit::astar::{ConstraintChecker, SpacetimeGrid, spacetime_astar_fast};
 use crate::planning::heuristics::{DistanceMap, DistanceMapCache};
-use crate::planning::planner::{
-    AgentPlan, AgentView, Decision, Observation, Planner, RestoredAgent,
-};
+use crate::planning::planner::{AgentPlan, AgentView, Decision, Observation, Planner};
 use crate::planning::traits::{Optimality, Scalability, SolverInfo};
 
 use crate::constants::{ASTAR_MAX_EXPANSIONS, TOKEN_ASTAR_MAX_TIME, TOKEN_PATH_MAX_TIME};
@@ -292,54 +290,73 @@ impl Planner for TokenPassingPlanner {
         std::mem::take(&mut self.goal_overrides)
     }
 
-    /// Restore TP's per-agent token paths from the snapshot's restored
-    /// `planned_actions`. Called during rewind AFTER `reset()`. Without this,
-    /// the master constraint index rebuilt on the next `step()` would be
-    /// empty (every token length 1), which changes A* results and makes the
-    /// rewound replay diverge from the original run.
-    fn restore_state(&mut self, agents: &[RestoredAgent]) {
-        if agents.is_empty() {
-            return;
+    /// Everything a reset clears that the next step reads: each agent's token
+    /// path, as its start cell plus one `Action` byte per later step, and the
+    /// agents that were free at the previous step. The runner only holds each
+    /// agent's next action, so the paths cannot be rebuilt from the fleet.
+    /// Little-endian, counts as u32:
+    /// `[n] ([index][path length][start x][start y][steps…])×n [m] [free index]×m`.
+    fn snapshot(&self) -> Option<Vec<u8>> {
+        let mut bytes = Vec::new();
+        put_u32(&mut bytes, self.reverse_map.len());
+        for (local, &index) in self.reverse_map.iter().enumerate() {
+            let path = &self.token.paths[local];
+            put_u32(&mut bytes, index);
+            put_u32(&mut bytes, path.len());
+            if let Some(start) = path.front() {
+                bytes.extend(start.x.to_le_bytes());
+                bytes.extend(start.y.to_le_bytes());
+            }
+            bytes.extend(path.iter().zip(path.iter().skip(1)).map(|(&from, &to)| {
+                crate::planning::heuristics::delta_to_action(from, to).to_u8()
+            }));
         }
+        let mut free: Vec<usize> = self.free_last_step.iter().copied().collect();
+        free.sort_unstable();
+        put_u32(&mut bytes, free.len());
+        for index in free {
+            put_u32(&mut bytes, index);
+        }
+        Some(bytes)
+    }
 
-        // Re-initialise agent_map / reverse_map from the post-rewind agent
-        // set. We fabricate the minimal `AgentView` slice that
-        // `ensure_initialized` needs — `has_plan` / `task_leg` are ignored
-        // there, only `index` and `pos` matter.
-        let init_states: Vec<AgentView> = agents
+    /// The master constraint index is rebuilt from the token at the top of
+    /// the next `step()`, so restoring the token is enough.
+    fn restore(&mut self, snapshot: &[u8]) {
+        let mut bytes = snapshot;
+        let paths: Vec<(usize, Vec<IVec2>)> = (0..take_u32(&mut bytes))
+            .map(|_| {
+                let index = take_u32(&mut bytes);
+                let len = take_u32(&mut bytes);
+                let mut path = Vec::with_capacity(len);
+                if len > 0 {
+                    let mut pos = IVec2::new(take_i32(&mut bytes), take_i32(&mut bytes));
+                    path.push(pos);
+                    for _ in 1..len {
+                        pos = Action::from_u8(take_u8(&mut bytes)).apply(pos);
+                        path.push(pos);
+                    }
+                }
+                (index, path)
+            })
+            .collect();
+        // `ensure_initialized` reads only `index` and `pos`.
+        let views: Vec<AgentView> = paths
             .iter()
-            .map(|a| AgentView {
-                index: a.index,
-                pos: a.pos,
-                goal: a.goal,
-                has_plan: !a.planned_actions.is_empty(),
-                task_leg: a.task_leg.clone(),
+            .map(|(index, path)| AgentView {
+                index: *index,
+                pos: path.first().copied().unwrap_or_default(),
+                goal: None,
+                has_plan: false,
+                task_leg: TaskLeg::Free,
             })
             .collect();
         self.initialized = false;
-        self.ensure_initialized(&init_states);
-
-        // Walk each restored planned-action sequence to rebuild the position
-        // stream of the token. The token stores the positions the agent IS
-        // at now and will pass through in the next `planned_actions.len()`
-        // ticks — exactly what `MasterConstraintIndex` consumes in the next
-        // `step()` at line 257 to rebuild the shared vertex/edge blocks.
-        for restore in agents {
-            if let Some(&local) = self.agent_map.get(restore.index)
-                && local < self.token.paths.len()
-            {
-                let mut positions = Vec::with_capacity(restore.planned_actions.len() + 1);
-                positions.push(restore.pos);
-                let mut p = restore.pos;
-                for action in restore.planned_actions {
-                    p = action.apply(p);
-                    positions.push(p);
-                }
-                self.token.set_path(local, positions);
-            }
+        self.ensure_initialized(&views);
+        for (local, (_, path)) in paths.into_iter().enumerate() {
+            self.token.set_path(local, path);
         }
-        // master_ci is rebuilt at the top of the next step() from these
-        // restored tokens, so no explicit rebuild here.
+        self.free_last_step = (0..take_u32(&mut bytes)).map(|_| take_u32(&mut bytes)).collect();
     }
 
     fn step<'a>(
@@ -537,6 +554,34 @@ impl Planner for TokenPassingPlanner {
 
         Decision::Plans(&self.plan_buffer)
     }
+}
+
+// ---------------------------------------------------------------------------
+// Snapshot encoding
+// ---------------------------------------------------------------------------
+
+fn put_u32(bytes: &mut Vec<u8>, value: usize) {
+    bytes.extend((value as u32).to_le_bytes());
+}
+
+fn take_u32(bytes: &mut &[u8]) -> usize {
+    u32::from_le_bytes(take(bytes)) as usize
+}
+
+fn take_i32(bytes: &mut &[u8]) -> i32 {
+    i32::from_le_bytes(take(bytes))
+}
+
+fn take_u8(bytes: &mut &[u8]) -> u8 {
+    let [byte] = take(bytes);
+    byte
+}
+
+/// The next `N` bytes of a snapshot written by `snapshot`.
+fn take<const N: usize>(bytes: &mut &[u8]) -> [u8; N] {
+    let (head, rest) = bytes.split_first_chunk::<N>().expect("a complete Token Passing snapshot");
+    *bytes = rest;
+    *head
 }
 
 // ---------------------------------------------------------------------------
@@ -928,63 +973,36 @@ mod tests {
         );
     }
 
-    /// Regression for the 2026-04-20 rewind-determinism bug (Issue 3 of the
-    /// TP audit). After `restore_state`, each agent's token must equal the
-    /// position sequence derived from walking its restored `planned_actions`
-    /// from `pos`, so the `MasterConstraintIndex` rebuilt on the next
-    /// `step()` matches the original run bit-for-bit.
+    /// Agents parked for lack of a task are only seen in crowded runs, so the
+    /// free set's round trip is checked directly.
     #[test]
-    fn tp_restore_state_rebuilds_token_from_actions() {
-        use crate::core::action::{Action, Direction};
-        use crate::planning::planner::RestoredAgent;
-
-        let mut solver = TokenPassingPlanner::new();
-        solver.reset(); // starts uninitialised
-
-        let actions_0 = vec![
-            Action::Move(Direction::East),
-            Action::Move(Direction::East),
-            Action::Move(Direction::East),
-        ];
-        let actions_1 = vec![Action::Move(Direction::North), Action::Move(Direction::North)];
-
-        let restore = vec![
-            RestoredAgent {
-                index: 0,
-                pos: IVec2::new(0, 0),
-                goal: Some(IVec2::new(3, 0)),
-                task_leg: TaskLeg::TravelEmpty(IVec2::new(3, 0)),
-                planned_actions: &actions_0,
-            },
-            RestoredAgent {
-                index: 1,
-                pos: IVec2::new(5, 0),
-                goal: Some(IVec2::new(5, 2)),
-                task_leg: TaskLeg::TravelEmpty(IVec2::new(5, 2)),
-                planned_actions: &actions_1,
-            },
-        ];
-
-        solver.restore_state(&restore);
-
-        // Tokens should trace [start, after_action_0, after_action_1, ...].
-        let token_0: Vec<IVec2> = solver.token.paths[0].iter().copied().collect();
-        assert_eq!(
-            token_0,
-            vec![IVec2::new(0, 0), IVec2::new(1, 0), IVec2::new(2, 0), IVec2::new(3, 0),],
-        );
-        let token_1: Vec<IVec2> = solver.token.paths[1].iter().copied().collect();
-        assert_eq!(token_1, vec![IVec2::new(5, 0), IVec2::new(5, 1), IVec2::new(5, 2)],);
+    fn restore_brings_back_the_free_agents() {
+        let mut planner = TokenPassingPlanner::new();
+        planner.free_last_step.extend([3, 7]);
+        let saved = planner.snapshot().expect("Token Passing supports snapshots");
+        planner.reset();
+        planner.restore(&saved);
+        assert_eq!(planner.free_last_step, std::collections::HashSet::from([3, 7]));
     }
 
-    /// Empty restore is a no-op (exercises the early-return branch).
+    /// The same planner state always gives the same bytes, and a reset loses
+    /// what the snapshot holds.
     #[test]
-    fn tp_restore_state_empty_is_noop() {
-        use crate::planning::planner::RestoredAgent;
-        let mut solver = TokenPassingPlanner::new();
-        solver.restore_state(&[] as &[RestoredAgent]);
-        assert!(solver.token.paths.is_empty(), "empty restore must not touch tokens");
-        assert!(!solver.initialized);
+    fn snapshot_round_trips() {
+        use crate::planners::toolkit::testing::{small_run, tick};
+        let mut runner = small_run(Box::new(TokenPassingPlanner::new()));
+        for _ in 0..40 {
+            tick(&mut runner);
+        }
+        let saved = runner.planner().snapshot().expect("Token Passing supports snapshots");
+        runner.planner_mut().reset();
+        assert_ne!(
+            runner.planner().snapshot().as_ref(),
+            Some(&saved),
+            "reset alone keeps the token"
+        );
+        runner.planner_mut().restore(&saved);
+        assert_eq!(runner.planner().snapshot(), Some(saved));
     }
 
     /// Regression test for the Token Passing audit (Step 3 of solver-refocus).
@@ -1029,6 +1047,17 @@ mod tests {
             "Token Passing regression: avg_throughput {tp:.4} fell below 0.05 floor. \
              Check planning order, MasterConstraintIndex add/remove symmetry, and \
              pibt2 line 53 needs-replan condition."
+        );
+    }
+
+    #[test]
+    fn restore_continues_like_uninterrupted() {
+        let make = || -> Box<dyn Planner> { Box::new(TokenPassingPlanner::new()) };
+        let divergence =
+            crate::planners::toolkit::testing::first_divergence_after_restore(make, 40, 80);
+        assert_eq!(
+            divergence, None,
+            "the restored run left the uninterrupted one at tick {divergence:?}"
         );
     }
 }

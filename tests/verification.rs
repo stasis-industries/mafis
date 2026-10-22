@@ -1053,7 +1053,7 @@ fn delete_fault_determinism() {
     let snapshot_tasks_completed: u64;
     let _snapshot_completion_ticks: std::collections::VecDeque<u64>;
     let _snapshot_agent_states: Vec<(bevy::math::IVec2, bevy::math::IVec2, bool)>;
-    let _snapshot_solver_priorities: Vec<f32>;
+    let _snapshot_planner: Option<Vec<u8>>;
     let snapshot_tick: u64;
     {
         // Build a burst fault schedule at fault_tick
@@ -1092,7 +1092,7 @@ fn delete_fault_determinism() {
         snapshot_tasks_completed = runner.tasks_completed;
         _snapshot_completion_ticks = runner.completion_ticks().clone();
         _snapshot_agent_states = runner.agents.iter().map(|a| (a.pos, a.goal, a.alive)).collect();
-        _snapshot_solver_priorities = runner.planner().save_priorities();
+        _snapshot_planner = runner.planner().snapshot();
 
         eprintln!("  Faulted run at tick {snapshot_tick}: tasks = {snapshot_tasks_completed}");
         eprintln!("  Faulted rng_word_pos = {snapshot_rng_pos}");
@@ -1278,7 +1278,7 @@ fn delete_fault_double_restore_determinism() {
         Vec<u8>,
         bool,
     )>;
-    let snap_solver_pri: Vec<f32>;
+    let snap_planner: Option<Vec<u8>>;
     {
         let kill_count = (num_agents as f64 * 0.2).round() as usize;
         let mut fs = FaultSchedule { initialized: true, ..Default::default() };
@@ -1315,7 +1315,7 @@ fn delete_fault_double_restore_determinism() {
                 (a.pos, a.goal, a.task_leg.clone(), actions, a.alive)
             })
             .collect();
-        snap_solver_pri = r.planner().save_priorities();
+        snap_planner = r.planner().snapshot();
         eprintln!("  Snapshot at tick {}: tasks={snap_tasks}, rng_pos={snap_rng_pos}", r.tick);
     }
 
@@ -1342,7 +1342,7 @@ fn delete_fault_double_restore_determinism() {
         restore_runner_from_snapshot(
             &mut r,
             &snap_agent_data,
-            &snap_solver_pri,
+            snap_planner.as_deref(),
             snap_rng_pos,
             snap_tasks,
             &snap_completion_ticks,
@@ -1356,7 +1356,7 @@ fn delete_fault_double_restore_determinism() {
         restore_runner_from_snapshot(
             &mut r,
             &snap_agent_data,
-            &snap_solver_pri,
+            snap_planner.as_deref(),
             snap_rng_pos,
             snap_tasks,
             &snap_completion_ticks,
@@ -1475,7 +1475,7 @@ fn delete_fault_inplace_restore_determinism() {
                 (a.pos, a.goal, a.task_leg.clone(), actions, a.alive, a.heat, a.operational_age)
             })
             .collect();
-        let snap_solver_pri = runner.planner().save_priorities();
+        let snap_planner = runner.planner().snapshot();
 
         eprintln!("  Snapshot at tick {snap_tick}: tasks={snap_tasks}, rng={snap_rng_pos}");
 
@@ -1530,7 +1530,7 @@ fn delete_fault_inplace_restore_determinism() {
         runner.fault_rng_mut().rng.set_word_pos(snap_fault_rng_pos);
 
         // Restore solver
-        runner.planner_mut().restore_priorities(&snap_solver_pri);
+        restore_planner(&mut runner, snap_planner.as_deref());
 
         // Restore completion state
         runner.restore_completion_state(snap_tasks, snap_completion_ticks.clone());
@@ -1579,7 +1579,7 @@ fn delete_fault_inplace_restore_determinism() {
         runner.rng_mut().rng.set_word_pos(snap_rng_pos);
         runner.fault_rng_mut().reseed(fault_seed);
         runner.fault_rng_mut().rng.set_word_pos(snap_fault_rng_pos);
-        runner.planner_mut().restore_priorities(&snap_solver_pri);
+        restore_planner(&mut runner, snap_planner.as_deref());
         runner.restore_completion_state(snap_tasks, snap_completion_ticks);
         runner.clear_transient_state();
 
@@ -1637,7 +1637,7 @@ fn restore_runner_from_snapshot(
         Vec<u8>,
         bool,
     )],
-    solver_priorities: &[f32],
+    planner_snapshot: Option<&[u8]>,
     rng_word_pos: u128,
     tasks_completed: u64,
     completion_ticks: &std::collections::VecDeque<u64>,
@@ -1672,16 +1672,21 @@ fn restore_runner_from_snapshot(
     runner.fault_rng_mut().reseed(fault_seed);
     // Note: we don't have fault_rng_word_pos in this test since faults are disabled
 
-    // Restore solver
-    if !solver_priorities.is_empty() {
-        runner.planner_mut().restore_priorities(solver_priorities);
-    }
+    // Restore planner
+    restore_planner(runner, planner_snapshot);
 
     // Restore completion state
     runner.restore_completion_state(tasks_completed, completion_ticks.clone());
 
     // Clear transient state
     runner.clear_transient_state();
+}
+
+/// Helper: restore the runner's planner in place from `snapshot`.
+fn restore_planner(runner: &mut SimulationRunner, snapshot: Option<&[u8]>) {
+    if let Some(bytes) = snapshot {
+        runner.planner_mut().restore(bytes);
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════

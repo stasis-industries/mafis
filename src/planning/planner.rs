@@ -42,20 +42,6 @@ pub struct AgentView {
     pub task_leg: TaskLeg,
 }
 
-/// Per-agent data passed to `Planner::restore_state` during rewind.
-///
-/// Bundles the subset of `AgentView` needed to reconstruct planner-internal
-/// planning caches (e.g. Token Passing's per-agent token paths) from the
-/// restored snapshot.
-#[derive(Clone, Debug)]
-pub struct RestoredAgent<'a> {
-    pub index: usize,
-    pub pos: IVec2,
-    pub goal: Option<IVec2>,
-    pub task_leg: TaskLeg,
-    pub planned_actions: &'a [crate::core::action::Action],
-}
-
 // ---------------------------------------------------------------------------
 // Decision — borrows from the planner's internal buffer
 // ---------------------------------------------------------------------------
@@ -92,29 +78,16 @@ pub trait Planner: Send + Sync + 'static {
         rng: &mut SeededRng,
     ) -> Decision<'a>;
 
-    /// Save internal priority state for deterministic rewind.
-    /// Default: no state to save.
-    fn save_priorities(&self) -> Vec<f32> {
-        Vec::new()
+    /// Opaque state from which `reset()` followed by `restore()` returns the
+    /// planner to this tick, for rewind. `None` means the planner cannot be
+    /// restored, and rewind falls back to `reset()` alone.
+    fn snapshot(&self) -> Option<Vec<u8>> {
+        None
     }
 
-    /// Restore internal priority state from a snapshot.
-    /// Default: no-op (solver reinitializes on next step).
-    fn restore_priorities(&mut self, _priorities: &[f32]) {}
-
-    /// Rebuild solver-specific planning caches from the post-rewind agent
-    /// state + their restored planned actions. Called by the rewind machinery
-    /// AFTER `reset()` + `restore_priorities()` so the solver can use the
-    /// re-materialised plans to re-seed any state that `reset()` just cleared.
-    ///
-    /// Required to keep Token Passing deterministic across rewinds: TP's
-    /// `MasterConstraintIndex` is rebuilt every step from the per-agent token
-    /// paths, so losing the paths on reset makes subsequent A* plans diverge
-    /// from the original run.
-    ///
-    /// Default: no-op (PIBT, RHCR-PBS have no path-based state to restore —
-    /// they replan fresh each tick or each window).
-    fn restore_state(&mut self, _agents: &[RestoredAgent]) {}
+    /// Called after `reset()` when the run rewinds to the tick `snapshot`
+    /// came from. Default: no-op.
+    fn restore(&mut self, _snapshot: &[u8]) {}
 
     /// Drain pending goal overrides produced by the last `step()`.
     /// Planners that change goals (Token Passing sends idle agents to parking)
@@ -192,30 +165,5 @@ impl ActiveSolver {
 
     pub fn info(&self) -> SolverInfo {
         self.solver.info()
-    }
-
-    pub fn step<'a>(
-        &'a mut self,
-        obs: &Observation,
-        distance_cache: &mut DistanceMapCache,
-        rng: &mut SeededRng,
-    ) -> Decision<'a> {
-        self.solver.step(obs, distance_cache, rng)
-    }
-
-    pub fn reset(&mut self) {
-        self.solver.reset();
-    }
-
-    pub fn save_priorities(&self) -> Vec<f32> {
-        self.solver.save_priorities()
-    }
-
-    pub fn restore_priorities(&mut self, priorities: &[f32]) {
-        self.solver.restore_priorities(priorities);
-    }
-
-    pub fn restore_state(&mut self, agents: &[RestoredAgent]) {
-        self.solver.restore_state(agents);
     }
 }

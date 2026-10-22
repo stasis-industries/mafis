@@ -148,7 +148,6 @@ pub struct RewindResources<'w> {
     fault_schedule: ResMut<'w, super::scenario::FaultSchedule>,
     tick_history: ResMut<'w, crate::analysis::history::TickHistory>,
     config: ResMut<'w, SimulationConfig>,
-    solver: ResMut<'w, crate::planning::ActiveSolver>,
     lifelong: ResMut<'w, crate::core::task::LifelongConfig>,
     rng: ResMut<'w, crate::core::seed::SeededRng>,
     ui_state: Res<'w, crate::ui::controls::UiState>,
@@ -382,45 +381,7 @@ fn restore_world_state(
     res.rng.reseed(original_seed);
     res.rng.rng.set_word_pos(snapshot.rng_word_pos);
 
-    // Restore solver priority state from snapshot instead of resetting.
-    // reset() would clear accumulated priorities, causing different agent ordering
-    // on resumed simulation (non-determinism). Priority restore preserves exact state.
-    if !snapshot.solver_priorities.is_empty() {
-        res.solver.restore_priorities(&snapshot.solver_priorities);
-    } else {
-        // Fallback for snapshots taken before priority saving was added
-        res.solver.reset();
-    }
     res.dist_cache.clear();
-
-    // Restore solver-specific planning caches that `reset()` / `restore_priorities()`
-    // did not recover. Token Passing rebuilds its per-agent token paths (and,
-    // implicitly, the MasterConstraintIndex on the next step) from each agent's
-    // restored planned_actions. Without this, TP replay diverges because the
-    // constraint index starts empty while the original run had multi-step plans
-    // active at this tick. PIBT and RHCR-PBS default to no-op.
-    {
-        use crate::core::action::Action;
-        use crate::planning::planner::RestoredAgent;
-        let actions_per_agent: Vec<Vec<Action>> = snapshot
-            .agents
-            .iter()
-            .map(|s| s.planned_actions.iter().map(|&b| Action::from_u8(b)).collect())
-            .collect();
-        let restore_data: Vec<RestoredAgent> = snapshot
-            .agents
-            .iter()
-            .zip(actions_per_agent.iter())
-            .map(|(s, actions)| RestoredAgent {
-                index: s.index,
-                pos: s.pos,
-                goal: Some(s.goal),
-                task_leg: s.reconstruct_task_leg(),
-                planned_actions: actions.as_slice(),
-            })
-            .collect();
-        res.solver.restore_state(&restore_data);
-    }
 
     // Restore lifelong task count + completion_ticks window for correct throughput
     res.lifelong.restore_from_snapshot(
@@ -487,36 +448,13 @@ fn restore_runner_state(
     runner.fault_rng_mut().reseed(fault_seed);
     runner.fault_rng_mut().rng.set_word_pos(snapshot.fault_rng_word_pos);
 
-    // Solver — always reset first to clear transient state (congestion_streak,
-    // plan_buffer, ticks_since_replan, etc.), then restore priorities if available.
-    // Without the unconditional reset, RHCR's transient state persists across rewind.
+    // Planner — always reset first to clear transient state (plan_buffer,
+    // ticks_since_replan, etc.); without the unconditional reset, RHCR's
+    // transient state persists across rewind. Then restore it from the snapshot
+    // taken at this tick.
     runner.planner_mut().reset();
-    if !snapshot.solver_priorities.is_empty() {
-        runner.planner_mut().restore_priorities(&snapshot.solver_priorities);
-    }
-
-    // Rebuild solver-specific planning caches (see comment on the ECS path).
-    {
-        use crate::core::action::Action;
-        use crate::planning::planner::RestoredAgent;
-        let actions_per_agent: Vec<Vec<Action>> = snapshot
-            .agents
-            .iter()
-            .map(|s| s.planned_actions.iter().map(|&b| Action::from_u8(b)).collect())
-            .collect();
-        let restore_data: Vec<RestoredAgent> = snapshot
-            .agents
-            .iter()
-            .zip(actions_per_agent.iter())
-            .map(|(s, actions)| RestoredAgent {
-                index: s.index,
-                pos: s.pos,
-                goal: Some(s.goal),
-                task_leg: s.reconstruct_task_leg(),
-                planned_actions: actions.as_slice(),
-            })
-            .collect();
-        runner.planner_mut().restore_state(&restore_data);
+    if let Some(bytes) = &snapshot.planner_snapshot {
+        runner.planner_mut().restore(bytes);
     }
 
     // Completion state

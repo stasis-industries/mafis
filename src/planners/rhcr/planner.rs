@@ -35,6 +35,7 @@ use crate::core::grid::GridMap;
 use crate::core::seed::SeededRng;
 
 use super::windowed::{WindowAgent, WindowContext, WindowResult, WindowedPlanner};
+use crate::planners::toolkit::bytes::{f32s_from_bytes, f32s_to_bytes};
 use crate::planners::toolkit::pibt_core::PibtCore;
 use crate::planning::heuristics::DistanceMapCache;
 use crate::planning::planner::{AgentPlan, AgentView, Decision, Observation, Planner};
@@ -538,27 +539,27 @@ impl Planner for RhcrPlanner {
         self.pbs_partial_count = 0;
     }
 
-    fn save_priorities(&self) -> Vec<f32> {
-        // Save both fallback PIBT and windowed planner priorities.
-        // Format: [fallback_len, fallback_priorities..., planner_priorities...]
-        let fb = self.pibt_fallback.priorities();
-        let wp = self.planner.save_priorities();
-        let mut out = Vec::with_capacity(1 + fb.len() + wp.len());
-        out.push(fb.len() as f32);
-        out.extend_from_slice(fb);
-        out.extend_from_slice(&wp);
-        out
+    /// The fallback PIBT's and the windowed planner's priorities, as
+    /// `[fallback length: u32 LE][fallback f32s][windowed-planner f32s]`.
+    /// The window phase is not saved: a restored run replans at its next step
+    /// instead of finishing the window it was in.
+    fn snapshot(&self) -> Option<Vec<u8>> {
+        let fallback = self.pibt_fallback.priorities();
+        let mut bytes = (fallback.len() as u32).to_le_bytes().to_vec();
+        bytes.extend(f32s_to_bytes(fallback));
+        bytes.extend(f32s_to_bytes(&self.planner.save_priorities()));
+        Some(bytes)
     }
 
-    fn restore_priorities(&mut self, priorities: &[f32]) {
-        if priorities.is_empty() {
+    fn restore(&mut self, snapshot: &[u8]) {
+        let Some((fallback_len, rest)) = snapshot.split_first_chunk::<4>() else {
             return;
-        }
-        let fb_len = priorities[0] as usize;
-        let rest = &priorities[1..];
-        if rest.len() >= fb_len {
-            self.pibt_fallback.set_priorities(&rest[..fb_len]);
-            self.planner.restore_priorities(&rest[fb_len..]);
+        };
+        let fallback_len = u32::from_le_bytes(*fallback_len) as usize;
+        let priorities = f32s_from_bytes(rest);
+        if priorities.len() >= fallback_len {
+            self.pibt_fallback.set_priorities(&priorities[..fallback_len]);
+            self.planner.restore_priorities(&priorities[fallback_len..]);
         }
     }
 
@@ -1233,5 +1234,19 @@ mod tests {
              in eager-mode PBS, plan_agent sequential A*, or the best-partial \
              fallback. See src/solver/rhcr/pbs_planner.rs."
         );
+    }
+
+    #[test]
+    fn snapshot_round_trips_priorities() {
+        // Fallback length 2, fallback priorities [1.0, 2.0], none for PBS.
+        let saved = [2u32.to_le_bytes(), 1.0f32.to_le_bytes(), 2.0f32.to_le_bytes()].concat();
+        let mut planner = RhcrPlanner::new(RhcrConfig::auto(0, 12));
+        assert_ne!(
+            planner.snapshot().as_ref(),
+            Some(&saved),
+            "a fresh planner holds no priorities"
+        );
+        planner.restore(&saved);
+        assert_eq!(planner.snapshot(), Some(saved));
     }
 }

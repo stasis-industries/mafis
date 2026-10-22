@@ -15,6 +15,7 @@ use crate::core::grid::GridMap;
 use crate::core::seed::SeededRng;
 use crate::core::task::TaskLeg;
 
+use crate::planners::toolkit::bytes::{f32s_from_bytes, f32s_to_bytes};
 use crate::planners::toolkit::pibt_core::PibtCore;
 use crate::planning::heuristics::{DistanceMap, DistanceMapCache, compute_distance_maps};
 use crate::planning::planner::{ActiveSolver, AgentPlan, Decision, Observation, Planner};
@@ -145,12 +146,14 @@ impl Planner for PibtPlanner {
         Decision::Plans(&self.plan_buffer)
     }
 
-    fn save_priorities(&self) -> Vec<f32> {
-        self.core.priorities().to_vec()
+    fn snapshot(&self) -> Option<Vec<u8>> {
+        Some(f32s_to_bytes(self.core.priorities()))
     }
 
-    fn restore_priorities(&mut self, priorities: &[f32]) {
-        self.core.set_priorities(priorities);
+    fn restore(&mut self, snapshot: &[u8]) {
+        if !snapshot.is_empty() {
+            self.core.set_priorities(&f32s_from_bytes(snapshot));
+        }
     }
 }
 
@@ -828,5 +831,16 @@ mod tests {
             }
         }
         eprintln!("\nFinal: {} tasks in 200 ticks with 15 agents", runner.tasks_completed);
+    }
+
+    #[test]
+    fn restore_continues_like_uninterrupted() {
+        let make = || -> Box<dyn Planner> { Box::new(PibtPlanner::new()) };
+        let divergence =
+            crate::planners::toolkit::testing::first_divergence_after_restore(make, 40, 80);
+        assert_eq!(
+            divergence, None,
+            "the restored run left the uninterrupted one at tick {divergence:?}"
+        );
     }
 }

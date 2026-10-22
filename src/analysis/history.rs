@@ -72,9 +72,9 @@ pub struct FullTickSnapshot {
     /// Tasks completed at this tick — used to restore LifelongConfig after rewind.
     #[serde(skip)]
     pub lifelong_tasks_completed: u64,
-    /// Solver priority state at this tick — used for deterministic rewind.
+    /// Planner snapshot at this tick — used for deterministic rewind.
     #[serde(skip)]
-    pub solver_priorities: Vec<f32>,
+    pub planner_snapshot: Option<Vec<u8>>,
     /// Throughput completion_ticks window — restored on rewind so throughput
     /// doesn't drop to 0.0 after seek/rewind.
     #[serde(skip)]
@@ -222,7 +222,6 @@ pub fn record_tick_snapshot(
     fault_metrics: Res<FaultMetrics>,
     rng: Res<SeededRng>,
     lifelong: Res<LifelongConfig>,
-    solver: Res<crate::planning::ActiveSolver>,
     mut history: ResMut<TickHistory>,
 ) {
     // Skip ticks based on snapshot interval to reduce allocation pressure.
@@ -322,7 +321,7 @@ pub fn record_tick_snapshot(
             .map(|s| s.runner.fault_rng().rng.get_word_pos())
             .unwrap_or(0),
         lifelong_tasks_completed: lifelong.tasks_completed,
-        solver_priorities: solver.save_priorities(),
+        planner_snapshot: sim.as_ref().and_then(|s| s.runner.planner().snapshot()),
         completion_ticks: lifelong.completion_ticks().clone(),
         intermittent_next_fault_tick: sim
             .as_ref()
