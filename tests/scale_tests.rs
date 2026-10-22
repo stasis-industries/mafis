@@ -24,7 +24,6 @@ fn run_ticks(
 ) -> (u64, usize) {
     let topo = ActiveTopology::from_name(topology_name);
     let output = topo.topology().generate(seed);
-    let grid_area = (output.grid.width * output.grid.height) as usize;
     let capacity = output.grid.walkable_count();
 
     let actual_agents = num_agents.min(capacity);
@@ -33,8 +32,8 @@ fn run_ticks(
     let agents = place_agents(actual_agents, &output.grid, &output.zones, &mut rng);
     let rng_after = rng.clone();
 
-    let solver = mafis::planners::lifelong_solver_from_name(solver_name, grid_area, actual_agents)
-        .unwrap_or_else(|| Box::new(mafis::planners::pibt::PibtPlanner::new()));
+    let solver = mafis::planning::registry::build(solver_name, &Default::default(), actual_agents)
+        .unwrap_or_else(|e| panic!("{e}"));
 
     let mut runner = SimulationRunner::new(
         output.grid,
@@ -149,12 +148,11 @@ fn edge_max_density_no_crash() {
         }
     }
 
-    let grid_area = 64;
     let mut rng = SeededRng::new(42);
     let agents = place_agents(64, &grid, &zones, &mut rng);
     let rng_after = rng.clone();
 
-    let solver = mafis::planners::lifelong_solver_from_name("pibt", grid_area, 64).unwrap();
+    let solver = mafis::planning::registry::build("pibt", &Default::default(), 64).unwrap();
     let mut runner = SimulationRunner::new(
         grid,
         zones,
@@ -202,7 +200,7 @@ fn edge_no_pickup_cells_no_crash() {
     let agents = place_agents(5, &grid, &zones, &mut rng);
     let rng_after = rng.clone();
 
-    let solver = mafis::planners::lifelong_solver_from_name("pibt", 100, 5).unwrap();
+    let solver = mafis::planning::registry::build("pibt", &Default::default(), 5).unwrap();
     let mut runner = SimulationRunner::new(
         grid,
         zones,
@@ -248,7 +246,7 @@ fn edge_no_delivery_cells_no_crash() {
     let agents = place_agents(5, &grid, &zones, &mut rng);
     let rng_after = rng.clone();
 
-    let solver = mafis::planners::lifelong_solver_from_name("pibt", 100, 5).unwrap();
+    let solver = mafis::planning::registry::build("pibt", &Default::default(), 5).unwrap();
     let mut runner = SimulationRunner::new(
         grid,
         zones,

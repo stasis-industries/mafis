@@ -60,7 +60,7 @@ fn run_baseline(solver: &str) -> f64 {
         seed: SEED,
         tick_count: TICK_COUNT,
         custom_map: None,
-        rhcr_override: None,
+        planner_params: Default::default(),
     };
     let result = run_single_experiment(&config);
     let tp = result.baseline_metrics.avg_throughput;
@@ -174,7 +174,7 @@ fn lacam3_cross_seed_stability() {
             seed,
             tick_count: 200,
             custom_map: None,
-            rhcr_override: None,
+            planner_params: Default::default(),
         };
         let result = run_single_experiment(&config);
         let tp = result.baseline_metrics.avg_throughput;

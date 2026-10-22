@@ -22,7 +22,7 @@ use crate::fault::FaultSet;
 use crate::fault::breakdown::{Dead, FaultEvent};
 use crate::fault::config::{FaultConfig, FaultType};
 use crate::fault::heat::HeatState;
-use crate::planning::ActiveSolver;
+use crate::planning::registry;
 use crate::ui::controls::UiState;
 
 use self::config::{ExportConfig, ExportRequest, ExportTrigger};
@@ -158,7 +158,6 @@ fn process_export_requests(
     registry: Res<AgentRegistry>,
     fault_log: Res<FaultLog>,
     fault_metrics: Res<FaultMetrics>,
-    solver: Res<ActiveSolver>,
     topology: Res<ActiveTopology>,
     scheduler: Res<ActiveScheduler>,
     agents: Query<(
@@ -173,7 +172,10 @@ fn process_export_requests(
     for request in requests.read() {
         let agent_data: Vec<_> = agents.iter().collect();
 
-        let info = solver.solver().info();
+        let label = registry::find(&ui_state.solver_name).map_or("", |entry| entry.info.label);
+        let params = registry::resolve(&ui_state.solver_name, &ui_state.planner_params)
+            .map(|(_, params)| params.canonical())
+            .unwrap_or_default();
         let snapshot = gather::gather_snapshot(
             &request.trigger,
             &sim_config,
@@ -189,9 +191,9 @@ fn process_export_requests(
             &fault_metrics,
             topology.name(),
             scheduler.name(),
-            solver.name(),
-            info.optimality.label(),
-            info.scalability.label(),
+            &ui_state.solver_name,
+            label,
+            &params,
             &agent_data,
         );
 

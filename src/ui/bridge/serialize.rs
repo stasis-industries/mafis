@@ -22,7 +22,7 @@ use crate::fault::breakdown::{Dead, LatencyFault};
 use crate::fault::config::FaultConfig;
 use crate::fault::heat::HeatState;
 use crate::fault::scenario::{FaultScenario, FaultSchedule, ScheduledAction};
-use crate::planning::ActiveSolver;
+use crate::planning::registry;
 use crate::render::animator::RobotOpacity;
 use crate::render::graphics::GraphicsConfig;
 use crate::render::orbit_camera::{CameraMode, OrbitCamera};
@@ -56,7 +56,7 @@ pub(super) struct BridgeOutput {
     pub export_config: ExportConfigSnapshot,
     pub metrics: Option<MetricsSnapshot>,
     pub solver: String,
-    pub solver_info: SolverInfoSnapshot,
+    pub solver_info: Option<PlannerInfoSnapshot>,
     pub agents: Vec<AgentSnapshot>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent_summary: Option<AgentSummary>,
@@ -214,13 +214,10 @@ pub(super) struct AgentSummary {
 }
 
 #[derive(Serialize)]
-pub(super) struct SolverInfoSnapshot {
-    optimality: String,
-    complexity: String,
-    scalability: String,
-    description: String,
-    source: String,
-    recommended_max_agents: Option<usize>,
+pub(super) struct PlannerInfoSnapshot {
+    label: &'static str,
+    summary: &'static str,
+    reference: &'static str,
 }
 
 #[derive(Serialize)]
@@ -377,7 +374,6 @@ pub(super) fn sync_state_to_js(
     analysis_config: Res<AnalysisConfig>,
     export_config: Res<ExportConfig>,
     analysis: AnalysisResources,
-    solver: Res<ActiveSolver>,
     time: Res<Time>,
     mut fps_tracker: ResMut<FpsTracker>,
     mut sync_timer: Local<f32>,
@@ -542,15 +538,11 @@ pub(super) fn sync_state_to_js(
         m.task_idle_count = leg_free;
     }
 
-    let info = solver.solver().info();
-    let solver_info = SolverInfoSnapshot {
-        optimality: info.optimality.label().to_string(),
-        complexity: info.complexity.to_string(),
-        scalability: info.scalability.label().to_string(),
-        description: info.description.to_string(),
-        source: info.source.to_string(),
-        recommended_max_agents: info.recommended_max_agents,
-    };
+    let solver_info = registry::find(&ui_state.solver_name).map(|entry| PlannerInfoSnapshot {
+        label: entry.info.label,
+        summary: entry.info.summary,
+        reference: entry.info.reference,
+    });
 
     let output = BridgeOutput {
         version: crate::constants::VERSION,

@@ -8,7 +8,7 @@ use crate::experiment::export::MetricColumn;
 use crate::experiment::runner::{ExperimentProgress as RunnerProgress, MatrixResult, run_matrix};
 
 use crate::core::task::SCHEDULER_NAMES;
-use crate::planners::SOLVER_NAMES;
+use crate::planning::registry;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 mod compact;
@@ -87,10 +87,9 @@ pub enum SortColumn {
 impl Default for ExperimentGuiState {
     fn default() -> Self {
         Self {
-            solvers: SOLVER_NAMES
+            solvers: registry::entries()
                 .iter()
-                .enumerate()
-                .map(|(i, &(id, _))| (id.to_string(), i == 0))
+                .map(|entry| (entry.info.id.to_string(), entry.info.id == crate::planners::DEFAULT))
                 .collect(),
             topologies: Vec::new(), // populated from TopologyRegistry at runtime
             schedulers: SCHEDULER_NAMES
@@ -152,7 +151,7 @@ impl ExperimentGuiState {
             agent_counts,
             seeds,
             tick_count: self.tick_count,
-            rhcr_overrides: vec![None],
+            planner_params: vec![Default::default()],
         })
     }
 

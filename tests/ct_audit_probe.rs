@@ -27,7 +27,7 @@ fn ct_probe_pibt_warehouse_medium_burst20_random_10a_seed456() {
         seed: 456,
         tick_count: 500,
         custom_map: None,
-        rhcr_override: None,
+        planner_params: Default::default(),
     };
     let r = run_single_experiment(&config);
     let b = &r.baseline_metrics;

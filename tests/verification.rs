@@ -39,7 +39,7 @@ fn run(
         seed,
         tick_count: TICK_COUNT,
         custom_map: None,
-        rhcr_override: None,
+        planner_params: Default::default(),
     };
     run_single_experiment(&config)
 }
@@ -387,11 +387,10 @@ fn all_solvers_no_collisions_500_ticks() {
     for solver_name in &solvers {
         let topo = ActiveTopology::from_name("warehouse_single_dock");
         let output = topo.topology().generate(42);
-        let grid_area = (output.grid.width * output.grid.height) as usize;
         let mut rng = SeededRng::new(42);
         let agents = place_agents(40, &output.grid, &output.zones, &mut rng);
 
-        let solver = mafis::planners::lifelong_solver_from_name(solver_name, grid_area, 40)
+        let solver = mafis::planning::registry::build(solver_name, &Default::default(), 40)
             .expect("solver creation failed");
         let scheduler = ActiveScheduler::from_name("random");
         let queue_policy = ActiveQueuePolicy::from_name("closest");
@@ -455,11 +454,10 @@ fn all_solvers_no_collisions_500_ticks() {
 fn token_passing_no_edge_swaps() {
     let topo = ActiveTopology::from_name("compact_grid");
     let output = topo.topology().generate(42);
-    let grid_area = (output.grid.width * output.grid.height) as usize;
     let mut rng = SeededRng::new(42);
     let agents = place_agents(30, &output.grid, &output.zones, &mut rng);
 
-    let solver = mafis::planners::lifelong_solver_from_name("token_passing", grid_area, 30)
+    let solver = mafis::planning::registry::build("token_passing", &Default::default(), 30)
         .expect("solver creation failed");
     let scheduler = ActiveScheduler::from_name("random");
     let queue_policy = ActiveQueuePolicy::from_name("closest");
@@ -524,11 +522,10 @@ fn token_passing_no_edge_swaps() {
 fn rhcr_fallback_collision_free() {
     let topo = ActiveTopology::from_name("warehouse_single_dock");
     let output = topo.topology().generate(42);
-    let grid_area = (output.grid.width * output.grid.height) as usize;
     let mut rng = SeededRng::new(42);
     let agents = place_agents(40, &output.grid, &output.zones, &mut rng);
 
-    let solver = mafis::planners::lifelong_solver_from_name("rhcr_pbs", grid_area, 40)
+    let solver = mafis::planning::registry::build("rhcr_pbs", &Default::default(), 40)
         .expect("solver creation failed");
     let scheduler = ActiveScheduler::from_name("random");
     let queue_policy = ActiveQueuePolicy::from_name("closest");
@@ -626,7 +623,6 @@ fn determinism_all_solvers_all_schedulers() {
 fn baseline_faulted_parity_before_burst() {
     let topo = ActiveTopology::from_name("warehouse_single_dock");
     let output = topo.topology().generate(42);
-    let grid_area = (output.grid.width * output.grid.height) as usize;
     let mut rng = SeededRng::new(42);
     let agents = place_agents(20, &output.grid, &output.zones, &mut rng);
     let rng_after = rng.clone();
@@ -635,7 +631,7 @@ fn baseline_faulted_parity_before_burst() {
     let queue_policy = ActiveQueuePolicy::from_name("closest");
 
     // Baseline runner (no faults)
-    let solver_bl = mafis::planners::lifelong_solver_from_name("pibt", grid_area, 20).unwrap();
+    let solver_bl = mafis::planning::registry::build("pibt", &Default::default(), 20).unwrap();
     let mut runner_bl = SimulationRunner::new(
         output.grid.clone(),
         output.zones.clone(),
@@ -654,7 +650,7 @@ fn baseline_faulted_parity_before_burst() {
         burst_at_tick: 100,
         ..Default::default()
     };
-    let solver_f = mafis::planners::lifelong_solver_from_name("pibt", grid_area, 20).unwrap();
+    let solver_f = mafis::planning::registry::build("pibt", &Default::default(), 20).unwrap();
     let fc = scenario.to_fault_config();
     let fs = scenario.generate_schedule(200, 20);
     let mut runner_f =
@@ -682,7 +678,6 @@ fn baseline_faulted_parity_before_burst() {
 fn baseline_faulted_parity_before_wear() {
     let topo = ActiveTopology::from_name("warehouse_single_dock");
     let output = topo.topology().generate(42);
-    let grid_area = (output.grid.width * output.grid.height) as usize;
     let mut rng = SeededRng::new(42);
     let agents = place_agents(15, &output.grid, &output.zones, &mut rng);
     let rng_after = rng.clone();
@@ -691,7 +686,7 @@ fn baseline_faulted_parity_before_wear() {
     let queue_policy = ActiveQueuePolicy::from_name("closest");
 
     // Baseline runner (no faults)
-    let solver_bl = mafis::planners::lifelong_solver_from_name("pibt", grid_area, 15).unwrap();
+    let solver_bl = mafis::planning::registry::build("pibt", &Default::default(), 15).unwrap();
     let mut runner_bl = SimulationRunner::new(
         output.grid.clone(),
         output.zones.clone(),
@@ -709,7 +704,7 @@ fn baseline_faulted_parity_before_wear() {
         wear_heat_rate: WearHeatRate::High,
         ..Default::default()
     };
-    let solver_f = mafis::planners::lifelong_solver_from_name("pibt", grid_area, 15).unwrap();
+    let solver_f = mafis::planning::registry::build("pibt", &Default::default(), 15).unwrap();
     let fc = scenario.to_fault_config();
     let fs = scenario.generate_schedule(200, 15);
     let mut runner_f =
@@ -760,7 +755,6 @@ fn baseline_faulted_parity_before_wear() {
 fn baseline_faulted_parity_before_intermittent() {
     let topo = ActiveTopology::from_name("warehouse_single_dock");
     let output = topo.topology().generate(42);
-    let grid_area = (output.grid.width * output.grid.height) as usize;
     let mut rng = SeededRng::new(42);
     let agents = place_agents(15, &output.grid, &output.zones, &mut rng);
     let rng_after = rng.clone();
@@ -769,7 +763,7 @@ fn baseline_faulted_parity_before_intermittent() {
     let queue_policy = ActiveQueuePolicy::from_name("closest");
 
     // Baseline runner (no faults)
-    let solver_bl = mafis::planners::lifelong_solver_from_name("pibt", grid_area, 15).unwrap();
+    let solver_bl = mafis::planning::registry::build("pibt", &Default::default(), 15).unwrap();
     let mut runner_bl = SimulationRunner::new(
         output.grid.clone(),
         output.zones.clone(),
@@ -788,7 +782,7 @@ fn baseline_faulted_parity_before_intermittent() {
         intermittent_recovery_ticks: 10,
         ..Default::default()
     };
-    let solver_f = mafis::planners::lifelong_solver_from_name("pibt", grid_area, 15).unwrap();
+    let solver_f = mafis::planning::registry::build("pibt", &Default::default(), 15).unwrap();
     let fc = scenario.to_fault_config();
     let fs = scenario.generate_schedule(200, 15);
     let mut runner_f =
@@ -839,7 +833,7 @@ fn all_schedulers_nonzero_throughput() {
             seed: 42,
             tick_count: 500,
             custom_map: None,
-            rhcr_override: None,
+            planner_params: Default::default(),
         };
         let r = run_single_experiment(&config);
         assert!(r.baseline_metrics.total_tasks > 0, "{sched}: zero tasks in 500 ticks");
@@ -947,7 +941,7 @@ fn wear_rate_ordering_invariant() {
             seed: 42,
             tick_count: 500,
             custom_map: None,
-            rhcr_override: None,
+            planner_params: Default::default(),
         };
         let r = run_single_experiment(&config);
         survivals.push(r.faulted_metrics.survival_rate);
@@ -1012,7 +1006,6 @@ fn delete_fault_determinism() {
     let output = topo.topology().generate(seed);
     let grid = output.grid;
     let zones = output.zones;
-    let grid_area = (grid.width * grid.height) as usize;
 
     let scheduler = ActiveScheduler::from_name("random");
     let queue_policy = ActiveQueuePolicy::from_name("closest");
@@ -1025,7 +1018,7 @@ fn delete_fault_determinism() {
     let baseline_throughput_series: Vec<f64>;
     {
         let solver =
-            mafis::planners::lifelong_solver_from_name(solver_name, grid_area, num_agents).unwrap();
+            mafis::planning::registry::build(solver_name, &Default::default(), num_agents).unwrap();
         let fault_config = FaultConfig { enabled: false, ..Default::default() };
         let mut runner = SimulationRunner::new(
             grid.clone(),
@@ -1068,7 +1061,7 @@ fn delete_fault_determinism() {
         let fault_config = FaultConfig { enabled: true, ..Default::default() };
 
         let solver =
-            mafis::planners::lifelong_solver_from_name(solver_name, grid_area, num_agents).unwrap();
+            mafis::planning::registry::build(solver_name, &Default::default(), num_agents).unwrap();
         let mut runner = SimulationRunner::new(
             grid.clone(),
             zones.clone(),
@@ -1103,7 +1096,7 @@ fn delete_fault_determinism() {
     let baseline_tasks_at_snap: u64;
     {
         let solver =
-            mafis::planners::lifelong_solver_from_name(solver_name, grid_area, num_agents).unwrap();
+            mafis::planning::registry::build(solver_name, &Default::default(), num_agents).unwrap();
         let fault_config = FaultConfig { enabled: false, ..Default::default() };
         let mut runner = SimulationRunner::new(
             grid.clone(),
@@ -1141,7 +1134,7 @@ fn delete_fault_determinism() {
     let resumed_tasks;
     {
         let solver =
-            mafis::planners::lifelong_solver_from_name(solver_name, grid_area, num_agents).unwrap();
+            mafis::planning::registry::build(solver_name, &Default::default(), num_agents).unwrap();
         let fault_config = FaultConfig { enabled: false, ..Default::default() };
         let mut runner = SimulationRunner::new(
             grid.clone(),
@@ -1188,7 +1181,7 @@ fn delete_fault_determinism() {
     let mut resumed_series: Vec<f64>;
     {
         let solver =
-            mafis::planners::lifelong_solver_from_name(solver_name, grid_area, num_agents).unwrap();
+            mafis::planning::registry::build(solver_name, &Default::default(), num_agents).unwrap();
         let fault_config = FaultConfig { enabled: false, ..Default::default() };
         let mut runner = SimulationRunner::new(
             grid.clone(),
@@ -1237,7 +1230,6 @@ fn delete_fault_double_restore_determinism() {
     let output = topo.topology().generate(seed);
     let grid = output.grid;
     let zones = output.zones;
-    let grid_area = (grid.width * grid.height) as usize;
 
     let scheduler = ActiveScheduler::from_name("random");
     let queue_policy = ActiveQueuePolicy::from_name("closest");
@@ -1249,7 +1241,7 @@ fn delete_fault_double_restore_determinism() {
     let baseline_tasks;
     {
         let solver =
-            mafis::planners::lifelong_solver_from_name(solver_name, grid_area, num_agents).unwrap();
+            mafis::planning::registry::build(solver_name, &Default::default(), num_agents).unwrap();
         let fc = FaultConfig { enabled: false, ..Default::default() };
         let mut r = SimulationRunner::new(
             grid.clone(),
@@ -1289,7 +1281,7 @@ fn delete_fault_double_restore_determinism() {
         });
         let fc = FaultConfig { enabled: true, ..Default::default() };
         let solver =
-            mafis::planners::lifelong_solver_from_name(solver_name, grid_area, num_agents).unwrap();
+            mafis::planning::registry::build(solver_name, &Default::default(), num_agents).unwrap();
         let mut r = SimulationRunner::new(
             grid.clone(),
             zones.clone(),
@@ -1326,7 +1318,7 @@ fn delete_fault_double_restore_determinism() {
     {
         // --- Restore 1 (DELETE handler creates runner, restores state) ---
         let solver =
-            mafis::planners::lifelong_solver_from_name(solver_name, grid_area, num_agents).unwrap();
+            mafis::planning::registry::build(solver_name, &Default::default(), num_agents).unwrap();
         let fc = FaultConfig { enabled: false, ..Default::default() };
         let mut r = SimulationRunner::new(
             grid.clone(),
@@ -1398,7 +1390,6 @@ fn delete_fault_inplace_restore_determinism() {
     let output = topo.topology().generate(seed);
     let grid = output.grid;
     let zones = output.zones;
-    let grid_area = (grid.width * grid.height) as usize;
 
     let scheduler = ActiveScheduler::from_name("random");
     let queue_policy = ActiveQueuePolicy::from_name("closest");
@@ -1411,7 +1402,7 @@ fn delete_fault_inplace_restore_determinism() {
     let baseline_per_tick: Vec<u64>;
     {
         let solver =
-            mafis::planners::lifelong_solver_from_name(solver_name, grid_area, num_agents).unwrap();
+            mafis::planning::registry::build(solver_name, &Default::default(), num_agents).unwrap();
         let fc = FaultConfig { enabled: false, ..Default::default() };
         let mut r = SimulationRunner::new(
             grid.clone(),
@@ -1446,7 +1437,7 @@ fn delete_fault_inplace_restore_determinism() {
         });
         let fc = FaultConfig { enabled: true, ..Default::default() };
         let solver =
-            mafis::planners::lifelong_solver_from_name(solver_name, grid_area, num_agents).unwrap();
+            mafis::planning::registry::build(solver_name, &Default::default(), num_agents).unwrap();
         let mut runner = SimulationRunner::new(
             grid.clone(),
             zones.clone(),
@@ -1722,7 +1713,7 @@ fn solver_throughput_ordering_sanity() {
             seed: 42,
             tick_count,
             custom_map: None,
-            rhcr_override: None,
+            planner_params: Default::default(),
         };
         let r = run_single_experiment(&config);
         let tp = r.baseline_metrics.avg_throughput;
@@ -1784,7 +1775,6 @@ fn rewind_determinism_reset_matches_fresh() {
 
     let topo = ActiveTopology::from_name("warehouse_single_dock");
     let output = topo.topology().generate(42);
-    let grid_area = (output.grid.width * output.grid.height) as usize;
 
     let scheduler = ActiveScheduler::from_name("random");
     let queue_policy = ActiveQueuePolicy::from_name("closest");
@@ -1795,7 +1785,7 @@ fn rewind_determinism_reset_matches_fresh() {
         let agents_fresh = place_agents(15, &output.grid, &output.zones, &mut rng_fresh);
         let rng_after_fresh = rng_fresh.clone();
         let solver_fresh =
-            mafis::planners::lifelong_solver_from_name(solver_name, grid_area, 15).unwrap();
+            mafis::planning::registry::build(solver_name, &Default::default(), 15).unwrap();
         let mut runner_fresh = SimulationRunner::new(
             output.grid.clone(),
             output.zones.clone(),
@@ -1816,7 +1806,7 @@ fn rewind_determinism_reset_matches_fresh() {
         let agents_rewind = place_agents(15, &output.grid, &output.zones, &mut rng_rewind);
         let rng_after_rewind = rng_rewind.clone();
         let solver_rewind =
-            mafis::planners::lifelong_solver_from_name(solver_name, grid_area, 15).unwrap();
+            mafis::planning::registry::build(solver_name, &Default::default(), 15).unwrap();
         let mut runner_rewind = SimulationRunner::new(
             output.grid.clone(),
             output.zones.clone(),
@@ -1897,7 +1887,6 @@ fn intermittent_respects_start_tick() {
 
     let topo = ActiveTopology::from_name("warehouse_single_dock");
     let output = topo.topology().generate(42);
-    let grid_area = (output.grid.width * output.grid.height) as usize;
     let mut rng = SeededRng::new(42);
     let agents = place_agents(20, &output.grid, &output.zones, &mut rng);
 
@@ -1912,7 +1901,7 @@ fn intermittent_respects_start_tick() {
         intermittent_start_tick: start_tick,
         ..Default::default()
     };
-    let solver = mafis::planners::lifelong_solver_from_name("pibt", grid_area, 20).unwrap();
+    let solver = mafis::planning::registry::build("pibt", &Default::default(), 20).unwrap();
     let mut runner = SimulationRunner::new(
         output.grid.clone(),
         output.zones.clone(),
@@ -1962,7 +1951,6 @@ fn intermittent_first_fire_median() {
 
     let topo = ActiveTopology::from_name("warehouse_single_dock");
     let output = topo.topology().generate(7);
-    let grid_area = (output.grid.width * output.grid.height) as usize;
 
     let scheduler = ActiveScheduler::from_name("random");
     let queue_policy = ActiveQueuePolicy::from_name("closest");
@@ -1981,7 +1969,7 @@ fn intermittent_first_fire_median() {
             intermittent_start_tick: 0,
             ..Default::default()
         };
-        let solver = mafis::planners::lifelong_solver_from_name("pibt", grid_area, 1).unwrap();
+        let solver = mafis::planning::registry::build("pibt", &Default::default(), 1).unwrap();
         let mut runner = SimulationRunner::new(
             output.grid.clone(),
             output.zones.clone(),
@@ -2058,7 +2046,6 @@ fn no_stuck_loading_on_delivery_corridor() {
 
     let topo = ActiveTopology::from_name("warehouse_single_dock");
     let output = topo.topology().generate(42);
-    let grid_area = (output.grid.width * output.grid.height) as usize;
 
     let scheduler = ActiveScheduler::from_name("closest");
     let queue_policy = ActiveQueuePolicy::from_name("closest");
@@ -2074,7 +2061,7 @@ fn no_stuck_loading_on_delivery_corridor() {
     let agents = place_agents(agent_count, &output.grid, &output.zones, &mut rng_seed);
     let rng_after_placement = rng_seed.clone();
 
-    let solver = mafis::planners::lifelong_solver_from_name("pibt", grid_area, agent_count)
+    let solver = mafis::planning::registry::build("pibt", &Default::default(), agent_count)
         .expect("pibt solver creation");
     let mut runner = SimulationRunner::new(
         output.grid,
@@ -2130,7 +2117,6 @@ fn diagnose_stuck_tp_sd_w2() {
 
     let topo = ActiveTopology::from_name("warehouse_single_dock_w2");
     let output = topo.topology().generate(42);
-    let grid_area = (output.grid.width * output.grid.height) as usize;
     let scheduler = ActiveScheduler::from_name("closest");
     let queue_policy = ActiveQueuePolicy::from_name("closest");
     let agent_count: usize = 72;
@@ -2138,7 +2124,7 @@ fn diagnose_stuck_tp_sd_w2() {
     let agents = place_agents(agent_count, &output.grid, &output.zones, &mut rng_seed);
     let rng_after = rng_seed.clone();
     let solver =
-        mafis::planners::lifelong_solver_from_name("token_passing", grid_area, agent_count)
+        mafis::planning::registry::build("token_passing", &Default::default(), agent_count)
             .expect("tp");
     let mut runner = SimulationRunner::new(
         output.grid.clone(),
@@ -2221,13 +2207,12 @@ fn diagnose_stuck_tp_sd_w2() {
     eprintln!("\n=== SD-w2 / TP / n=85 / 800 ticks — FREEZE diagnostic ===");
     let topo2 = ActiveTopology::from_name("warehouse_single_dock_w2");
     let output2 = topo2.topology().generate(42);
-    let grid_area2 = (output2.grid.width * output2.grid.height) as usize;
     let n2: usize = 85;
     let mut rng_seed2 = SeededRng::new(42);
     let agents2 = place_agents(n2, &output2.grid, &output2.zones, &mut rng_seed2);
     let rng_after2 = rng_seed2.clone();
     let solver2 =
-        mafis::planners::lifelong_solver_from_name("token_passing", grid_area2, n2).expect("tp");
+        mafis::planning::registry::build("token_passing", &Default::default(), n2).expect("tp");
     let mut runner2 = SimulationRunner::new(
         output2.grid.clone(),
         output2.zones.clone(),
@@ -2305,7 +2290,6 @@ fn intermittent_rewind_determinism() {
 
     let topo = ActiveTopology::from_name("warehouse_single_dock");
     let output = topo.topology().generate(99);
-    let grid_area = (output.grid.width * output.grid.height) as usize;
 
     let scheduler = ActiveScheduler::from_name("random");
     let queue_policy = ActiveQueuePolicy::from_name("closest");
@@ -2316,7 +2300,7 @@ fn intermittent_rewind_determinism() {
         let rng = SeededRng::new(99);
         // Consume the same RNG as place_agents did
         let solver =
-            mafis::planners::lifelong_solver_from_name("pibt", grid_area, agents.len()).unwrap();
+            mafis::planning::registry::build("pibt", &Default::default(), agents.len()).unwrap();
         let fc = FaultConfig {
             enabled: true,
             intermittent_enabled: true,

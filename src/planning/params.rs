@@ -26,7 +26,7 @@ pub struct ParamSpec {
     pub kind: ParamKind,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum ParamValue {
     Int(i64),
@@ -41,7 +41,7 @@ impl fmt::Display for ParamValue {
 }
 
 /// Parameter values as a user gave them, not yet checked against any planner.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct ParamValues(BTreeMap<String, ParamValue>);
 

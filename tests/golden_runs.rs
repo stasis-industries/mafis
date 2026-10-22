@@ -16,8 +16,8 @@ use mafis::core::task::ActiveScheduler;
 use mafis::core::topology::{ActiveTopology, TopologyRegistry};
 use mafis::fault::config::FaultConfig;
 use mafis::fault::scenario::{FaultScenario, FaultScenarioType, FaultSchedule};
+use mafis::planning::registry::{self, PlannerEntry};
 
-const PLANNERS: [&str; 3] = ["pibt", "rhcr_pbs", "token_passing"];
 const MAPS: [&str; 8] = [
     "warehouse_medium",
     "warehouse_single_dock",
@@ -101,14 +101,13 @@ impl Fnv {
 
 /// The golden line for one cell, or `None` when the planner's fleet limit excludes it.
 /// Built like the faulted run in `run_single_experiment`.
-fn golden_line(planner: &str, map: &str, n: usize, variant: Variant) -> Option<String> {
+fn golden_line(entry: &PlannerEntry, map: &str, n: usize, variant: Variant) -> Option<String> {
     let output = ActiveTopology::from_name(map).topology().generate(SEED);
-    let area = (output.grid.width * output.grid.height) as usize;
-    let solver = mafis::planners::lifelong_solver_from_name(planner, area, n)
-        .unwrap_or_else(|| panic!("unknown planner '{planner}'"));
-    if solver.max_agents(&output.zones).is_some_and(|cap| cap < n) {
+    if (entry.fleet_limit)(&output.zones).is_some_and(|cap| cap < n) {
         return None;
     }
+    let planner = entry.info.id;
+    let solver = registry::build(planner, &Default::default(), n).unwrap_or_else(|e| panic!("{e}"));
 
     let mut rng = SeededRng::new(SEED);
     let agents = place_agents(n, &output.grid, &output.zones, &mut rng);
@@ -176,9 +175,9 @@ fn golden_runs_match() {
         let map_fleet =
             registry.find(map).unwrap_or_else(|| panic!("unknown map '{map}'")).number_agents;
         for n in [SMALL_FLEET, LARGE_FLEET_CAP.min(map_fleet)] {
-            for planner in PLANNERS {
+            for entry in registry::entries() {
                 for variant in Variant::ALL {
-                    actual.extend(golden_line(planner, map, n, variant));
+                    actual.extend(golden_line(entry, map, n, variant));
                 }
             }
         }

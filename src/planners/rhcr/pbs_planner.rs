@@ -1199,46 +1199,6 @@ impl PbsPlanner {
         Self::with_eager(true)
     }
 
-    /// Construct an eager-priority PBS planner with **pre-sized scratch
-    /// buffers**. Eliminates the ~3.2 MB allocation spike that would otherwise
-    /// happen on the first `plan_window` call (which is the freeze the user
-    /// experiences immediately after "Start Simulation").
-    ///
-    /// `max_goals` should be `PBS_GOAL_SEQUENCE_MAX_LEN + 1` (primary +
-    /// peek-chain extensions) — see `windowed.rs::WindowAgent::goal_sequence`.
-    ///
-    /// The `*::reset` methods on the buffers are idempotent: when called with
-    /// matching dimensions on the first `plan_window`, they fast-path to a
-    /// `.fill()` zero pass instead of reallocating.
-    pub fn with_capacity(grid_w: usize, grid_h: usize, horizon: usize, max_goals: usize) -> Self {
-        let w = grid_w as i32;
-        let h = grid_h as i32;
-        let cells = grid_w * grid_h;
-        let max_time = horizon as u64;
-
-        let mut conflict_grid = ConflictGrid::new();
-        conflict_grid.ensure_size(cells);
-
-        let mut seq_stg = SeqGoalGrid::new();
-        seq_stg.reset(w, h, max_time, max_goals);
-
-        Self {
-            conflict_grid,
-            ci_buf: FlatConstraintIndex::new(w, h, max_time),
-            seq_stg,
-            cat: FlatCAT::new(w, h, max_time),
-            eager: true,
-            nogood: BTreeSet::new(),
-            cycle_stack: Vec::new(),
-            cycle_visited: Vec::new(),
-            pc_stack: Vec::new(),
-            pc_seen: Vec::new(),
-            scratch_new_conflicts: Vec::new(),
-            scratch_unique_goal_pairs: Vec::new(),
-            scratch_agent_starts: Vec::new(),
-        }
-    }
-
     /// Construct a lazy-priority PBS planner. Kept for regression benchmarking
     /// against the previous MAFIS implementation and for tests that want to
     /// observe the delta between eager and lazy mode.

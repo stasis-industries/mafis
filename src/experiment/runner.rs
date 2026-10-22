@@ -94,7 +94,6 @@ pub fn run_single_experiment(config: &ExperimentConfig) -> RunResult {
         (output.grid, output.zones)
     };
 
-    let grid_area = (grid.width * grid.height) as usize;
     let capacity = grid.walkable_count();
 
     // Clamp agent count to map capacity
@@ -122,13 +121,12 @@ pub fn run_single_experiment(config: &ExperimentConfig) -> RunResult {
     let baseline_record;
     let mut baseline_metrics;
     {
-        let solver = crate::planners::lifelong_solver_from_name_with_override(
+        let solver = crate::planning::registry::build(
             &config.solver_name,
-            grid_area,
+            &config.planner_params,
             actual_agents,
-            config.rhcr_override.as_ref(),
         )
-        .unwrap_or_else(|| panic!("unknown solver '{}'", config.solver_name));
+        .unwrap_or_else(|e| panic!("{e}"));
 
         let fault_config = FaultConfig { enabled: false, ..Default::default() };
 
@@ -178,13 +176,12 @@ pub fn run_single_experiment(config: &ExperimentConfig) -> RunResult {
     // ── Run faulted (same topology + agents, faults enabled) ────────
     let faulted_metrics;
     {
-        let solver = crate::planners::lifelong_solver_from_name_with_override(
+        let solver = crate::planning::registry::build(
             &config.solver_name,
-            grid_area,
+            &config.planner_params,
             actual_agents,
-            config.rhcr_override.as_ref(),
         )
-        .unwrap_or_else(|| panic!("unknown solver '{}'", config.solver_name));
+        .unwrap_or_else(|e| panic!("{e}"));
 
         let (fault_config, fault_schedule) = match &config.scenario {
             Some(scenario) => {
@@ -378,9 +375,9 @@ struct BaselineKey {
     scheduler_name: String,
     num_agents: usize,
     seed: u64,
-    /// RHCR ablation label (`"h5n3"`, `"default"`, etc.). Required so
-    /// overridden-horizon baselines don't collide with default-horizon ones.
-    rhcr_override_label: String,
+    /// Canonical planner parameters, so runs with different parameters never
+    /// share a twin.
+    planner_params: String,
     tick_count: u64,
     /// Fingerprint of an inline custom map (`None` = registry topology).
     custom_map: Option<u64>,
@@ -395,7 +392,7 @@ impl BaselineKey {
             scheduler_name: config.scheduler_name.clone(),
             num_agents: config.num_agents,
             seed: config.seed,
-            rhcr_override_label: config.rhcr_override_label(),
+            planner_params: config.planner_params_text(),
             tick_count: config.tick_count,
             custom_map: config.custom_map.as_ref().map(map_fingerprint),
         }
@@ -442,7 +439,6 @@ fn run_baseline_only(config: &ExperimentConfig) -> CachedBaseline {
         (output.grid, output.zones)
     };
 
-    let grid_area = (grid.width * grid.height) as usize;
     let actual_agents = config.num_agents.min(grid.walkable_count());
 
     let scheduler = ActiveScheduler::from_name(&config.scheduler_name);
@@ -452,13 +448,12 @@ fn run_baseline_only(config: &ExperimentConfig) -> CachedBaseline {
     let mut rng = SeededRng::new(config.seed);
     let agents = place_agents(actual_agents, &grid, &zones, &mut rng);
 
-    let solver = crate::planners::lifelong_solver_from_name_with_override(
+    let solver = crate::planning::registry::build(
         &config.solver_name,
-        grid_area,
+        &config.planner_params,
         actual_agents,
-        config.rhcr_override.as_ref(),
     )
-    .unwrap_or_else(|| panic!("unknown solver '{}'", config.solver_name));
+    .unwrap_or_else(|e| panic!("{e}"));
 
     let fault_config = FaultConfig { enabled: false, ..Default::default() };
     let mut runner = SimulationRunner::new(
@@ -508,7 +503,6 @@ fn run_faulted_only(config: &ExperimentConfig, cached: &CachedBaseline) -> RunRe
         (output.grid, output.zones)
     };
 
-    let grid_area = (grid.width * grid.height) as usize;
     let actual_agents = config.num_agents.min(grid.walkable_count());
 
     let scheduler = ActiveScheduler::from_name(&config.scheduler_name);
@@ -518,13 +512,12 @@ fn run_faulted_only(config: &ExperimentConfig, cached: &CachedBaseline) -> RunRe
     let mut rng = SeededRng::new(config.seed);
     let agents = place_agents(actual_agents, &grid, &zones, &mut rng);
 
-    let solver = crate::planners::lifelong_solver_from_name_with_override(
+    let solver = crate::planning::registry::build(
         &config.solver_name,
-        grid_area,
+        &config.planner_params,
         actual_agents,
-        config.rhcr_override.as_ref(),
     )
-    .unwrap_or_else(|| panic!("unknown solver '{}'", config.solver_name));
+    .unwrap_or_else(|e| panic!("{e}"));
 
     let (fault_config, fault_schedule) = match &config.scenario {
         Some(scenario) => {
@@ -893,7 +886,7 @@ pub fn wasm_experiment_finish() -> String {
                 agent_counts: vec![],
                 seeds: vec![],
                 tick_count: 0,
-                rhcr_overrides: vec![None],
+                planner_params: vec![Default::default()],
             },
             runs: runs.clone(),
             summaries,
@@ -992,7 +985,7 @@ fn parse_config_json(json: &str) -> Option<ExperimentConfig> {
         seed,
         tick_count,
         custom_map,
-        rhcr_override: None,
+        planner_params: Default::default(),
     })
 }
 
@@ -1030,7 +1023,7 @@ mod tests {
             seed: 1,
             tick_count: 100,
             custom_map: None,
-            rhcr_override: None,
+            planner_params: Default::default(),
         };
         let key = BaselineKey::from_config;
         let longer = ExperimentConfig { tick_count: 200, ..base.clone() };
@@ -1058,7 +1051,7 @@ mod tests {
             seed: 42,
             tick_count: 100,
             custom_map: None,
-            rhcr_override: None,
+            planner_params: Default::default(),
         };
         let result = run_single_experiment(&config);
         assert!(result.baseline_metrics.total_tasks > 0);
@@ -1078,7 +1071,7 @@ mod tests {
             seed: 123,
             tick_count: 100,
             custom_map: None,
-            rhcr_override: None,
+            planner_params: Default::default(),
         };
         let r1 = run_single_experiment(&config);
         let r2 = run_single_experiment(&config);
@@ -1103,7 +1096,7 @@ mod tests {
             seed: 42,
             tick_count: 100,
             custom_map: None,
-            rhcr_override: None,
+            planner_params: Default::default(),
         };
         let result = run_single_experiment(&config);
         // Survival rate should be < 1.0 (some agents killed)
@@ -1138,7 +1131,7 @@ mod tests {
             seed: 42,
             tick_count: 100,
             custom_map: None,
-            rhcr_override: None,
+            planner_params: Default::default(),
         };
         let result = run_single_experiment(&config);
         let m = &result.faulted_metrics;
@@ -1165,7 +1158,7 @@ mod tests {
             seed: 42,
             tick_count: 100,
             custom_map: None,
-            rhcr_override: None,
+            planner_params: Default::default(),
         };
         let result = run_single_experiment(&config);
         assert_eq!(result.faulted_metrics.attack_rate, 0.0);
@@ -1194,7 +1187,7 @@ mod tests {
             seed: 42,
             tick_count: 100,
             custom_map: None,
-            rhcr_override: None,
+            planner_params: Default::default(),
         };
         let result = run_single_experiment(&config);
         let ft = result.faulted_metrics.fault_tolerance;
@@ -1232,7 +1225,7 @@ mod tests {
             seed,
             tick_count,
             custom_map: None,
-            rhcr_override: None,
+            planner_params: Default::default(),
         };
         let experiment_result = run_single_experiment(&config);
 
@@ -1240,7 +1233,6 @@ mod tests {
         let topo = crate::core::topology::ActiveTopology::from_name(topology_name);
         let output = topo.topology().generate(seed);
         let (grid, zones) = (output.grid, output.zones);
-        let grid_area = (grid.width * grid.height) as usize;
 
         let scheduler = ActiveScheduler::from_name(scheduler_name);
         let queue_policy = ActiveQueuePolicy::from_name("closest");
@@ -1249,7 +1241,7 @@ mod tests {
         let agents = place_agents(num_agents, &grid, &zones, &mut rng);
 
         let solver =
-            crate::planners::lifelong_solver_from_name(solver_name, grid_area, num_agents).unwrap();
+            crate::planning::registry::build(solver_name, &Default::default(), num_agents).unwrap();
 
         let mut runner = SimulationRunner::new(
             grid,
@@ -1297,7 +1289,7 @@ mod tests {
             seed,
             tick_count,
             custom_map: None,
-            rhcr_override: None,
+            planner_params: Default::default(),
         };
         let experiment_result = run_single_experiment(&config);
 
@@ -1306,6 +1298,7 @@ mod tests {
             topology_name: topology_name.into(),
             num_agents,
             solver_name: solver_name.into(),
+            planner_params: Default::default(),
             scheduler_name: scheduler_name.into(),
             seed,
             tick_count,
@@ -1353,7 +1346,7 @@ mod tests {
             seed,
             tick_count,
             custom_map: None,
-            rhcr_override: None,
+            planner_params: Default::default(),
         };
         let experiment_result = run_single_experiment(&config);
 
@@ -1362,6 +1355,7 @@ mod tests {
             topology_name: topology_name.into(),
             num_agents,
             solver_name: solver_name.into(),
+            planner_params: Default::default(),
             scheduler_name: scheduler_name.into(),
             seed,
             tick_count,
@@ -1412,7 +1406,7 @@ mod tests {
             seed,
             tick_count,
             custom_map: None,
-            rhcr_override: None,
+            planner_params: Default::default(),
         };
         let experiment_result = run_single_experiment(&config);
 
@@ -1420,7 +1414,6 @@ mod tests {
         let topo = crate::core::topology::ActiveTopology::from_name(topology_name);
         let output = topo.topology().generate(seed);
         let (grid, zones) = (output.grid, output.zones);
-        let grid_area = (grid.width * grid.height) as usize;
         let actual_agents = num_agents.min(grid.walkable_count());
 
         let scheduler = ActiveScheduler::from_name(scheduler_name);
@@ -1430,7 +1423,7 @@ mod tests {
         let agents = place_agents(actual_agents, &grid, &zones, &mut rng);
 
         let solver =
-            crate::planners::lifelong_solver_from_name(solver_name, grid_area, actual_agents)
+            crate::planning::registry::build(solver_name, &Default::default(), actual_agents)
                 .unwrap();
 
         let fault_config = scenario.to_fault_config();
@@ -1460,7 +1453,7 @@ mod tests {
             agent_counts: vec![5],
             seeds: vec![1, 2],
             tick_count: 30,
-            rhcr_overrides: vec![None],
+            planner_params: vec![Default::default()],
         };
         let result = run_matrix(&matrix, None);
         assert_eq!(result.runs.len(), 2);
@@ -1495,7 +1488,7 @@ mod tests {
             agent_counts: vec![10],
             seeds: vec![42],
             tick_count: 100,
-            rhcr_overrides: vec![None],
+            planner_params: vec![Default::default()],
         };
         let cached_result = run_matrix(&matrix, None);
         assert_eq!(cached_result.runs.len(), 2);
@@ -1510,7 +1503,7 @@ mod tests {
             seed: 42,
             tick_count: 100,
             custom_map: None,
-            rhcr_override: None,
+            planner_params: Default::default(),
         };
         let config_burst = ExperimentConfig { scenario: Some(burst), ..config_none.clone() };
 
@@ -1562,7 +1555,7 @@ mod tests {
             seed: 42,
             tick_count: 100,
             custom_map: None,
-            rhcr_override: None,
+            planner_params: Default::default(),
         };
 
         let result = run_single_experiment(&config);

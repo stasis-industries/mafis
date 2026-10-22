@@ -3,69 +3,30 @@ use bevy::prelude::*;
 use super::super::theme;
 use crate::constants;
 use crate::core::state::SimState;
-use crate::planners::SOLVER_NAMES;
+use crate::planning::params::ParamValues;
+use crate::planning::registry;
 use crate::ui::controls::UiState;
-
-struct SolverInfo {
-    optimality: &'static str,
-    scalability: &'static str,
-    description: &'static str,
-    source: &'static str,
-    warning: Option<&'static str>,
-}
-
-fn solver_info(id: &str) -> SolverInfo {
-    match id {
-        "pibt" => SolverInfo {
-            optimality: "Suboptimal",
-            scalability: "Excellent",
-            description: "Reactive one-step priority inheritance. Replans every tick — fast, handles high density.",
-            source: "Okumura et al., AIJ 2022",
-            warning: None,
-        },
-        "rhcr_pbs" => SolverInfo {
-            optimality: "Bounded",
-            scalability: "Good",
-            description: "Rolling-horizon with PBS windowed planner. Better path quality, higher compute cost.",
-            source: "Li et al., AAAI 2021",
-            warning: None,
-        },
-        "token_passing" => SolverInfo {
-            optimality: "Optimal (per agent)",
-            scalability: "Limited",
-            description: "Decentralized sequential planning via shared TOKEN. Each agent plans against all others.",
-            source: "Ma et al., AAMAS 2017",
-            warning: Some("Recommended ≤100 agents"),
-        },
-        _ => SolverInfo {
-            optimality: "?",
-            scalability: "?",
-            description: "Unknown solver.",
-            source: "",
-            warning: None,
-        },
-    }
-}
 
 pub fn solver_panel(ui: &mut egui::Ui, ui_state: &mut UiState, sim_state: SimState) {
     let idle = sim_state == SimState::Idle;
+    let selected = registry::find(&ui_state.solver_name);
 
-    // ── Solver dropdown ────────────────────────────────────────────
+    // ── Planner dropdown ───────────────────────────────────────────
     ui.horizontal(|ui| {
         ui.label("Algorithm");
-        let current_label = SOLVER_NAMES
-            .iter()
-            .find(|(id, _)| *id == ui_state.solver_name)
-            .map(|(_, label)| *label)
-            .unwrap_or("Unknown");
+        let current_label = selected.map_or("Unknown", |entry| entry.info.label);
 
         egui::ComboBox::from_id_salt("solver_combo").selected_text(current_label).show_ui(
             ui,
             |ui| {
-                for &(id, label) in SOLVER_NAMES {
-                    let selected = ui_state.solver_name == id;
-                    if ui.selectable_label(selected, label).clicked() && !selected && idle {
-                        ui_state.solver_name = id.to_string();
+                for entry in registry::entries() {
+                    let is_selected = ui_state.solver_name == entry.info.id;
+                    if ui.selectable_label(is_selected, entry.info.label).clicked()
+                        && !is_selected
+                        && idle
+                    {
+                        ui_state.solver_name = entry.info.id.to_string();
+                        ui_state.planner_params = ParamValues::default();
                         // Clear RHCR overrides when switching solver
                         ui_state.rhcr_horizon = None;
                         ui_state.rhcr_replan_interval = None;
@@ -75,28 +36,20 @@ pub fn solver_panel(ui: &mut egui::Ui, ui_state: &mut UiState, sim_state: SimSta
         );
     });
 
-    // ── Solver info card ───────────────────────────────────────────
-    let info = solver_info(&ui_state.solver_name);
+    // ── Planner info card ──────────────────────────────────────────
     ui.add_space(4.0);
     egui::Frame::new()
         .fill(theme::BG_CARD)
         .stroke(egui::Stroke::new(1.0f32, theme::BORDER))
         .inner_margin(egui::Margin::same(6))
-        .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.strong("Opt:");
-                ui.label(info.optimality);
-                ui.separator();
-                ui.strong("Scale:");
-                ui.label(info.scalability);
-            });
-            ui.weak(info.description);
-            if !info.source.is_empty() {
+        .show(ui, |ui| match selected {
+            Some(entry) => {
+                ui.weak(entry.info.summary);
                 ui.add_space(2.0);
-                ui.weak(info.source);
+                ui.weak(entry.info.reference);
             }
-            if let Some(warn) = info.warning {
-                ui.colored_label(theme::STATE_PAUSED, warn);
+            None => {
+                ui.weak("Unknown planner.");
             }
         });
 

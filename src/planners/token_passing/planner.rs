@@ -75,7 +75,6 @@ use super::common::{MasterConstraintIndex, Token};
 use crate::planners::toolkit::astar::{ConstraintChecker, SpacetimeGrid, spacetime_astar_fast};
 use crate::planning::heuristics::{DistanceMap, DistanceMapCache};
 use crate::planning::planner::{AgentPlan, AgentView, Decision, Observation, Planner};
-use crate::planning::traits::{Optimality, Scalability, SolverInfo};
 
 use crate::constants::{ASTAR_MAX_EXPANSIONS, TOKEN_ASTAR_MAX_TIME, TOKEN_PATH_MAX_TIME};
 
@@ -250,26 +249,6 @@ impl TokenPassingPlanner {
 }
 
 impl Planner for TokenPassingPlanner {
-    fn name(&self) -> &'static str {
-        "token_passing"
-    }
-
-    fn info(&self) -> SolverInfo {
-        SolverInfo {
-            optimality: Optimality::Suboptimal,
-            complexity: "O(n × A* per idle agent)",
-            scalability: Scalability::Medium,
-            description: "Token Passing — decentralized sequential planning. Each idle agent plans a collision-free path against all others' TOKEN paths.",
-            source: "Ma et al., AAMAS 2017",
-            // Instance-dependent: see `max_agents`.
-            recommended_max_agents: None,
-        }
-    }
-
-    fn max_agents(&self, zones: &crate::core::topology::ZoneMap) -> Option<usize> {
-        Some(zones.parking_cells().len())
-    }
-
     fn task_scheduler(&self) -> Option<&dyn crate::core::task::TaskScheduler> {
         Some(&crate::planners::token_passing::TokenPassingTaskSelection)
     }
@@ -886,16 +865,16 @@ mod tests {
     /// TP's fleet cap comes from the instance: Ma et al. well-formedness
     /// condition 2 needs at least one non-task endpoint (parking) per agent.
     #[test]
-    fn tp_max_agents_is_parking_count() {
+    fn fleet_limit_is_parking_count() {
         use crate::core::topology::TopologyRegistry;
         let registry = TopologyRegistry::load_from_dir(std::path::Path::new("topologies"));
         let zones_of =
             |id: &str| TopologyRegistry::parse_entry(registry.find(id).unwrap()).unwrap().1;
-        let tp = TokenPassingPlanner::new();
-        assert_eq!(tp.max_agents(&zones_of("warehouse_single_dock")), Some(60));
-        assert_eq!(tp.max_agents(&zones_of("warehouse_dual_dock")), Some(120));
-        let pibt = crate::planners::pibt::PibtPlanner::new();
-        assert_eq!(pibt.max_agents(&zones_of("warehouse_single_dock")), None);
+        let tp = crate::planners::token_passing::ENTRY.fleet_limit;
+        assert_eq!(tp(&zones_of("warehouse_single_dock")), Some(60));
+        assert_eq!(tp(&zones_of("warehouse_dual_dock")), Some(120));
+        let pibt = crate::planners::pibt::ENTRY.fleet_limit;
+        assert_eq!(pibt(&zones_of("warehouse_single_dock")), None);
     }
 
     /// TP selects its own tasks (Ma et al. 2017 Alg. 1 lines 7-12) instead of
@@ -1034,7 +1013,7 @@ mod tests {
             seed: 42,
             tick_count: 200,
             custom_map: None,
-            rhcr_override: None,
+            planner_params: Default::default(),
         };
         let result = run_single_experiment(&config);
         let tp = result.baseline_metrics.avg_throughput;

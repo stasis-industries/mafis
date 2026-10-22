@@ -31,8 +31,9 @@ pub struct ExportSimConfig {
     pub tick_hz: f64,
     pub max_ticks: Option<u64>,
     pub solver_name: String,
-    pub solver_optimality: String,
-    pub solver_scalability: String,
+    pub solver_label: String,
+    /// Canonical planner parameters (`key=value` pairs joined by `,`).
+    pub planner_params: String,
     pub fault_enabled: bool,
     pub weibull_enabled: bool,
     pub weibull_beta: f32,

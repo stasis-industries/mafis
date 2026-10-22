@@ -7,6 +7,8 @@
 //! The headless loop replicates `tick_agents → recycle_goals → lifelong_replan`
 //! faithfully: same collision resolution, same task scheduling, same solver.
 
+use crate::planning::params::ParamValues;
+use crate::planning::registry;
 use bevy::prelude::*;
 use std::collections::{HashMap, HashSet};
 
@@ -28,6 +30,7 @@ pub struct BaselineConfig {
     pub topology_name: String,
     pub num_agents: usize,
     pub solver_name: String,
+    pub planner_params: ParamValues,
     pub scheduler_name: String,
     pub seed: u64,
     pub tick_count: u64,
@@ -51,6 +54,7 @@ impl BaselineConfig {
         self.topology_name.hash(&mut h);
         self.num_agents.hash(&mut h);
         self.solver_name.hash(&mut h);
+        self.planner_params.hash(&mut h);
         self.scheduler_name.hash(&mut h);
         self.seed.hash(&mut h);
         self.tick_count.hash(&mut h);
@@ -381,13 +385,9 @@ pub fn start_headless(config: &BaselineConfig) -> BaselineComputation {
     // 2. Clamp agent count to walkable capacity (matches experiment runner)
     let actual_agents = config.num_agents.min(grid.walkable_count());
 
-    // 3. Create solver + scheduler + rng
-    let solver = crate::planners::lifelong_solver_from_name(
-        &config.solver_name,
-        (grid.width * grid.height) as usize,
-        actual_agents,
-    )
-    .unwrap_or_else(|| Box::new(crate::planners::pibt::PibtPlanner::new()));
+    // 3. Create planner + scheduler + rng
+    let solver = registry::build(&config.solver_name, &config.planner_params, actual_agents)
+        .unwrap_or_else(|e| panic!("{e}"));
 
     let scheduler = ActiveScheduler::from_name(&config.scheduler_name);
     let queue_policy = ActiveQueuePolicy::from_name("closest");
@@ -493,6 +493,28 @@ pub fn place_agents(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::planning::params::{ParamValue, ParamValues};
+
+    #[test]
+    fn twin_hash_changes_with_params() {
+        let base = BaselineConfig {
+            topology_name: "warehouse_single_dock".into(),
+            num_agents: 10,
+            solver_name: crate::planners::DEFAULT.into(),
+            planner_params: ParamValues::default(),
+            scheduler_name: "random".into(),
+            seed: 1,
+            tick_count: 10,
+            grid_override: None,
+            fault_enabled: false,
+            agent_positions: None,
+        };
+        let changed = BaselineConfig {
+            planner_params: ParamValues::default().with("horizon", ParamValue::Int(7)),
+            ..base.clone()
+        };
+        assert_ne!(base.config_hash(), changed.config_hash());
+    }
 
     // ── BaselineDiff unit tests ────────────────────────────────────────────
 
@@ -582,6 +604,7 @@ mod tests {
             topology_name: "warehouse_single_dock".into(),
             num_agents: 8,
             solver_name: "pibt".into(),
+            planner_params: Default::default(),
             scheduler_name: "random".into(),
             seed: 42,
             tick_count: 100,
@@ -603,6 +626,7 @@ mod tests {
             topology_name: "warehouse_single_dock".into(),
             num_agents: 10,
             solver_name: "pibt".into(),
+            planner_params: Default::default(),
             scheduler_name: "random".into(),
             seed: 123,
             tick_count: 50,
@@ -623,6 +647,7 @@ mod tests {
             topology_name: "warehouse_single_dock".into(),
             num_agents: 0,
             solver_name: "pibt".into(),
+            planner_params: Default::default(),
             scheduler_name: "random".into(),
             seed: 42,
             tick_count: 10,
@@ -644,6 +669,7 @@ mod tests {
             topology_name: "warehouse_single_dock".into(),
             num_agents: 40,
             solver_name: "rhcr_pbs".into(),
+            planner_params: Default::default(),
             scheduler_name: "random".into(),
             seed: 42,
             tick_count: 300,
@@ -662,6 +688,7 @@ mod tests {
             topology_name: "warehouse_single_dock".into(),
             num_agents: 5,
             solver_name: "token_passing".into(),
+            planner_params: Default::default(),
             scheduler_name: "random".into(),
             seed: 42,
             tick_count: 60,
@@ -680,6 +707,7 @@ mod tests {
             topology_name: "warehouse_single_dock".into(),
             num_agents: 10,
             solver_name: "pibt".into(),
+            planner_params: Default::default(),
             scheduler_name: "random".into(),
             seed: 42,
             tick_count: 100,
@@ -697,6 +725,7 @@ mod tests {
             topology_name: "warehouse_single_dock".into(),
             num_agents: 10,
             solver_name: "pibt".into(),
+            planner_params: Default::default(),
             scheduler_name: "random".into(),
             seed: 42,
             tick_count: 100,
@@ -715,6 +744,7 @@ mod tests {
             topology_name: "warehouse_single_dock".into(),
             num_agents: 5,
             solver_name: "pibt".into(),
+            planner_params: Default::default(),
             scheduler_name: "random".into(),
             seed: 42,
             tick_count: 30,
@@ -739,6 +769,7 @@ mod tests {
             topology_name: "warehouse_single_dock".into(),
             num_agents: 8,
             solver_name: "pibt".into(),
+            planner_params: Default::default(),
             scheduler_name: "random".into(),
             seed: 42,
             tick_count: 50,
@@ -760,6 +791,7 @@ mod tests {
             topology_name: "warehouse_single_dock".into(),
             num_agents: 12,
             solver_name: "pibt".into(),
+            planner_params: Default::default(),
             scheduler_name: "random".into(),
             seed: 999,
             tick_count: 80,
@@ -774,12 +806,9 @@ mod tests {
             let grid = output.grid;
             let zones = output.zones;
 
-            let solver = crate::planners::lifelong_solver_from_name(
-                &config.solver_name,
-                (grid.width * grid.height) as usize,
-                config.num_agents,
-            )
-            .unwrap();
+            let solver =
+                registry::build(&config.solver_name, &config.planner_params, config.num_agents)
+                    .unwrap();
 
             let scheduler = ActiveScheduler::from_name(&config.scheduler_name);
             let mut rng = SeededRng::new(config.seed);
@@ -819,6 +848,7 @@ mod tests {
             topology_name: "warehouse_single_dock".into(),
             num_agents: 20,
             solver_name: "pibt".into(),
+            planner_params: Default::default(),
             scheduler_name: "closest".into(),
             seed: 7777,
             tick_count: 60,
@@ -841,6 +871,7 @@ mod tests {
             topology_name: "warehouse_single_dock".into(),
             num_agents: 15,
             solver_name: "pibt".into(),
+            planner_params: Default::default(),
             scheduler_name: "random".into(),
             seed: 42,
             tick_count: 100,
@@ -854,12 +885,9 @@ mod tests {
         let grid = output.grid;
         let zones = output.zones;
 
-        let solver = crate::planners::lifelong_solver_from_name(
-            &config.solver_name,
-            (grid.width * grid.height) as usize,
-            config.num_agents,
-        )
-        .unwrap();
+        let solver =
+            registry::build(&config.solver_name, &config.planner_params, config.num_agents)
+                .unwrap();
 
         let scheduler = ActiveScheduler::from_name(&config.scheduler_name);
         let mut rng = SeededRng::new(config.seed);
@@ -898,6 +926,7 @@ mod tests {
             topology_name: "warehouse_single_dock".into(),
             num_agents: 8,
             solver_name: "pibt".into(),
+            planner_params: Default::default(),
             scheduler_name: "random".into(),
             seed: 42,
             tick_count: 200,
@@ -921,6 +950,7 @@ mod tests {
             topology_name: "warehouse_single_dock".into(),
             num_agents: 15,
             solver_name: "pibt".into(),
+            planner_params: Default::default(),
             scheduler_name: "random".into(),
             seed: 42,
             tick_count: 200,
@@ -938,12 +968,9 @@ mod tests {
         let grid = output.grid;
         let zones = output.zones;
 
-        let solver = crate::planners::lifelong_solver_from_name(
-            &config.solver_name,
-            (grid.width * grid.height) as usize,
-            config.num_agents,
-        )
-        .unwrap();
+        let solver =
+            registry::build(&config.solver_name, &config.planner_params, config.num_agents)
+                .unwrap();
 
         let scheduler = ActiveScheduler::from_name(&config.scheduler_name);
         let mut rng = SeededRng::new(config.seed);
@@ -1001,6 +1028,7 @@ mod tests {
             topology_name: "warehouse_single_dock".into(),
             num_agents: 8,
             solver_name: "pibt".into(),
+            planner_params: Default::default(),
             scheduler_name: "random".into(),
             seed: 42,
             tick_count: 100,

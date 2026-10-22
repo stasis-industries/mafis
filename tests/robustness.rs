@@ -10,7 +10,7 @@ use proptest::prelude::*;
 
 use mafis::core::grid::GridMap;
 use mafis::core::topology::{TopologyRegistry, ZoneMap, validate_connectivity};
-use mafis::planners::lifelong_solver_from_name;
+use mafis::planning::registry;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Section 1: Property-based fuzzing (proptest)
@@ -335,42 +335,33 @@ fn grid_out_of_bounds_queries() {
     assert!(!grid.is_obstacle(IVec2::new(100, 100)));
 }
 
-// ── Solver factory edge cases ──────────────────────────────────────────
+// ── Planner registry edge cases ────────────────────────────────────────
 
 #[test]
 fn solver_factory_unknown_name_returns_none() {
-    assert!(lifelong_solver_from_name("nonexistent", 100, 10).is_none());
+    assert!(registry::build("nonexistent", &Default::default(), 10).is_err());
 }
 
 #[test]
 fn solver_factory_empty_name_returns_none() {
-    assert!(lifelong_solver_from_name("", 100, 10).is_none());
+    assert!(registry::build("", &Default::default(), 10).is_err());
 }
 
 #[test]
 fn solver_factory_zero_agents() {
     // All solvers should accept 0 agents without panic
     for name in ["pibt", "rhcr_pbs", "token_passing"] {
-        let solver = lifelong_solver_from_name(name, 100, 0);
-        assert!(solver.is_some(), "{name} should accept 0 agents");
-    }
-}
-
-#[test]
-fn solver_factory_zero_grid_area() {
-    // grid_area=0 might cause division by zero in auto-config
-    // Should not panic
-    for name in ["pibt", "rhcr_pbs", "token_passing"] {
-        let _ = lifelong_solver_from_name(name, 0, 10);
+        let solver = registry::build(name, &Default::default(), 0);
+        assert!(solver.is_ok(), "{name} should accept 0 agents");
     }
 }
 
 #[test]
 fn solver_factory_agents_exceed_grid() {
-    // More agents than could possibly fit — factory shouldn't care
+    // More agents than could possibly fit — building shouldn't care
     for name in ["pibt", "rhcr_pbs", "token_passing"] {
-        let solver = lifelong_solver_from_name(name, 4, 1000);
-        assert!(solver.is_some(), "{name} should accept large agent count at factory level");
+        let solver = registry::build(name, &Default::default(), 1000);
+        assert!(solver.is_ok(), "{name} should accept large agent count at build time");
     }
 }
 

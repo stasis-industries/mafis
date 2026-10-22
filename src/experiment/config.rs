@@ -3,7 +3,8 @@
 use crate::core::grid::GridMap;
 use crate::core::topology::ZoneMap;
 use crate::fault::scenario::{FaultScenario, FaultScenarioType, WearHeatRate};
-pub use crate::planners::RhcrConfigOverride;
+use crate::planning::params::ParamValues;
+use crate::planning::registry;
 
 /// Identity of a single experiment run.
 #[derive(Debug, Clone)]
@@ -18,9 +19,8 @@ pub struct ExperimentConfig {
     /// Inline map data for custom/imported maps. When present, used instead of
     /// `topology_name` lookup via `ActiveTopology::from_name()`.
     pub custom_map: Option<(GridMap, ZoneMap)>,
-    /// Optional RHCR-PBS ablation override (horizon / PBS node-limit multiplier).
-    /// `None` uses `RhcrConfig::auto()` defaults. No effect on non-RHCR solvers.
-    pub rhcr_override: Option<RhcrConfigOverride>,
+    /// Parameters for the planner; a key left out takes its declared default.
+    pub planner_params: ParamValues,
 }
 
 impl ExperimentConfig {
@@ -54,19 +54,12 @@ impl ExperimentConfig {
         }
     }
 
-    /// Short CSV-safe label for the RHCR ablation override.
-    /// Format: `"h{h}n{m}"` when both fields are set, `"h{h}"` / `"n{m}"` for
-    /// single-field overrides, `"default"` when `rhcr_override` is `None`.
-    pub fn rhcr_override_label(&self) -> String {
-        match &self.rhcr_override {
-            None => "default".to_string(),
-            Some(o) => match (o.horizon, o.node_limit_mult) {
-                (Some(h), Some(m)) => format!("h{h}n{m}"),
-                (Some(h), None) => format!("h{h}"),
-                (None, Some(m)) => format!("n{m}"),
-                (None, None) => "default".to_string(),
-            },
-        }
+    /// The planner's parameters as canonical text (every declared key, with
+    /// defaults filled in), as recorded in results and in the twin key.
+    pub fn planner_params_text(&self) -> String {
+        registry::resolve(&self.solver_name, &self.planner_params)
+            .map(|(_, params)| params.canonical())
+            .unwrap_or_else(|e| panic!("{e}"))
     }
 }
 
@@ -80,10 +73,9 @@ pub struct ExperimentMatrix {
     pub agent_counts: Vec<usize>,
     pub seeds: Vec<u64>,
     pub tick_count: u64,
-    /// RHCR-PBS ablation overrides. Default is a single-element `vec![None]`
-    /// which preserves prior behaviour (auto-computed `RhcrConfig`). Add more
-    /// entries to sweep horizon × node-limit at a fixed cell.
-    pub rhcr_overrides: Vec<Option<RhcrConfigOverride>>,
+    /// Planner parameter sets, each crossed with every planner. The default is
+    /// one empty set (every planner's defaults); add sets to sweep parameters.
+    pub planner_params: Vec<ParamValues>,
 }
 
 impl Default for ExperimentMatrix {
@@ -96,20 +88,27 @@ impl Default for ExperimentMatrix {
             agent_counts: Vec::new(),
             seeds: Vec::new(),
             tick_count: 0,
-            rhcr_overrides: vec![None],
+            planner_params: vec![Default::default()],
         }
     }
 }
 
 impl ExperimentMatrix {
     /// Expand into the Cartesian product of experiment configs, skipping
-    /// cells whose fleet exceeds the solver's `max_agents` on that topology
-    /// (with a warning) so no matrix runs a solver outside its supported range.
+    /// cells whose fleet exceeds the planner's fleet limit on that topology
+    /// (with a warning) so no matrix runs a planner outside its supported range.
+    /// Panics on an unknown planner or a parameter set it does not accept.
     pub fn expand(&self) -> Vec<ExperimentConfig> {
         let mut configs = Vec::new();
-        let overrides: &[Option<RhcrConfigOverride>] =
-            if self.rhcr_overrides.is_empty() { &[None] } else { &self.rhcr_overrides };
+        let default_params = [ParamValues::default()];
+        let param_sets: &[ParamValues] =
+            if self.planner_params.is_empty() { &default_params } else { &self.planner_params };
         for solver in &self.solvers {
+            for params in param_sets {
+                if let Err(e) = registry::resolve(solver, params) {
+                    panic!("{e}");
+                }
+            }
             for topology in &self.topologies {
                 let cap = solver_agent_cap(solver, topology);
                 #[cfg(not(target_arch = "wasm32"))]
@@ -126,7 +125,7 @@ impl ExperimentMatrix {
                                 continue;
                             }
                             for &seed in &self.seeds {
-                                for ov in overrides {
+                                for params in param_sets {
                                     configs.push(ExperimentConfig {
                                         solver_name: solver.clone(),
                                         topology_name: topology.clone(),
@@ -136,7 +135,7 @@ impl ExperimentMatrix {
                                         seed,
                                         tick_count: self.tick_count,
                                         custom_map: None,
-                                        rhcr_override: ov.clone(),
+                                        planner_params: params.clone(),
                                     });
                                 }
                             }
@@ -150,7 +149,7 @@ impl ExperimentMatrix {
 
     /// Total number of runs this matrix will produce (same skips as `expand`).
     pub fn total_runs(&self) -> usize {
-        let ov_len = self.rhcr_overrides.len().max(1);
+        let param_sets = self.planner_params.len().max(1);
         let mut cells = 0;
         for solver in &self.solvers {
             for topology in &self.topologies {
@@ -158,13 +157,13 @@ impl ExperimentMatrix {
                 cells += self.agent_counts.iter().filter(|&&n| cap.is_none_or(|c| n <= c)).count();
             }
         }
-        cells * self.scenarios.len() * self.schedulers.len() * self.seeds.len() * ov_len
+        cells * self.scenarios.len() * self.schedulers.len() * self.seeds.len() * param_sets
     }
 }
 
-/// Largest fleet `solver` supports on `topology`, from the solver's own
-/// `max_agents(&zones)` (`None` = uncapped, unknown solver or unknown topology;
-/// the run itself then fails loudly). Memoized: the desktop UI recounts runs
+/// Largest fleet `solver` supports on `topology`, from the planner's registered
+/// `fleet_limit` (`None` = uncapped, unknown planner or unknown topology; the
+/// run itself then fails loudly). Memoized: the desktop UI recounts runs
 /// every frame and topologies do not change at runtime.
 fn solver_agent_cap(solver: &str, topology: &str) -> Option<usize> {
     use std::collections::HashMap;
@@ -175,8 +174,8 @@ fn solver_agent_cap(solver: &str, topology: &str) -> Option<usize> {
     if let Some(cap) = caps.lock().ok().and_then(|m| m.get(&key).copied()) {
         return cap;
     }
-    let cap = crate::planners::lifelong_solver_from_name(solver, 0, 0)
-        .and_then(|s| s.max_agents(&topology_zones(topology)?));
+    let cap =
+        registry::find(solver).and_then(|entry| (entry.fleet_limit)(&topology_zones(topology)?));
     if let Ok(mut m) = caps.lock() {
         m.insert(key, cap);
     }
@@ -240,6 +239,23 @@ pub fn standard_scenarios() -> Vec<Option<FaultScenario>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::planning::params::ParamValue;
+
+    #[test]
+    #[should_panic(expected = "unknown parameter")]
+    fn matrix_with_undeclared_param_panics() {
+        let matrix = ExperimentMatrix {
+            solvers: vec![crate::planners::DEFAULT.into()],
+            topologies: vec!["warehouse_single_dock".into()],
+            scenarios: vec![None],
+            schedulers: vec!["random".into()],
+            agent_counts: vec![10],
+            seeds: vec![1],
+            tick_count: 10,
+            planner_params: vec![ParamValues::default().with("undeclared_key", ParamValue::Int(1))],
+        };
+        matrix.expand();
+    }
 
     #[test]
     fn expand_cartesian_product() {
@@ -251,7 +267,7 @@ mod tests {
             agent_counts: vec![10, 20],
             seeds: vec![1, 2, 3],
             tick_count: 100,
-            rhcr_overrides: vec![None],
+            planner_params: vec![Default::default()],
         };
         let configs = matrix.expand();
         assert_eq!(configs.len(), 6); // 1×1×1×1×2×3×1
@@ -269,7 +285,7 @@ mod tests {
             agent_counts: vec![40, 250],
             seeds: vec![1],
             tick_count: 100,
-            rhcr_overrides: vec![None],
+            planner_params: vec![Default::default()],
         };
         let configs = matrix.expand();
         let cells: Vec<(&str, usize)> =
@@ -288,7 +304,7 @@ mod tests {
             agent_counts: vec![20],
             seeds: vec![42],
             tick_count: 500,
-            rhcr_overrides: vec![None],
+            planner_params: vec![Default::default()],
         };
         // 2 x 2 x 5 x 1 x 1 x 1 x 1 = 20
         assert_eq!(matrix.total_runs(), 20);
@@ -297,7 +313,7 @@ mod tests {
     }
 
     #[test]
-    fn expand_with_rhcr_overrides_multiplies_axes() {
+    fn expand_with_planner_params_multiplies_axes() {
         let matrix = ExperimentMatrix {
             solvers: vec!["rhcr_pbs".into()],
             topologies: vec!["warehouse_single_dock".into()],
@@ -306,19 +322,21 @@ mod tests {
             agent_counts: vec![60],
             seeds: vec![1, 2],
             tick_count: 100,
-            rhcr_overrides: vec![
-                Some(RhcrConfigOverride { horizon: Some(5), node_limit_mult: Some(3) }),
-                Some(RhcrConfigOverride { horizon: Some(10), node_limit_mult: Some(3) }),
-                Some(RhcrConfigOverride { horizon: Some(20), node_limit_mult: Some(6) }),
-            ],
+            planner_params: [(5, 3), (10, 3), (20, 6)]
+                .map(|(h, m)| {
+                    ParamValues::default()
+                        .with("horizon", ParamValue::Int(h))
+                        .with("nodes_per_agent", ParamValue::Int(m))
+                })
+                .to_vec(),
         };
         assert_eq!(matrix.total_runs(), 6);
         let configs = matrix.expand();
         assert_eq!(configs.len(), 6);
-        let labels: Vec<String> = configs.iter().map(|c| c.rhcr_override_label()).collect();
-        assert!(labels.contains(&"h5n3".to_string()));
-        assert!(labels.contains(&"h10n3".to_string()));
-        assert!(labels.contains(&"h20n6".to_string()));
+        let texts: Vec<String> = configs.iter().map(|c| c.planner_params_text()).collect();
+        assert!(texts.contains(&"horizon=5,nodes_per_agent=3,replan_interval=5".to_string()));
+        assert!(texts.contains(&"horizon=10,nodes_per_agent=3,replan_interval=5".to_string()));
+        assert!(texts.contains(&"horizon=20,nodes_per_agent=6,replan_interval=5".to_string()));
     }
 
     #[test]
@@ -332,10 +350,10 @@ mod tests {
             seed: 42,
             tick_count: 100,
             custom_map: None,
-            rhcr_override: None,
+            planner_params: Default::default(),
         };
         assert_eq!(cfg.scenario_label(), "none");
-        assert_eq!(cfg.rhcr_override_label(), "default");
+        assert_eq!(cfg.planner_params_text(), "");
 
         let cfg2 = ExperimentConfig {
             scenario: Some(FaultScenario {
@@ -367,7 +385,7 @@ mod tests {
             agent_counts: vec![10],
             seeds: vec![42],
             tick_count: 100,
-            rhcr_overrides: vec![None],
+            planner_params: vec![Default::default()],
         };
         assert_eq!(matrix.total_runs(), 0);
         assert!(matrix.expand().is_empty());

@@ -15,11 +15,11 @@ use crate::core::grid::GridMap;
 use crate::core::seed::SeededRng;
 use crate::core::task::TaskLeg;
 
+use crate::planners::toolkit::astar::SolverError;
 use crate::planners::toolkit::bytes::{f32s_from_bytes, f32s_to_bytes};
 use crate::planners::toolkit::pibt_core::PibtCore;
 use crate::planning::heuristics::{DistanceMap, DistanceMapCache, compute_distance_maps};
-use crate::planning::planner::{ActiveSolver, AgentPlan, Decision, Observation, Planner};
-use crate::planning::traits::{MAPFSolver, Optimality, Scalability, SolverError, SolverInfo};
+use crate::planning::planner::{AgentPlan, Decision, Observation, Planner};
 
 // ---------------------------------------------------------------------------
 // PibtPlanner — implements Planner
@@ -70,21 +70,6 @@ impl Default for PibtPlanner {
 }
 
 impl Planner for PibtPlanner {
-    fn name(&self) -> &'static str {
-        "pibt"
-    }
-
-    fn info(&self) -> SolverInfo {
-        SolverInfo {
-            optimality: Optimality::Suboptimal,
-            complexity: "O(n log n) per timestep",
-            scalability: Scalability::High,
-            description: "PIBT — fast, reactive, one-step planner. Scales to 1000+ agents.",
-            source: "Okumura et al., AIJ 2022",
-            recommended_max_agents: None,
-        }
-    }
-
     fn reset(&mut self) {
         self.core.reset();
         self.plan_buffer.clear();
@@ -171,20 +156,20 @@ impl Default for PibtSolver {
     }
 }
 
+pub trait MAPFSolver: Send + Sync + 'static {
+    /// Short identifier for this solver.
+    fn name(&self) -> &str;
+
+    fn solve(
+        &self,
+        grid: &GridMap,
+        agents: &[(IVec2, IVec2)],
+    ) -> Result<Vec<Vec<Action>>, SolverError>;
+}
+
 impl MAPFSolver for PibtSolver {
     fn name(&self) -> &str {
         "pibt"
-    }
-
-    fn info(&self) -> SolverInfo {
-        SolverInfo {
-            optimality: Optimality::Suboptimal,
-            complexity: "O(n log n) per timestep",
-            scalability: Scalability::High,
-            description: "Priority Inheritance with Backtracking — fast, reactive, one-step planner. Scales to 1000+ agents with O(n log n) per timestep.",
-            source: "Okumura et al., AIJ 2022",
-            recommended_max_agents: None,
-        }
     }
 
     fn solve(
@@ -264,14 +249,6 @@ impl PibtSolver {
 
         Ok(paths)
     }
-}
-
-// ---------------------------------------------------------------------------
-// Helper to create default ActiveSolver
-// ---------------------------------------------------------------------------
-
-pub fn default_active_solver() -> ActiveSolver {
-    ActiveSolver::new(Box::new(PibtPlanner::new()))
 }
 
 #[cfg(test)]
@@ -762,14 +739,13 @@ mod tests {
         let registry = TopologyRegistry::load_from_dir(std::path::Path::new("topologies"));
         let entry = registry.find("warehouse_medium").expect("warehouse_medium missing");
         let (grid, zones) = TopologyRegistry::parse_entry(entry).unwrap();
-        let grid_area = (grid.width * grid.height) as usize;
         let num = 15;
 
         let mut rng = SeededRng::new(42);
         let agents = place_agents(num, &grid, &zones, &mut rng);
         let rng_after = rng.clone();
 
-        let solver = crate::planners::lifelong_solver_from_name("pibt", grid_area, num).unwrap();
+        let solver = Box::new(PibtPlanner::new());
         let mut runner = SimulationRunner::new(
             grid,
             zones,

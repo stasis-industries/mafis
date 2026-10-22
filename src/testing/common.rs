@@ -36,7 +36,6 @@ use crate::{
         topology::ZoneMap,
     },
     fault::{FaultPlugin, breakdown::Dead, config::FaultConfig, heat::HeatState},
-    planning::SolverPlugin,
 };
 
 // ---------------------------------------------------------------------------
@@ -73,7 +72,6 @@ impl SimHarness {
             // included in MinimalPlugins (it is in DefaultPlugins).
             bevy::state::app::StatesPlugin,
             CorePlugin,
-            SolverPlugin,
             FaultPlugin,
             AnalysisPlugin,
         ));

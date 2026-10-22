@@ -38,8 +38,8 @@ use super::windowed::{WindowAgent, WindowContext, WindowResult, WindowedPlanner}
 use crate::planners::toolkit::bytes::{f32s_from_bytes, f32s_to_bytes};
 use crate::planners::toolkit::pibt_core::PibtCore;
 use crate::planning::heuristics::DistanceMapCache;
+use crate::planning::params::{ParamKind, ParamSpec, ResolvedParams};
 use crate::planning::planner::{AgentPlan, AgentView, Decision, Observation, Planner};
-use crate::planning::traits::{Optimality, Scalability, SolverInfo};
 
 use super::pbs_planner::PbsPlanner;
 
@@ -54,38 +54,52 @@ pub struct RhcrConfig {
     pub pbs_node_limit: usize,
 }
 
-impl RhcrConfig {
-    /// Reference defaults: replan every `simulation_window` = 5 ticks with a
-    /// `planning_window` of 10 (RHCR README example; driver.cpp:116-119),
-    /// independent of the grid. The PBS budget scales with the fleet (see
-    /// `PBS_NODES_PER_AGENT`).
-    pub fn auto(_grid_area: usize, num_agents: usize) -> Self {
-        Self {
-            horizon: constants::RHCR_PLANNING_HORIZON_DEFAULT,
-            replan_interval: constants::RHCR_SIMULATION_WINDOW_DEFAULT,
-            pbs_node_limit: (num_agents * constants::PBS_NODES_PER_AGENT)
-                .clamp(constants::PBS_MIN_NODE_LIMIT, constants::PBS_MAX_NODE_LIMIT),
-        }
-    }
-}
+/// Parameters RHCR-PBS declares. Defaults are the reference values: replan
+/// every `simulation_window` = 5 ticks with a `planning_window` of 10 (RHCR
+/// README example; driver.cpp:116-119), independent of the grid.
+pub const PARAMS: &[ParamSpec] = &[
+    ParamSpec {
+        key: "horizon",
+        label: "Planning window (H)",
+        help: "Ticks over which PBS resolves conflicts.",
+        kind: ParamKind::Int {
+            min: constants::RHCR_MIN_HORIZON as i64,
+            max: constants::RHCR_MAX_HORIZON as i64,
+            default: constants::RHCR_PLANNING_HORIZON_DEFAULT as i64,
+        },
+    },
+    ParamSpec {
+        key: "replan_interval",
+        label: "Replan interval (W)",
+        help: "Ticks between planning windows.",
+        kind: ParamKind::Int {
+            min: constants::RHCR_MIN_REPLAN_INTERVAL as i64,
+            max: constants::RHCR_MAX_REPLAN_INTERVAL as i64,
+            default: constants::RHCR_SIMULATION_WINDOW_DEFAULT as i64,
+        },
+    },
+    ParamSpec {
+        key: "nodes_per_agent",
+        label: "PBS nodes per agent",
+        help: "PBS node budget per agent; the fleet's total is kept within the node-limit bounds.",
+        kind: ParamKind::Int {
+            min: 1,
+            max: constants::PBS_MAX_NODE_LIMIT as i64,
+            default: constants::PBS_NODES_PER_AGENT as i64,
+        },
+    },
+];
 
 impl RhcrConfig {
-    /// Apply an optional ablation override on top of the auto-computed config.
-    pub fn with_override(
-        mut self,
-        ov: Option<&crate::planners::RhcrConfigOverride>,
-        num_agents: usize,
-    ) -> Self {
-        if let Some(o) = ov {
-            if let Some(h) = o.horizon {
-                self.horizon = h.clamp(constants::RHCR_MIN_HORIZON, constants::RHCR_MAX_HORIZON);
-            }
-            if let Some(m) = o.node_limit_mult {
-                self.pbs_node_limit = (num_agents * m)
-                    .clamp(constants::PBS_MIN_NODE_LIMIT, constants::PBS_MAX_NODE_LIMIT);
-            }
+    /// The configuration for `fleet` agents. The PBS budget scales with the
+    /// fleet (see `PBS_NODES_PER_AGENT`).
+    pub fn from_params(params: &ResolvedParams, fleet: usize) -> Self {
+        Self {
+            horizon: params.int("horizon") as usize,
+            replan_interval: params.int("replan_interval") as usize,
+            pbs_node_limit: (fleet * params.int("nodes_per_agent") as usize)
+                .clamp(constants::PBS_MIN_NODE_LIMIT, constants::PBS_MAX_NODE_LIMIT),
         }
-        self
     }
 }
 
@@ -140,44 +154,6 @@ impl RhcrPlanner {
 
         // Start at replan_interval - 1 so the very first step() triggers a replan.
         // Without this, agents would sit idle for W ticks before getting any plans.
-        let initial_counter = config.replan_interval.saturating_sub(1);
-
-        Self {
-            config,
-            planner,
-            pibt_fallback: PibtCore::new(),
-            ticks_since_replan: initial_counter,
-            plan_buffer: Vec::new(),
-            issued: Vec::new(),
-            extra_replans: 0,
-            last_pos: Vec::new(),
-            moved_in_window: Vec::new(),
-            congestion_checks: 0,
-            congested_windows: 0,
-            scratch_window_agents: Vec::new(),
-            scratch_initial_plans: Vec::new(),
-            scratch_start_constraints: Vec::new(),
-            scratch_fixed_vertices: Vec::new(),
-            scratch_fixed_edges: Vec::new(),
-            pbs_total_replans: 0,
-            pbs_partial_count: 0,
-        }
-    }
-
-    /// Construct an RHCR solver with **pre-sized PBS scratch buffers**. The
-    /// underlying [`PbsPlanner::with_capacity`] reserves the full
-    /// `FlatConstraintIndex` / `SeqGoalGrid` / `FlatCAT` slabs at construction
-    /// (~3 MB total for a 1000-cell × 20-horizon grid) so the first
-    /// `plan_window` call doesn't stall the WASM main thread.
-    ///
-    /// Use this from production paths that know the grid dimensions ahead of
-    /// time (the `lifelong_solver_from_name_sized` factory). Tests and the
-    /// experiment runner can keep using [`RhcrPlanner::new`].
-    pub fn with_grid(config: RhcrConfig, grid_w: usize, grid_h: usize) -> Self {
-        let max_goals = constants::PBS_GOAL_SEQUENCE_MAX_LEN + 1;
-        let planner: Box<dyn WindowedPlanner> =
-            Box::new(PbsPlanner::with_capacity(grid_w, grid_h, config.horizon, max_goals));
-
         let initial_counter = config.replan_interval.saturating_sub(1);
 
         Self {
@@ -506,21 +482,6 @@ fn fixed_path_constraints(
 }
 
 impl Planner for RhcrPlanner {
-    fn name(&self) -> &'static str {
-        "rhcr_pbs"
-    }
-
-    fn info(&self) -> SolverInfo {
-        SolverInfo {
-            optimality: Optimality::Suboptimal,
-            complexity: "O(W⁻¹ × PBS_node_limit) amortized per tick",
-            scalability: Scalability::Medium,
-            description: "RHCR (PBS) — windowed planning with Priority-Based Search. High quality, bounded by node limit.",
-            source: "Li et al., AAAI 2021",
-            recommended_max_agents: Some(200),
-        }
-    }
-
     fn reset(&mut self) {
         self.ticks_since_replan = self.config.replan_interval.saturating_sub(1);
         self.pibt_fallback.reset();
@@ -741,6 +702,28 @@ impl Planner for RhcrPlanner {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::planning::params::{ParamValue, ParamValues, resolve};
+
+    fn config_for(values: &ParamValues, fleet: usize) -> RhcrConfig {
+        RhcrConfig::from_params(&resolve(PARAMS, values).unwrap(), fleet)
+    }
+
+    #[test]
+    fn default_params_match_reference_values() {
+        let small = config_for(&ParamValues::default(), 12);
+        assert_eq!((small.horizon, small.replan_interval, small.pbs_node_limit), (10, 5, 50));
+        assert_eq!(config_for(&ParamValues::default(), 5_000).pbs_node_limit, 10_000);
+    }
+
+    #[test]
+    fn params_reach_the_config() {
+        let values = ParamValues::default()
+            .with("horizon", ParamValue::Int(7))
+            .with("replan_interval", ParamValue::Int(3))
+            .with("nodes_per_agent", ParamValue::Int(4));
+        let config = config_for(&values, 40);
+        assert_eq!((config.horizon, config.replan_interval, config.pbs_node_limit), (7, 3, 160));
+    }
     use crate::core::grid::GridMap;
     use crate::core::seed::SeededRng;
     use crate::core::task::TaskLeg;
@@ -876,8 +859,8 @@ mod tests {
     #[test]
     fn rhcr_auto_config_uses_reference_defaults() {
         // RHCR README / driver.cpp:116-119: h = 5, w = 10, at any scale.
-        for (area, n) in [(100, 5), (16384, 400)] {
-            let cfg = RhcrConfig::auto(area, n);
+        for n in [5, 400] {
+            let cfg = config_for(&ParamValues::default(), n);
             assert_eq!(cfg.replan_interval, constants::RHCR_SIMULATION_WINDOW_DEFAULT);
             assert_eq!(cfg.horizon, constants::RHCR_PLANNING_HORIZON_DEFAULT);
             assert_eq!(
@@ -1078,7 +1061,7 @@ mod tests {
         let mut plans: Vec<std::collections::VecDeque<Action>> =
             vec![std::collections::VecDeque::new(); n];
 
-        let config = RhcrConfig::auto((grid.width * grid.height) as usize, n);
+        let config = config_for(&ParamValues::default(), n);
         let mut solver = RhcrPlanner::new(config);
         let mut cache = DistanceMapCache::default();
         let mut rng = SeededRng::new(42);
@@ -1141,7 +1124,7 @@ mod tests {
     fn rhcr_handles_empty_agent_list() {
         let grid = GridMap::new(5, 5);
         let zones = test_zones();
-        let config = RhcrConfig::auto(25, 0);
+        let config = config_for(&ParamValues::default(), 0);
         let mut solver = RhcrPlanner::new(config);
         let mut cache = DistanceMapCache::default();
         let mut rng = SeededRng::new(42);
@@ -1158,7 +1141,7 @@ mod tests {
     fn rhcr_reset_clears_state() {
         let grid = GridMap::new(5, 5);
         let zones = test_zones();
-        let config = RhcrConfig::auto(25, 1);
+        let config = config_for(&ParamValues::default(), 1);
         let mut solver = RhcrPlanner::new(config);
         let mut cache = DistanceMapCache::default();
         let mut rng = SeededRng::new(42);
@@ -1218,7 +1201,7 @@ mod tests {
             seed: 42,
             tick_count: 200,
             custom_map: None,
-            rhcr_override: None,
+            planner_params: Default::default(),
         };
         let result = run_single_experiment(&config);
         let tp = result.baseline_metrics.avg_throughput;
@@ -1240,7 +1223,7 @@ mod tests {
     fn snapshot_round_trips_priorities() {
         // Fallback length 2, fallback priorities [1.0, 2.0], none for PBS.
         let saved = [2u32.to_le_bytes(), 1.0f32.to_le_bytes(), 2.0f32.to_le_bytes()].concat();
-        let mut planner = RhcrPlanner::new(RhcrConfig::auto(0, 12));
+        let mut planner = RhcrPlanner::new(config_for(&ParamValues::default(), 12));
         assert_ne!(
             planner.snapshot().as_ref(),
             Some(&saved),

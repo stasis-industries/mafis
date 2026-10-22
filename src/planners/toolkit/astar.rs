@@ -1,12 +1,29 @@
 use bevy::prelude::*;
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap, HashSet};
+use std::fmt;
 
 use crate::core::action::{Action, Direction};
 use crate::core::grid::GridMap;
 
 use crate::planning::heuristics::{DistanceMap, manhattan};
-use crate::planning::traits::SolverError;
+
+#[derive(Debug)]
+pub enum SolverError {
+    NoSolution,
+    Timeout,
+    InvalidInput(String),
+}
+
+impl fmt::Display for SolverError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SolverError::NoSolution => write!(f, "no solution found"),
+            SolverError::Timeout => write!(f, "solver timed out"),
+            SolverError::InvalidInput(msg) => write!(f, "invalid input: {msg}"),
+        }
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Legacy constraint types (kept for PBS planner compatibility)

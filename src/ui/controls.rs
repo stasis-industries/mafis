@@ -1,4 +1,5 @@
 #[cfg(any(target_arch = "wasm32", not(feature = "headless")))]
+use crate::planning::params::ParamValues;
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use std::collections::HashSet;
@@ -38,11 +39,11 @@ use crate::fault::heat::HeatState;
 #[cfg(any(target_arch = "wasm32", not(feature = "headless")))]
 use crate::planners::pibt::PibtSolver;
 #[cfg(any(target_arch = "wasm32", not(feature = "headless")))]
-use crate::planning::ActiveSolver;
+use crate::planners::pibt::planner::MAPFSolver;
 #[cfg(any(target_arch = "wasm32", not(feature = "headless")))]
 use crate::planning::heuristics::DistanceMapCache;
 #[cfg(any(target_arch = "wasm32", not(feature = "headless")))]
-use crate::planning::traits::MAPFSolver;
+use crate::planning::registry;
 #[cfg(any(target_arch = "wasm32", not(feature = "headless")))]
 use crate::render::environment::{
     EnvironmentMarker, ObstacleMarker, spawn_floor_and_lines, spawn_queue_arrows,
@@ -83,7 +84,6 @@ struct LoadingResources<'w> {
 #[cfg(any(target_arch = "wasm32", not(feature = "headless")))]
 #[derive(SystemParam)]
 struct ResetResources<'w> {
-    solver: ResMut<'w, ActiveSolver>,
     dist_cache: ResMut<'w, DistanceMapCache>,
     cascade: ResMut<'w, CascadeState>,
     fault_metrics: ResMut<'w, FaultMetrics>,
@@ -120,6 +120,8 @@ pub struct UiState {
     pub grid_width: i32,
     pub grid_height: i32,
     pub solver_name: String,
+    /// Parameters for the planner; a key left out takes its declared default.
+    pub planner_params: ParamValues,
     pub topology_name: String,
     pub imported_scenario: Option<ImportedScenario>,
     /// User override for RHCR horizon (None = auto).
@@ -153,6 +155,7 @@ impl Default for UiState {
             grid_width: 25,
             grid_height: 15,
             solver_name: "pibt".to_string(),
+            planner_params: ParamValues::default(),
             topology_name: "warehouse_single_dock".to_string(),
             imported_scenario: None,
             rhcr_horizon: None,
@@ -231,8 +234,8 @@ mod observatory_controls {
             Query<Entity, With<EnvironmentMarker>>,
         ),
     ) {
-        if !crate::planners::is_known_planner(&res.ui_state.solver_name) {
-            error!("unknown planner '{}': loading stopped", res.ui_state.solver_name);
+        if let Err(e) = registry::resolve(&res.ui_state.solver_name, &res.ui_state.planner_params) {
+            error!("{e}: loading stopped");
             // A `Done` progress left by the previous load would make `loading_tick`
             // request Running in this same frame, overriding the Idle request.
             *res.progress = LoadingProgress::default();
@@ -253,25 +256,6 @@ mod observatory_controls {
         res.baseline.reset();
         res.rng.reseed(res.ui_state.seed);
 
-        // Recreate solver from ui_state to guarantee same type+config as baseline.
-        // Just calling reset() would keep a stale solver type (e.g. RHCR from a
-        // previous run) while the baseline creates a fresh one from solver_name.
-        // Use the *_sized factory so RHCR's PBS scratch buffers are pre-allocated
-        // at the actual grid dimensions — eliminates the first-tick allocation
-        // stall that users perceive as "slow simulation start".
-        {
-            let grid_w = res.ui_state.grid_width as usize;
-            let grid_h = res.ui_state.grid_height as usize;
-            let num_agents = res.ui_state.num_agents;
-            let fresh = crate::planners::lifelong_solver_from_name_sized(
-                &res.ui_state.solver_name,
-                grid_w,
-                grid_h,
-                num_agents,
-            )
-            .expect("planner id checked at the start of begin_loading");
-            *reset.solver = ActiveSolver::new(fresh);
-        }
         reset.dist_cache.clear();
         reset.cascade.clear();
         reset.fault_metrics.clear();
@@ -324,6 +308,7 @@ mod observatory_controls {
                     topology_name: res.ui_state.topology_name.clone(),
                     num_agents: res.ui_state.num_agents,
                     solver_name: res.ui_state.solver_name.clone(),
+                    planner_params: res.ui_state.planner_params.clone(),
                     scheduler_name: res.active_scheduler.name().to_string(),
                     seed: res.ui_state.seed,
                     tick_count: total_ticks,
@@ -381,18 +366,14 @@ mod observatory_controls {
             // Extract positions for ECS entity spawning BEFORE runner takes ownership
             live_agent_pairs = sim_agents.iter().map(|a| (a.pos, a.goal)).collect();
 
-            // Create solver — use actual_agents (clamped) so RHCR auto-config
-            // matches what the experiment runner and baseline engine compute.
-            // The *_sized factory pre-allocates RHCR PBS scratch buffers at
-            // the real grid dimensions, avoiding the first-tick allocation
-            // stall.
-            let runner_solver = crate::planners::lifelong_solver_from_name_sized(
+            // Build the planner for actual_agents (clamped), the fleet the
+            // experiment runner and the twin build theirs for.
+            let runner_solver = registry::build(
                 &res.ui_state.solver_name,
-                runner_grid.width as usize,
-                runner_grid.height as usize,
+                &res.ui_state.planner_params,
                 actual_agents,
             )
-            .expect("planner id checked at the start of begin_loading");
+            .expect("planner and parameters checked at the start of begin_loading");
 
             let runner = SimulationRunner::new(
                 runner_grid,
@@ -1011,7 +992,6 @@ mod observatory_controls {
                 bevy::state::app::StatesPlugin,
                 bevy::asset::AssetPlugin::default(),
                 crate::core::CorePlugin,
-                crate::planning::SolverPlugin,
                 crate::fault::FaultPlugin,
                 crate::analysis::AnalysisPlugin,
                 ControlsPlugin,

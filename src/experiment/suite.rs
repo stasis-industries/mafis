@@ -148,7 +148,7 @@ pub fn solver_resilience() -> ExperimentMatrix {
         agent_counts: vec![40],
         seeds: SEEDS.to_vec(),
         tick_count: TICK_COUNT,
-        rhcr_overrides: vec![None],
+        planner_params: vec![Default::default()],
     }
 }
 
@@ -179,7 +179,7 @@ pub fn topology_effect() -> Vec<ExperimentMatrix> {
             agent_counts: vec![40],
             seeds: SEEDS.to_vec(),
             tick_count: TICK_COUNT,
-            rhcr_overrides: vec![None],
+            planner_params: vec![Default::default()],
         },
         ExperimentMatrix {
             solvers: vec!["pibt".into()],
@@ -189,7 +189,7 @@ pub fn topology_effect() -> Vec<ExperimentMatrix> {
             agent_counts: vec![80],
             seeds: SEEDS.to_vec(),
             tick_count: TICK_COUNT,
-            rhcr_overrides: vec![None],
+            planner_params: vec![Default::default()],
         },
         ExperimentMatrix {
             solvers: vec!["pibt".into()],
@@ -199,7 +199,7 @@ pub fn topology_effect() -> Vec<ExperimentMatrix> {
             agent_counts: vec![30],
             seeds: SEEDS.to_vec(),
             tick_count: TICK_COUNT,
-            rhcr_overrides: vec![None],
+            planner_params: vec![Default::default()],
         },
         ExperimentMatrix {
             solvers: vec!["pibt".into()],
@@ -209,7 +209,7 @@ pub fn topology_effect() -> Vec<ExperimentMatrix> {
             agent_counts: vec![25],
             seeds: SEEDS.to_vec(),
             tick_count: TICK_COUNT,
-            rhcr_overrides: vec![None],
+            planner_params: vec![Default::default()],
         },
         ExperimentMatrix {
             solvers: vec!["pibt".into()],
@@ -219,7 +219,7 @@ pub fn topology_effect() -> Vec<ExperimentMatrix> {
             agent_counts: vec![35],
             seeds: SEEDS.to_vec(),
             tick_count: TICK_COUNT,
-            rhcr_overrides: vec![None],
+            planner_params: vec![Default::default()],
         },
     ]
 }
@@ -245,7 +245,7 @@ pub fn scale_sensitivity() -> ExperimentMatrix {
         agent_counts: vec![10, 20, 40, 80],
         seeds: SEEDS.to_vec(),
         tick_count: TICK_COUNT,
-        rhcr_overrides: vec![None],
+        planner_params: vec![Default::default()],
     }
 }
 
@@ -270,7 +270,7 @@ pub fn scheduler_effect() -> ExperimentMatrix {
         agent_counts: vec![40],
         seeds: SEEDS.to_vec(),
         tick_count: TICK_COUNT,
-        rhcr_overrides: vec![None],
+        planner_params: vec![Default::default()],
     }
 }
 
@@ -301,7 +301,7 @@ pub fn braess_resilience() -> ExperimentMatrix {
         agent_counts: vec![10, 20, 40, 80],
         seeds: SEEDS_50.to_vec(),
         tick_count: TICK_COUNT,
-        rhcr_overrides: vec![None],
+        planner_params: vec![Default::default()],
     }
 }
 
@@ -371,7 +371,7 @@ pub fn core_experiment_suite() -> Vec<(&'static str, ExperimentMatrix)> {
                 agent_counts: vec![20, 40, 60],
                 seeds: SEEDS.to_vec(),
                 tick_count: TICK_COUNT,
-                rhcr_overrides: vec![None],
+                planner_params: vec![Default::default()],
             },
         ),
         // E1b: warehouse_dual_dock (61×33) — 40/80/120 agents
@@ -385,7 +385,7 @@ pub fn core_experiment_suite() -> Vec<(&'static str, ExperimentMatrix)> {
                 agent_counts: vec![40, 80, 120],
                 seeds: SEEDS.to_vec(),
                 tick_count: TICK_COUNT,
-                rhcr_overrides: vec![None],
+                planner_params: vec![Default::default()],
             },
         ),
         // E2: Scheduler effect (warehouse_single_dock, 40 agents)
@@ -399,7 +399,7 @@ pub fn core_experiment_suite() -> Vec<(&'static str, ExperimentMatrix)> {
                 agent_counts: vec![40],
                 seeds: SEEDS.to_vec(),
                 tick_count: TICK_COUNT,
-                rhcr_overrides: vec![None],
+                planner_params: vec![Default::default()],
             },
         ),
     ]
@@ -470,7 +470,7 @@ pub fn aisle_width_sweep() -> Vec<(&'static str, ExperimentMatrix)> {
                 agent_counts: vec![20, 40, 60],
                 seeds: SEEDS.to_vec(),
                 tick_count: TICK_COUNT,
-                rhcr_overrides: vec![None],
+                planner_params: vec![Default::default()],
             },
         ),
         // SD-w2 (aisle width 2) in-envelope
@@ -484,7 +484,7 @@ pub fn aisle_width_sweep() -> Vec<(&'static str, ExperimentMatrix)> {
                 agent_counts: vec![36, 72],
                 seeds: SEEDS.to_vec(),
                 tick_count: TICK_COUNT,
-                rhcr_overrides: vec![None],
+                planner_params: vec![Default::default()],
             },
         ),
         // SD-w2 out-envelope — PIBT + RHCR-PBS only
@@ -498,7 +498,7 @@ pub fn aisle_width_sweep() -> Vec<(&'static str, ExperimentMatrix)> {
                 agent_counts: vec![108],
                 seeds: SEEDS.to_vec(),
                 tick_count: TICK_COUNT,
-                rhcr_overrides: vec![None],
+                planner_params: vec![Default::default()],
             },
         ),
         // SD-w3 (aisle width 3) in-envelope
@@ -512,7 +512,7 @@ pub fn aisle_width_sweep() -> Vec<(&'static str, ExperimentMatrix)> {
                 agent_counts: vec![50, 100],
                 seeds: SEEDS.to_vec(),
                 tick_count: TICK_COUNT,
-                rhcr_overrides: vec![None],
+                planner_params: vec![Default::default()],
             },
         ),
         // SD-w3 out-envelope — PIBT + RHCR-PBS only
@@ -526,7 +526,7 @@ pub fn aisle_width_sweep() -> Vec<(&'static str, ExperimentMatrix)> {
                 agent_counts: vec![151],
                 seeds: SEEDS.to_vec(),
                 tick_count: TICK_COUNT,
-                rhcr_overrides: vec![None],
+                planner_params: vec![Default::default()],
             },
         ),
     ]
@@ -547,7 +547,7 @@ pub fn smoke_test() -> ExperimentMatrix {
         agent_counts: vec![15],
         seeds: vec![42, 123],
         tick_count: 100,
-        rhcr_overrides: vec![None],
+        planner_params: vec![Default::default()],
     }
 }
 
@@ -566,7 +566,7 @@ pub fn solver_benchmark() -> ExperimentMatrix {
         agent_counts: vec![40],
         seeds: vec![42, 123, 456, 789, 1024],
         tick_count: 500,
-        rhcr_overrides: vec![None],
+        planner_params: vec![Default::default()],
     }
 }
 
@@ -678,7 +678,7 @@ mod tests {
             agent_counts: vec![20, 40],
             seeds: SEEDS.to_vec(),
             tick_count: TICK_COUNT,
-            rhcr_overrides: vec![None],
+            planner_params: vec![Default::default()],
         };
 
         let total = matrix.total_runs();
@@ -719,7 +719,7 @@ mod tests {
             agent_counts: vec![20],
             seeds: SEEDS.to_vec(),
             tick_count: TICK_COUNT,
-            rhcr_overrides: vec![None],
+            planner_params: vec![Default::default()],
         };
 
         let total = matrix.total_runs();
@@ -796,7 +796,7 @@ mod tests {
             agent_counts: vec![40],
             seeds: vec![42, 123, 456, 789, 1024],
             tick_count: 500,
-            rhcr_overrides: vec![None],
+            planner_params: vec![Default::default()],
         };
 
         let total = matrix.total_runs();
@@ -950,7 +950,7 @@ mod tests {
                     agent_counts: vec![40, 60],
                     seeds: SEEDS.to_vec(),
                     tick_count: TICK_COUNT,
-                    rhcr_overrides: vec![None],
+                    planner_params: vec![Default::default()],
                 },
             ),
             (
@@ -963,7 +963,7 @@ mod tests {
                     agent_counts: vec![36, 72],
                     seeds: SEEDS.to_vec(),
                     tick_count: TICK_COUNT,
-                    rhcr_overrides: vec![None],
+                    planner_params: vec![Default::default()],
                 },
             ),
             (
@@ -976,7 +976,7 @@ mod tests {
                     agent_counts: vec![108],
                     seeds: SEEDS.to_vec(),
                     tick_count: TICK_COUNT,
-                    rhcr_overrides: vec![None],
+                    planner_params: vec![Default::default()],
                 },
             ),
             (
@@ -989,7 +989,7 @@ mod tests {
                     agent_counts: vec![50, 100],
                     seeds: SEEDS.to_vec(),
                     tick_count: TICK_COUNT,
-                    rhcr_overrides: vec![None],
+                    planner_params: vec![Default::default()],
                 },
             ),
             (
@@ -1002,7 +1002,7 @@ mod tests {
                     agent_counts: vec![151],
                     seeds: SEEDS.to_vec(),
                     tick_count: TICK_COUNT,
-                    rhcr_overrides: vec![None],
+                    planner_params: vec![Default::default()],
                 },
             ),
         ];
@@ -1082,7 +1082,7 @@ mod tests {
                     agent_counts: vec![20, 40, 60],
                     seeds: SEEDS.to_vec(),
                     tick_count: TICK_COUNT,
-                    rhcr_overrides: vec![None],
+                    planner_params: vec![Default::default()],
                 },
             ),
             (
@@ -1095,7 +1095,7 @@ mod tests {
                     agent_counts: vec![36, 72],
                     seeds: SEEDS.to_vec(),
                     tick_count: TICK_COUNT,
-                    rhcr_overrides: vec![None],
+                    planner_params: vec![Default::default()],
                 },
             ),
             (
@@ -1108,7 +1108,7 @@ mod tests {
                     agent_counts: vec![50, 100],
                     seeds: SEEDS.to_vec(),
                     tick_count: TICK_COUNT,
-                    rhcr_overrides: vec![None],
+                    planner_params: vec![Default::default()],
                 },
             ),
         ];
@@ -1146,6 +1146,14 @@ mod tests {
         );
     }
 
+    /// RHCR-PBS parameters for a horizon × nodes-per-agent sweep point.
+    fn rhcr_params(horizon: i64, nodes_per_agent: i64) -> crate::planning::params::ParamValues {
+        use crate::planning::params::{ParamValue, ParamValues};
+        ParamValues::default()
+            .with("horizon", ParamValue::Int(horizon))
+            .with("nodes_per_agent", ParamValue::Int(nodes_per_agent))
+    }
+
     /// RHCR-PBS Braess ablation — horizon × PBS node-limit sweep across all
     /// density tiers on the 3 aisle-width topologies under the 2 temporary-fault
     /// scenarios (ZoneOutage, IntermittentFault).
@@ -1171,9 +1179,10 @@ mod tests {
     #[test]
     #[ignore]
     fn run_rhcr_braess_ablation() {
-        use crate::experiment::config::{ExperimentMatrix, RhcrConfigOverride};
+        use crate::experiment::config::ExperimentMatrix;
         use crate::experiment::export::{write_runs_csv, write_summary_csv};
         use crate::experiment::runner::{ExperimentProgress, run_matrix};
+        use crate::planning::params::ParamValues;
         use std::fs;
         use std::sync::{Arc, Mutex};
         use std::time::Instant;
@@ -1185,12 +1194,12 @@ mod tests {
         // out of the Braess regime per the frozen-result analysis.
         let temp_scenarios = vec![Some(zone_outage()), Some(intermittent())];
 
-        // 9 ablation points: horizon × node_limit_mult
-        let overrides: Vec<Option<RhcrConfigOverride>> = {
+        // 9 ablation points: horizon × PBS nodes per agent
+        let param_sets: Vec<ParamValues> = {
             let mut v = Vec::new();
-            for &h in &[5usize, 10, 20] {
-                for &m in &[1usize, 3, 6] {
-                    v.push(Some(RhcrConfigOverride { horizon: Some(h), node_limit_mult: Some(m) }));
+            for h in [5, 10, 20] {
+                for m in [1, 3, 6] {
+                    v.push(rhcr_params(h, m));
                 }
             }
             v
@@ -1207,7 +1216,7 @@ mod tests {
                     agent_counts: vec![20, 40, 60],
                     seeds: SEEDS.to_vec(),
                     tick_count: TICK_COUNT,
-                    rhcr_overrides: overrides.clone(),
+                    planner_params: param_sets.clone(),
                 },
             ),
             (
@@ -1220,7 +1229,7 @@ mod tests {
                     agent_counts: vec![36, 72, 108],
                     seeds: SEEDS.to_vec(),
                     tick_count: TICK_COUNT,
-                    rhcr_overrides: overrides.clone(),
+                    planner_params: param_sets.clone(),
                 },
             ),
             (
@@ -1233,7 +1242,7 @@ mod tests {
                     agent_counts: vec![50, 100, 151],
                     seeds: SEEDS.to_vec(),
                     tick_count: TICK_COUNT,
-                    rhcr_overrides: overrides,
+                    planner_params: param_sets,
                 },
             ),
         ];
@@ -1304,9 +1313,10 @@ mod tests {
     #[test]
     #[ignore]
     fn run_rhcr_braess_observatory_proof() {
-        use crate::experiment::config::{ExperimentMatrix, RhcrConfigOverride};
+        use crate::experiment::config::ExperimentMatrix;
         use crate::experiment::export::{write_runs_csv, write_summary_csv};
         use crate::experiment::runner::{ExperimentProgress, run_matrix};
+        use crate::planning::params::ParamValues;
         use std::fs;
         use std::sync::{Arc, Mutex};
         use std::time::Instant;
@@ -1316,13 +1326,13 @@ mod tests {
 
         let temp_scenarios = vec![Some(zone_outage()), Some(intermittent())];
 
-        // 5 corners: default + 4 extremes of (h, n_mult)
-        let overrides: Vec<Option<RhcrConfigOverride>> = vec![
-            None,
-            Some(RhcrConfigOverride { horizon: Some(5), node_limit_mult: Some(1) }),
-            Some(RhcrConfigOverride { horizon: Some(5), node_limit_mult: Some(6) }),
-            Some(RhcrConfigOverride { horizon: Some(20), node_limit_mult: Some(1) }),
-            Some(RhcrConfigOverride { horizon: Some(20), node_limit_mult: Some(6) }),
+        // 5 corners: default + 4 extremes of (h, nodes per agent)
+        let param_sets: Vec<ParamValues> = vec![
+            ParamValues::default(),
+            rhcr_params(5, 1),
+            rhcr_params(5, 6),
+            rhcr_params(20, 1),
+            rhcr_params(20, 6),
         ];
 
         // 20-seed subset of SEEDS — sufficient for correlation + single-paragraph claim
@@ -1340,7 +1350,7 @@ mod tests {
                     agent_counts: vec![60],
                     seeds: seeds_proof.clone(),
                     tick_count: TICK_COUNT_PROOF,
-                    rhcr_overrides: overrides.clone(),
+                    planner_params: param_sets.clone(),
                 },
             ),
             (
@@ -1353,7 +1363,7 @@ mod tests {
                     agent_counts: vec![108],
                     seeds: seeds_proof.clone(),
                     tick_count: TICK_COUNT_PROOF,
-                    rhcr_overrides: overrides.clone(),
+                    planner_params: param_sets.clone(),
                 },
             ),
             (
@@ -1366,7 +1376,7 @@ mod tests {
                     agent_counts: vec![151],
                     seeds: seeds_proof,
                     tick_count: TICK_COUNT_PROOF,
-                    rhcr_overrides: overrides,
+                    planner_params: param_sets,
                 },
             ),
         ];

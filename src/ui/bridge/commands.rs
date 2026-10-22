@@ -13,7 +13,6 @@ use crate::core::topology::ActiveTopology;
 use crate::export::config::{ExportConfig, ExportRequest};
 use crate::fault::config::FaultConfig;
 use crate::fault::manual::ManualFaultCommand;
-use crate::planning::ActiveSolver;
 use crate::render::animator::RobotOpacity;
 use crate::render::graphics::GraphicsConfig;
 use crate::render::orbit_camera::{CameraMode, OrbitCamera};
@@ -26,7 +25,8 @@ use crate::core::topology::{CustomMap, ZoneMap, ZoneType};
 #[cfg(target_arch = "wasm32")]
 use crate::export::config::ExportTrigger;
 #[cfg(target_arch = "wasm32")]
-use crate::planners::lifelong_solver_from_name_sized;
+use crate::planning::params::ParamValues;
+use crate::planning::registry;
 #[cfg(target_arch = "wasm32")]
 use crate::render::orbit_camera as orbit_camera_fns;
 #[cfg(target_arch = "wasm32")]
@@ -208,7 +208,6 @@ pub(super) struct SimCommandResources<'w> {
     orbit: ResMut<'w, OrbitCamera>,
     grid: ResMut<'w, GridMap>,
     heatmap_state: ResMut<'w, HeatmapState>,
-    solver: ResMut<'w, ActiveSolver>,
     tick_history: ResMut<'w, TickHistory>,
 }
 
@@ -461,16 +460,13 @@ pub(super) fn process_js_commands(
                 }
                 JsCommand::SetSolver(name) => {
                     if current == SimState::Idle {
-                        let grid_w = sim_res.grid.width as usize;
-                        let grid_h = sim_res.grid.height as usize;
-                        let num_agents = sim_res.ui_state.num_agents;
-                        match lifelong_solver_from_name_sized(&name, grid_w, grid_h, num_agents) {
-                            Some(new_solver) => *sim_res.solver = ActiveSolver::new(new_solver),
-                            None => error!("unknown planner '{name}'"),
+                        if registry::find(&name).is_none() {
+                            error!("unknown planner '{name}'");
                         }
                         // Kept even when unknown, so the next start is refused
                         // (begin_loading) instead of running the previous planner.
                         sim_res.ui_state.solver_name = name;
+                        sim_res.ui_state.planner_params = ParamValues::default();
                         // Clear RHCR overrides when switching solver
                         sim_res.ui_state.rhcr_horizon = None;
                         sim_res.ui_state.rhcr_replan_interval = None;

@@ -2,7 +2,7 @@ use std::sync::atomic::Ordering;
 
 use crate::core::topology::TopologyRegistry;
 use crate::experiment::export::MetricColumn;
-use crate::planners::SOLVER_NAMES;
+use crate::planning::registry;
 
 use super::helpers::{
     ExportFormat, PRESETS, TABLE_METRICS, export_button, matrix_result_from_summaries,
@@ -93,12 +93,8 @@ fn fullpage_config(
                     left.label(egui::RichText::new("SOLVERS").weak().small());
                     left.horizontal_wrapped(|ui| {
                         for (id, on) in &mut gui.solvers {
-                            let label = SOLVER_NAMES.iter()
-                                .find(|(sid, _)| sid == id)
-                                .map(|(_, l)| *l)
-                                .unwrap_or(id.as_str());
-                            let short = label.split('—').next().unwrap_or(label).trim();
-                            ui.checkbox(on, short);
+                            let label = registry::find(id).map_or(id.as_str(), |entry| entry.info.label);
+                            ui.checkbox(on, label);
                         }
                     });
 

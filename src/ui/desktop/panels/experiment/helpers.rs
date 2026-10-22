@@ -21,7 +21,7 @@ fn empty_matrix() -> ExperimentMatrix {
         agent_counts: vec![],
         seeds: vec![],
         tick_count: 0,
-        rhcr_overrides: vec![None],
+        planner_params: vec![Default::default()],
     }
 }
 

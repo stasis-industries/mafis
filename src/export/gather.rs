@@ -42,8 +42,8 @@ pub fn gather_snapshot(
     topology_name: &str,
     scheduler_name: &str,
     solver_name: &str,
-    solver_optimality: &str,
-    solver_scalability: &str,
+    solver_label: &str,
+    planner_params: &str,
     agent_data: &[AgentQueryItem],
 ) -> ExportSnapshot {
     let metadata = ExportMetadata {
@@ -68,8 +68,8 @@ pub fn gather_snapshot(
         tick_hz: sim_config.tick_hz,
         max_ticks: sim_config.max_ticks,
         solver_name: solver_name.to_string(),
-        solver_optimality: solver_optimality.to_string(),
-        solver_scalability: solver_scalability.to_string(),
+        solver_label: solver_label.to_string(),
+        planner_params: planner_params.to_string(),
         fault_enabled: fault_config.enabled,
         weibull_enabled: fault_config.weibull_enabled,
         weibull_beta: fault_config.weibull_beta,

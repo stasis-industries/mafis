@@ -4,7 +4,6 @@
 //! decides internally whether to replan (based on its own cadence) and returns
 //! either new plans or `Keep` (no work this tick).
 
-use bevy::ecs::resource::Resource;
 use bevy::math::IVec2;
 use smallvec::SmallVec;
 
@@ -14,7 +13,6 @@ use crate::core::task::TaskLeg;
 use crate::core::topology::ZoneMap;
 
 use super::heuristics::DistanceMapCache;
-use super::traits::SolverInfo;
 
 // ---------------------------------------------------------------------------
 // Observation passed to planners each tick
@@ -61,12 +59,6 @@ pub enum Decision<'a> {
 // ---------------------------------------------------------------------------
 
 pub trait Planner: Send + Sync + 'static {
-    /// Short identifier (e.g. `"pibt"`, `"rhcr_pbs"`).
-    fn name(&self) -> &'static str;
-
-    /// Structured metadata.
-    fn info(&self) -> SolverInfo;
-
     /// Called when the solver is activated or the scenario resets.
     fn reset(&mut self);
 
@@ -98,14 +90,6 @@ pub trait Planner: Send + Sync + 'static {
         Vec::new()
     }
 
-    /// Largest fleet this solver supports on the given map. Token Passing
-    /// derives it from the instance (one parking endpoint per agent, Ma et
-    /// al. 2017 well-formedness condition 2). Default: the static
-    /// `info().recommended_max_agents`.
-    fn max_agents(&self, _zones: &crate::core::topology::ZoneMap) -> Option<usize> {
-        self.info().recommended_max_agents
-    }
-
     /// Task selection owned by the solver itself. Token Passing assigns its
     /// own tasks (Ma et al. 2017); the runner then ignores the configured
     /// scheduler. Default: `None` — use the configured scheduler.
@@ -132,38 +116,5 @@ pub trait Planner: Send + Sync + 'static {
     /// plan (new goal, runner-forced wait, fault). Default: no telemetry.
     fn extra_replan_count(&self) -> Option<usize> {
         None
-    }
-}
-
-// ---------------------------------------------------------------------------
-// ActiveSolver resource
-// ---------------------------------------------------------------------------
-
-#[derive(Resource)]
-pub struct ActiveSolver {
-    solver: Box<dyn Planner>,
-    name: String,
-}
-
-impl ActiveSolver {
-    pub fn new(solver: Box<dyn Planner>) -> Self {
-        let name = solver.name().to_string();
-        Self { solver, name }
-    }
-
-    pub fn solver(&self) -> &dyn Planner {
-        self.solver.as_ref()
-    }
-
-    pub fn solver_mut(&mut self) -> &mut dyn Planner {
-        self.solver.as_mut()
-    }
-
-    pub fn name(&self) -> &str {
-        &self.name
-    }
-
-    pub fn info(&self) -> SolverInfo {
-        self.solver.info()
     }
 }

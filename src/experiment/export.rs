@@ -9,7 +9,7 @@ pub fn write_runs_csv<W: Write>(writer: &mut W, runs: &[RunResult]) -> std::io::
     // Header
     writeln!(
         writer,
-        "solver,topology,scenario,scheduler,num_agents,seed,is_baseline,\
+        "solver,planner_params,topology,scenario,scheduler,num_agents,seed,is_baseline,\
          avg_throughput,total_tasks,unassigned_ratio,wait_ratio,\
          fault_tolerance,critical_time,\
          deficit_recovery,throughput_recovery,mtbf,recovery_tick,\
@@ -46,7 +46,7 @@ fn write_run_row<W: Write>(
 ) -> std::io::Result<()> {
     writeln!(
         writer,
-        "{},{},{},{},{},{},{},\
+        "{},\"{}\",{},{},{},{},{},{},\
          {},{},{},{},\
          {},{},\
          {},{},{},{},\
@@ -58,6 +58,8 @@ fn write_run_row<W: Write>(
          {},{},{},\
          {},{},{},{},{},{}",
         config.solver_name,
+        // Quoted in the format string: the canonical text separates parameters with commas.
+        config.planner_params_text(),
         config.topology_name,
         config.scenario_label(),
         config.scheduler_name,
@@ -206,9 +208,9 @@ pub fn write_summary_csv<W: Write>(
 }
 
 /// Build the deduplication key for a run's baseline.
-/// Configs sharing `(solver, topology, scheduler, num_agents, seed, rhcr_override)`
-/// produce identical baselines; the ablation label is included so h=5 and h=20
-/// baselines don't collide.
+/// Configs sharing `(solver, topology, scheduler, num_agents, seed, planner params)`
+/// produce identical baselines; the parameters are included so runs of one
+/// planner with different parameters don't share a baseline.
 fn baseline_key_str(config: &super::config::ExperimentConfig) -> String {
     format!(
         "{}|{}|{}|{}|{}|{}",
@@ -217,7 +219,7 @@ fn baseline_key_str(config: &super::config::ExperimentConfig) -> String {
         config.scheduler_name,
         config.num_agents,
         config.seed,
-        config.rhcr_override_label(),
+        config.planner_params_text(),
     )
 }
 
@@ -291,10 +293,11 @@ pub fn write_matrix_json<W: Write>(writer: &mut W, result: &MatrixResult) -> std
 fn write_run_json<W: Write>(writer: &mut W, run: &RunResult) -> std::io::Result<()> {
     write!(
         writer,
-        "{{\"config\":{{\"solver\":\"{}\",\"topology\":\"{}\",\"scenario\":\"{}\",\
+        "{{\"config\":{{\"solver\":\"{}\",\"planner_params\":\"{}\",\"topology\":\"{}\",\"scenario\":\"{}\",\
          \"scheduler\":\"{}\",\"num_agents\":{},\"seed\":{},\"tick_count\":{},\
          \"fault_scenario\":",
         run.config.solver_name,
+        run.config.planner_params_text(),
         run.config.topology_name,
         run.config.scenario_label(),
         run.config.scheduler_name,
@@ -937,7 +940,7 @@ mod tests {
             seed: 42,
             tick_count: 20,
             custom_map: None,
-            rhcr_override: None,
+            planner_params: Default::default(),
         })
     }
 
@@ -1003,7 +1006,7 @@ mod tests {
                 agent_counts: vec![3],
                 seeds: vec![42],
                 tick_count: 20,
-                rhcr_overrides: vec![None],
+                planner_params: vec![Default::default()],
             },
             runs: vec![run],
             summaries: vec![],
@@ -1029,7 +1032,7 @@ mod tests {
             agent_counts: vec![3],
             seeds: vec![42, 123],
             tick_count: 20,
-            rhcr_overrides: vec![None],
+            planner_params: vec![Default::default()],
         };
         let result = crate::experiment::runner::run_matrix(&matrix, None);
 
@@ -1054,7 +1057,7 @@ mod tests {
             agent_counts: vec![3],
             seeds: vec![42],
             tick_count: 20,
-            rhcr_overrides: vec![None],
+            planner_params: vec![Default::default()],
         };
         let result = crate::experiment::runner::run_matrix(&matrix, None);
 
@@ -1081,7 +1084,7 @@ mod tests {
             agent_counts: vec![3],
             seeds: vec![42],
             tick_count: 20,
-            rhcr_overrides: vec![None],
+            planner_params: vec![Default::default()],
         };
         let result = crate::experiment::runner::run_matrix(&matrix, None);
 
@@ -1102,7 +1105,7 @@ mod tests {
             agent_counts: vec![3],
             seeds: vec![42],
             tick_count: 20,
-            rhcr_overrides: vec![None],
+            planner_params: vec![Default::default()],
         };
         let result = crate::experiment::runner::run_matrix(&matrix, None);
 

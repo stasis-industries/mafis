@@ -18,7 +18,6 @@ use mafis::fault::scenario::{
 };
 use mafis::planning::heuristics::DistanceMapCache;
 use mafis::planning::planner::{Decision, Observation, Planner};
-use mafis::planning::traits::SolverInfo;
 
 const SOLVERS: [&str; 3] = ["pibt", "rhcr_pbs", "token_passing"];
 const TOPOLOGY: &str = "warehouse_single_dock";
@@ -37,9 +36,7 @@ fn runner_with(
 }
 
 fn solver(name: &str, n: usize) -> Box<dyn Planner> {
-    let output = ActiveTopology::from_name(TOPOLOGY).topology().generate(0);
-    let area = (output.grid.width * output.grid.height) as usize;
-    mafis::planners::lifelong_solver_from_name(name, area, n).expect("known solver")
+    mafis::planning::registry::build(name, &Default::default(), n).expect("known solver")
 }
 
 fn no_faults() -> FaultConfig {
@@ -66,12 +63,6 @@ struct NoisyPibt {
 }
 
 impl Planner for NoisyPibt {
-    fn name(&self) -> &'static str {
-        "noisy_pibt"
-    }
-    fn info(&self) -> SolverInfo {
-        self.inner.info()
-    }
     fn reset(&mut self) {
         self.inner.reset();
     }
@@ -156,7 +147,7 @@ fn zero_magnitude_config(solver_name: &str, scenario: FaultScenario) -> Experime
         seed: 42,
         tick_count: 300,
         custom_map: None,
-        rhcr_override: None,
+        planner_params: Default::default(),
     }
 }
 

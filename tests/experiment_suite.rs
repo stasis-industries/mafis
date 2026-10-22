@@ -276,7 +276,7 @@ fn fault_from_env() {
         agent_counts: vec![num_agents],
         seeds: seeds.clone(),
         tick_count,
-        rhcr_overrides: vec![None],
+        planner_params: vec![Default::default()],
     };
 
     let result = run_matrix(&matrix, None);

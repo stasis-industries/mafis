@@ -25,7 +25,6 @@ impl Plugin for MapfFisPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
             core::CorePlugin,
-            planning::SolverPlugin,
             fault::FaultPlugin,
             analysis::AnalysisPlugin,
             ui::UiPlugin,

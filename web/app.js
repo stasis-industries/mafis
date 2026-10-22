@@ -1379,18 +1379,8 @@ function updateUI(s) {
     const infoCard = document.getElementById('solver-info-card');
     if (infoCard && s.solver_info) {
         infoCard.style.display = 'block';
-        document.getElementById('info-opt').textContent = s.solver_info.optimality;
-        document.getElementById('info-scale').textContent = s.solver_info.scalability;
-        document.getElementById('info-desc').textContent = s.solver_info.description;
-        document.getElementById('info-source').textContent = s.solver_info.source || '';
-
-        const warningEl = document.getElementById('info-warning');
-        if (s.solver_info.recommended_max_agents && s.num_agents > s.solver_info.recommended_max_agents) {
-            warningEl.textContent = `Warning: ${s.solver.toUpperCase()} is not recommended for \u003e${s.solver_info.recommended_max_agents} agents and may timeout.`;
-            warningEl.style.display = 'block';
-        } else {
-            warningEl.style.display = 'none';
-        }
+        document.getElementById('info-desc').textContent = s.solver_info.summary;
+        document.getElementById('info-source').textContent = s.solver_info.reference;
     } else if (infoCard) {
         infoCard.style.display = 'none';
     }
