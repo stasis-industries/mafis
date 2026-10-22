@@ -224,12 +224,19 @@ mod observatory_controls {
         mut materials: ResMut<Assets<StandardMaterial>>,
         mut res: LoadingResources,
         mut reset: ResetResources,
+        mut next_state: ResMut<NextState<SimState>>,
         queries: (
             Query<Entity, With<LogicalAgent>>,
             Query<Entity, With<ObstacleMarker>>,
             Query<Entity, With<EnvironmentMarker>>,
         ),
     ) {
+        if !crate::solver::is_known_planner(&res.ui_state.solver_name) {
+            error!("unknown planner '{}': loading stopped", res.ui_state.solver_name);
+            next_state.set(SimState::Idle);
+            return;
+        }
+
         let (existing_agents, existing_obstacles, existing_env) = queries;
 
         let new_fp = compute_fingerprint(&res.ui_state);
@@ -253,16 +260,14 @@ mod observatory_controls {
             let grid_w = res.ui_state.grid_width as usize;
             let grid_h = res.ui_state.grid_height as usize;
             let num_agents = res.ui_state.num_agents;
-            if let Some(fresh) = crate::solver::lifelong_solver_from_name_sized(
+            let fresh = crate::solver::lifelong_solver_from_name_sized(
                 &res.ui_state.solver_name,
                 grid_w,
                 grid_h,
                 num_agents,
-            ) {
-                *reset.solver = ActiveSolver::new(fresh);
-            } else {
-                reset.solver.reset();
-            }
+            )
+            .expect("planner id checked at the start of begin_loading");
+            *reset.solver = ActiveSolver::new(fresh);
         }
         reset.dist_cache.clear();
         reset.cascade.clear();
@@ -384,7 +389,7 @@ mod observatory_controls {
                 runner_grid.height as usize,
                 actual_agents,
             )
-            .unwrap_or_else(|| Box::new(crate::solver::pibt::PibtLifelongSolver::new()));
+            .expect("planner id checked at the start of begin_loading");
 
             let runner = SimulationRunner::new(
                 runner_grid,

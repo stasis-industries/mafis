@@ -472,6 +472,8 @@ pub(super) fn process_js_commands(
                             sim_res.ui_state.rhcr_horizon = None;
                             sim_res.ui_state.rhcr_replan_interval = None;
                             *sim_res.solver = ActiveSolver::new(new_solver);
+                        } else {
+                            error!("unknown planner '{name}'");
                         }
                     }
                 }
