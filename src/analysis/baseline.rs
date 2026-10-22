@@ -387,7 +387,7 @@ pub fn start_headless(config: &BaselineConfig) -> BaselineComputation {
         (grid.width * grid.height) as usize,
         actual_agents,
     )
-    .unwrap_or_else(|| Box::new(crate::planners::pibt::PibtLifelongSolver::new()));
+    .unwrap_or_else(|| Box::new(crate::planners::pibt::PibtPlanner::new()));
 
     let scheduler = ActiveScheduler::from_name(&config.scheduler_name);
     let queue_policy = ActiveQueuePolicy::from_name("closest");

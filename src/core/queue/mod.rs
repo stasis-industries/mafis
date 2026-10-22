@@ -5,7 +5,7 @@
 //! shuffle forward each tick, and get promoted to delivery when the cell is free.
 //!
 //! Queue assignment policy (`DeliveryQueuePolicy`) is a swappable research
-//! variable — parallel to `TaskScheduler` and `LifelongSolver`.
+//! variable — parallel to `TaskScheduler` and `Planner`.
 
 pub mod policy;
 pub use policy::*;

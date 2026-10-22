@@ -17,16 +17,14 @@ use crate::core::task::TaskLeg;
 
 use crate::planners::toolkit::pibt_core::PibtCore;
 use crate::planning::heuristics::{DistanceMap, DistanceMapCache, compute_distance_maps};
-use crate::planning::planner::{
-    ActiveSolver, AgentPlan, AgentState, LifelongSolver, SolverContext, StepResult,
-};
+use crate::planning::planner::{ActiveSolver, AgentPlan, Decision, Observation, Planner};
 use crate::planning::traits::{MAPFSolver, Optimality, Scalability, SolverError, SolverInfo};
 
 // ---------------------------------------------------------------------------
-// PibtLifelongSolver — implements LifelongSolver
+// PibtPlanner — implements Planner
 // ---------------------------------------------------------------------------
 
-pub struct PibtLifelongSolver {
+pub struct PibtPlanner {
     core: PibtCore,
     plan_buffer: Vec<AgentPlan>,
     // Pre-allocated per-tick scratch buffers — avoids allocation on every step()
@@ -50,7 +48,7 @@ fn carries_task(leg: &TaskLeg) -> bool {
     )
 }
 
-impl PibtLifelongSolver {
+impl PibtPlanner {
     pub fn new() -> Self {
         Self {
             core: PibtCore::new(),
@@ -64,13 +62,13 @@ impl PibtLifelongSolver {
     }
 }
 
-impl Default for PibtLifelongSolver {
+impl Default for PibtPlanner {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl LifelongSolver for PibtLifelongSolver {
+impl Planner for PibtPlanner {
     fn name(&self) -> &'static str {
         "pibt"
     }
@@ -93,26 +91,26 @@ impl LifelongSolver for PibtLifelongSolver {
 
     fn step<'a>(
         &'a mut self,
-        ctx: &SolverContext,
-        agents: &[AgentState],
+        obs: &Observation,
         distance_cache: &mut DistanceMapCache,
         rng: &mut SeededRng,
-    ) -> StepResult<'a> {
+    ) -> Decision<'a> {
+        let agents = obs.agents;
         // Derive shuffle seed from tick so tie-breaking is deterministic
         // after rewind (survives solver.reset() which clears the counter).
-        self.core.set_shuffle_seed(ctx.tick);
+        self.core.set_shuffle_seed(obs.tick);
         self.core.set_tie_salt(rng.seed());
 
         if agents.is_empty() {
             self.plan_buffer.clear();
-            return StepResult::Replan(&self.plan_buffer);
+            return Decision::Plans(&self.plan_buffer);
         }
 
         // Build position/goal pairs for distance cache — reuse buffer
         self.agent_pairs_buf.clear();
         self.agent_pairs_buf.extend(agents.iter().map(|a| (a.pos, a.goal.unwrap_or(a.pos))));
 
-        let dist_maps = distance_cache.get_or_compute(ctx.grid, &self.agent_pairs_buf);
+        let dist_maps = distance_cache.get_or_compute(obs.grid, &self.agent_pairs_buf);
 
         self.positions_buf.clear();
         self.positions_buf.extend(agents.iter().map(|a| a.pos));
@@ -132,7 +130,7 @@ impl LifelongSolver for PibtLifelongSolver {
         let actions = self.core.one_step_with_tasks(
             &self.positions_buf,
             &self.goals_buf,
-            ctx.grid,
+            obs.grid,
             &dist_maps,
             &self.ids_buf,
             &self.has_task_buf,
@@ -144,7 +142,7 @@ impl LifelongSolver for PibtLifelongSolver {
             self.plan_buffer.push((agents[i].index, smallvec![action]));
         }
 
-        StepResult::Replan(&self.plan_buffer)
+        Decision::Plans(&self.plan_buffer)
     }
 
     fn save_priorities(&self) -> Vec<f32> {
@@ -270,13 +268,14 @@ impl PibtSolver {
 // ---------------------------------------------------------------------------
 
 pub fn default_active_solver() -> ActiveSolver {
-    ActiveSolver::new(Box::new(PibtLifelongSolver::new()))
+    ActiveSolver::new(Box::new(PibtPlanner::new()))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::core::grid::GridMap;
+    use crate::planning::planner::AgentView;
 
     fn solver() -> PibtSolver {
         PibtSolver::default()
@@ -551,14 +550,14 @@ mod tests {
         let grid = GridMap::new(5, 3);
         let zones = ZoneMap::default();
         let agents = vec![
-            AgentState {
+            AgentView {
                 index: 0,
                 pos: IVec2::new(0, 1),
                 goal: Some(goal_a),
                 has_plan: false,
                 task_leg: leg_a,
             },
-            AgentState {
+            AgentView {
                 index: 1,
                 pos: IVec2::new(1, 0),
                 goal: Some(goal_b),
@@ -566,11 +565,13 @@ mod tests {
                 task_leg: leg_b,
             },
         ];
-        let ctx = SolverContext { grid: &grid, zones: &zones, tick: 0, num_agents: 2 };
-        let mut solver = PibtLifelongSolver::new();
+        let obs = Observation { tick: 0, grid: &grid, zones: &zones, agents: &[] };
+        let mut solver = PibtPlanner::new();
         let mut cache = DistanceMapCache::default();
         let mut rng = SeededRng::new(seed);
-        let StepResult::Replan(plans) = solver.step(&ctx, &agents, &mut cache, &mut rng) else {
+        let Decision::Plans(plans) =
+            solver.step(&Observation { agents: &agents, ..obs }, &mut cache, &mut rng)
+        else {
             panic!("PIBT always replans");
         };
         let target = IVec2::new(1, 1);
@@ -623,7 +624,7 @@ mod tests {
             queue_lines: Vec::new(),
         };
 
-        let mut solver = PibtLifelongSolver::new();
+        let mut solver = PibtPlanner::new();
         let mut cache = DistanceMapCache::default();
         let mut rng = crate::core::seed::SeededRng::new(42);
 
@@ -632,21 +633,21 @@ mod tests {
         let goal = IVec2::new(7, 7);
 
         for tick in 0..100 {
-            let agents = vec![AgentState {
+            let agents = vec![AgentView {
                 index: 0,
                 pos,
                 goal: Some(goal),
                 has_plan: tick > 0,
                 task_leg: crate::core::task::TaskLeg::TravelEmpty(goal),
             }];
-            let ctx = crate::planning::planner::SolverContext {
+            let obs = crate::planning::planner::Observation {
                 grid: &grid,
                 zones: &zones,
                 tick,
-                num_agents: 1,
+                agents: &agents,
             };
-            if let crate::planning::planner::StepResult::Replan(plans) =
-                solver.step(&ctx, &agents, &mut cache, &mut rng)
+            if let crate::planning::planner::Decision::Plans(plans) =
+                solver.step(&obs, &mut cache, &mut rng)
             {
                 if let Some((_, actions)) = plans.first() {
                     if let Some(action) = actions.first() {
@@ -682,7 +683,7 @@ mod tests {
             queue_lines: Vec::new(),
         };
 
-        let mut solver = PibtLifelongSolver::new();
+        let mut solver = PibtPlanner::new();
         let mut cache = DistanceMapCache::default();
         let mut rng = crate::core::seed::SeededRng::new(42);
 
@@ -703,8 +704,8 @@ mod tests {
         let mut goals_reached = 0;
 
         for tick in 0..200 {
-            let agents: Vec<AgentState> = (0..5)
-                .map(|i| AgentState {
+            let agents: Vec<AgentView> = (0..5)
+                .map(|i| AgentView {
                     index: i,
                     pos: positions[i],
                     goal: Some(goals[i]),
@@ -713,14 +714,14 @@ mod tests {
                 })
                 .collect();
 
-            let ctx = crate::planning::planner::SolverContext {
+            let obs = crate::planning::planner::Observation {
                 grid: &grid,
                 zones: &zones,
                 tick,
-                num_agents: 5,
+                agents: &agents,
             };
-            if let crate::planning::planner::StepResult::Replan(plans) =
-                solver.step(&ctx, &agents, &mut cache, &mut rng)
+            if let crate::planning::planner::Decision::Plans(plans) =
+                solver.step(&obs, &mut cache, &mut rng)
             {
                 for (idx, actions) in plans {
                     if let Some(action) = actions.first() {

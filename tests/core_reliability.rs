@@ -17,14 +17,14 @@ use mafis::fault::scenario::{
     FaultScenario, FaultScenarioType, FaultSchedule, ScheduledAction, ScheduledEvent,
 };
 use mafis::planning::heuristics::DistanceMapCache;
-use mafis::planning::planner::{AgentState, LifelongSolver, SolverContext, StepResult};
+use mafis::planning::planner::{Decision, Observation, Planner};
 use mafis::planning::traits::SolverInfo;
 
 const SOLVERS: [&str; 3] = ["pibt", "rhcr_pbs", "token_passing"];
 const TOPOLOGY: &str = "warehouse_single_dock";
 
 fn runner_with(
-    solver: Box<dyn LifelongSolver>,
+    solver: Box<dyn Planner>,
     n: usize,
     seed: u64,
     fault_config: FaultConfig,
@@ -36,7 +36,7 @@ fn runner_with(
     SimulationRunner::new(output.grid, output.zones, agents, solver, rng, fault_config, schedule)
 }
 
-fn solver(name: &str, n: usize) -> Box<dyn LifelongSolver> {
+fn solver(name: &str, n: usize) -> Box<dyn Planner> {
     let output = ActiveTopology::from_name(TOPOLOGY).topology().generate(0);
     let area = (output.grid.width * output.grid.height) as usize;
     mafis::planners::lifelong_solver_from_name(name, area, n).expect("known solver")
@@ -62,10 +62,10 @@ fn positions(runner: &SimulationRunner) -> Vec<(IVec2, bool)> {
 /// RNG after planning. If the solver stream is shared with task demand or
 /// carried across ticks, the trajectory diverges from plain PIBT.
 struct NoisyPibt {
-    inner: Box<dyn LifelongSolver>,
+    inner: Box<dyn Planner>,
 }
 
-impl LifelongSolver for NoisyPibt {
+impl Planner for NoisyPibt {
     fn name(&self) -> &'static str {
         "noisy_pibt"
     }
@@ -77,13 +77,12 @@ impl LifelongSolver for NoisyPibt {
     }
     fn step<'a>(
         &'a mut self,
-        ctx: &SolverContext,
-        agents: &[AgentState],
+        obs: &Observation,
         distance_cache: &mut DistanceMapCache,
         rng: &mut SeededRng,
-    ) -> StepResult<'a> {
-        let result = self.inner.step(ctx, agents, distance_cache, rng);
-        for _ in 0..(ctx.tick % 5) {
+    ) -> Decision<'a> {
+        let result = self.inner.step(obs, distance_cache, rng);
+        for _ in 0..(obs.tick % 5) {
             let _: u64 = rng.rng.random();
         }
         result

@@ -154,7 +154,7 @@ pub fn run_single_experiment(config: &ExperimentConfig) -> RunResult {
         analysis.compute_aggregates();
 
         let bl_wall_ms = wall_start.elapsed().as_millis() as u64;
-        let partial_rate = runner.solver().pbs_partial_rate();
+        let partial_rate = runner.planner().pbs_partial_rate();
 
         // Baseline self-metrics (no clone needed — computed directly from engine)
         baseline_metrics =
@@ -222,7 +222,7 @@ pub fn run_single_experiment(config: &ExperimentConfig) -> RunResult {
         analysis.compute_aggregates();
 
         let faulted_wall_ms = faulted_start.elapsed().as_millis() as u64;
-        let partial_rate = runner.solver().pbs_partial_rate();
+        let partial_rate = runner.planner().pbs_partial_rate();
 
         let mut fm = compute_run_metrics(
             &baseline_record,
@@ -483,7 +483,7 @@ fn run_baseline_only(config: &ExperimentConfig) -> CachedBaseline {
     analysis.compute_aggregates();
 
     let bl_wall_ms = wall_start.elapsed().as_millis() as u64;
-    let partial_rate = runner.solver().pbs_partial_rate();
+    let partial_rate = runner.planner().pbs_partial_rate();
     let mut metrics =
         super::metrics::compute_baseline_self_metrics(&analysis, &step_times, bl_wall_ms);
     metrics.pbs_partial_rate = partial_rate;
@@ -553,7 +553,7 @@ fn run_faulted_only(config: &ExperimentConfig, cached: &CachedBaseline) -> RunRe
     analysis.compute_aggregates();
 
     let faulted_wall_ms = faulted_start.elapsed().as_millis() as u64;
-    let partial_rate = runner.solver().pbs_partial_rate();
+    let partial_rate = runner.planner().pbs_partial_rate();
 
     let mut fm = compute_run_metrics(
         &cached.record,

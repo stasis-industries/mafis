@@ -37,7 +37,7 @@ use crate::core::seed::SeededRng;
 use super::windowed::{WindowAgent, WindowContext, WindowResult, WindowedPlanner};
 use crate::planners::toolkit::pibt_core::PibtCore;
 use crate::planning::heuristics::DistanceMapCache;
-use crate::planning::planner::{AgentPlan, AgentState, LifelongSolver, SolverContext, StepResult};
+use crate::planning::planner::{AgentPlan, AgentView, Decision, Observation, Planner};
 use crate::planning::traits::{Optimality, Scalability, SolverInfo};
 
 use super::pbs_planner::PbsPlanner;
@@ -92,7 +92,7 @@ impl RhcrConfig {
 // RHCR Solver
 // ---------------------------------------------------------------------------
 
-pub struct RhcrSolver {
+pub struct RhcrPlanner {
     config: RhcrConfig,
     planner: Box<dyn WindowedPlanner>,
     pibt_fallback: PibtCore,
@@ -133,7 +133,7 @@ pub struct RhcrSolver {
     pbs_partial_count: usize,
 }
 
-impl RhcrSolver {
+impl RhcrPlanner {
     pub fn new(config: RhcrConfig) -> Self {
         let planner: Box<dyn WindowedPlanner> = Box::new(PbsPlanner::new());
 
@@ -171,7 +171,7 @@ impl RhcrSolver {
     ///
     /// Use this from production paths that know the grid dimensions ahead of
     /// time (the `lifelong_solver_from_name_sized` factory). Tests and the
-    /// experiment runner can keep using [`RhcrSolver::new`].
+    /// experiment runner can keep using [`RhcrPlanner::new`].
     pub fn with_grid(config: RhcrConfig, grid_w: usize, grid_h: usize) -> Self {
         let max_goals = constants::PBS_GOAL_SEQUENCE_MAX_LEN + 1;
         let planner: Box<dyn WindowedPlanner> =
@@ -206,7 +206,7 @@ impl RhcrSolver {
     }
 
     /// Track per-agent movement each tick for the reference congestion test.
-    fn track_movement(&mut self, agents: &[AgentState]) {
+    fn track_movement(&mut self, agents: &[AgentView]) {
         for a in agents {
             if self.last_pos.len() <= a.index {
                 self.last_pos.resize(a.index + 1, None);
@@ -222,7 +222,7 @@ impl RhcrSolver {
     /// Reference `BasicSystem::congested()` (BasicSystem.cpp:310): more than
     /// half the agents made no move during the window that just ended.
     /// Called at each replan; the first window has no history and is skipped.
-    fn close_window(&mut self, agents: &[AgentState]) {
+    fn close_window(&mut self, agents: &[AgentView]) {
         if self.pbs_total_replans > 0 && !agents.is_empty() {
             let still = agents.iter().filter(|a| !self.moved_in_window[a.index]).count();
             self.congestion_checks += 1;
@@ -245,7 +245,7 @@ impl RhcrSolver {
     /// means higher priority.
     fn lra_resolve_conflicts(
         plans: &[(usize, Vec<Action>)],
-        agents: &[AgentState],
+        agents: &[AgentView],
         _grid: &GridMap,
         max_steps: usize,
     ) -> Vec<AgentPlan> {
@@ -256,7 +256,7 @@ impl RhcrSolver {
             return Vec::new();
         }
 
-        // Current position per slot (initialized from AgentState)
+        // Current position per slot (initialized from AgentView)
         let mut cur_pos: Vec<IVec2> = plans
             .iter()
             .map(|(idx, _)| {
@@ -393,7 +393,7 @@ impl RhcrSolver {
     fn pibt_fallback_for(
         &mut self,
         failed_indices: &[usize],
-        agents: &[AgentState],
+        agents: &[AgentView],
         distance_cache: &mut DistanceMapCache,
         grid: &GridMap,
         solved_first_steps: &[(usize, IVec2)],
@@ -403,7 +403,7 @@ impl RhcrSolver {
         }
 
         // Build sub-problem for failed agents only
-        let sub_agents: Vec<&AgentState> = failed_indices
+        let sub_agents: Vec<&AgentView> = failed_indices
             .iter()
             .filter_map(|&idx| agents.iter().find(|a| a.index == idx))
             .collect();
@@ -466,7 +466,7 @@ impl RhcrSolver {
 }
 
 /// Agent has somewhere to go but no plan (new goal, cleared by the runner).
-fn needs_plan(a: &AgentState) -> bool {
+fn needs_plan(a: &AgentView) -> bool {
     !a.has_plan && a.goal.is_some_and(|g| g != a.pos)
 }
 
@@ -474,7 +474,7 @@ fn needs_plan(a: &AgentState) -> bool {
 /// cleared it). Plans issued at tick `t` start executing at `t + 1`.
 fn remaining_plan<'p>(
     issued: &'p [(u64, smallvec::SmallVec<[Action; 20]>)],
-    a: &AgentState,
+    a: &AgentView,
     tick: u64,
 ) -> &'p [Action] {
     match issued.get(a.index) {
@@ -504,7 +504,7 @@ fn fixed_path_constraints(
     }
 }
 
-impl LifelongSolver for RhcrSolver {
+impl Planner for RhcrPlanner {
     fn name(&self) -> &'static str {
         "rhcr_pbs"
     }
@@ -564,15 +564,15 @@ impl LifelongSolver for RhcrSolver {
 
     fn step<'a>(
         &'a mut self,
-        ctx: &SolverContext,
-        agents: &[AgentState],
+        obs: &Observation,
         distance_cache: &mut DistanceMapCache,
         rng: &mut SeededRng,
-    ) -> StepResult<'a> {
+    ) -> Decision<'a> {
+        let agents = obs.agents;
         self.ticks_since_replan += 1;
 
         // Sync PIBT fallback shuffle seed with tick for deterministic tie-breaking after rewind.
-        self.pibt_fallback.set_shuffle_seed(ctx.tick);
+        self.pibt_fallback.set_shuffle_seed(obs.tick);
         self.pibt_fallback.set_tie_salt(rng.seed());
 
         self.track_movement(agents);
@@ -589,13 +589,13 @@ impl LifelongSolver for RhcrSolver {
             self.ticks_since_replan = 0;
             self.close_window(agents);
         } else if !agents.iter().any(needs_plan) {
-            return StepResult::Continue;
+            return Decision::Keep;
         } else {
             self.extra_replans += 1;
         }
 
         if agents.is_empty() {
-            return StepResult::Replan(&self.plan_buffer);
+            return Decision::Plans(&self.plan_buffer);
         }
 
         // Each agent plans to its current goal and holds it — the reference's
@@ -607,7 +607,7 @@ impl LifelongSolver for RhcrSolver {
         self.scratch_fixed_vertices.clear();
         self.scratch_fixed_edges.clear();
         for a in agents {
-            let remaining = remaining_plan(&self.issued, a, ctx.tick);
+            let remaining = remaining_plan(&self.issued, a, obs.tick);
             if window || needs_plan(a) {
                 self.scratch_window_agents.push(WindowAgent {
                     index: a.index,
@@ -620,7 +620,7 @@ impl LifelongSolver for RhcrSolver {
                 let valid = !remaining.is_empty()
                     && remaining.iter().all(|act| {
                         pos = act.apply(pos);
-                        ctx.grid.is_walkable(pos)
+                        obs.grid.is_walkable(pos)
                     });
                 self.scratch_initial_plans.push(valid.then(|| remaining.to_vec()));
             } else {
@@ -639,7 +639,7 @@ impl LifelongSolver for RhcrSolver {
             .extend(self.scratch_window_agents.iter().map(|a| (a.pos, 0u64)));
 
         let window_ctx = WindowContext {
-            grid: ctx.grid,
+            grid: obs.grid,
             horizon: self.config.horizon,
             node_limit: self.config.pbs_node_limit,
             agents: &self.scratch_window_agents,
@@ -685,7 +685,7 @@ impl LifelongSolver for RhcrSolver {
                 }
 
                 let resolved =
-                    Self::lra_resolve_conflicts(&combined, agents, ctx.grid, self.config.horizon);
+                    Self::lra_resolve_conflicts(&combined, agents, obs.grid, self.config.horizon);
 
                 // LRA may leave a failed agent waiting the whole window; give
                 // it one PIBT step (MAFIS addition).
@@ -702,7 +702,7 @@ impl LifelongSolver for RhcrSolver {
                         &pibt_needed,
                         agents,
                         distance_cache,
-                        ctx.grid,
+                        obs.grid,
                         &solved_first_steps,
                     );
                 }
@@ -713,10 +713,10 @@ impl LifelongSolver for RhcrSolver {
             if self.issued.len() <= *idx {
                 self.issued.resize(*idx + 1, (0, smallvec::SmallVec::new()));
             }
-            self.issued[*idx] = (ctx.tick, actions.clone());
+            self.issued[*idx] = (obs.tick, actions.clone());
         }
 
-        StepResult::Replan(&self.plan_buffer)
+        Decision::Plans(&self.plan_buffer)
     }
 
     fn pbs_partial_rate(&self) -> Option<f32> {
@@ -763,10 +763,10 @@ mod tests {
         let grid = GridMap::new(5, 5);
         let zones = test_zones();
         let config = RhcrConfig { horizon: 10, replan_interval: 5, pbs_node_limit: 100 };
-        let mut solver = RhcrSolver::new(config);
+        let mut solver = RhcrPlanner::new(config);
         let mut cache = DistanceMapCache::default();
         let mut rng = SeededRng::new(42);
-        let agents = vec![AgentState {
+        let agents = vec![AgentView {
             index: 0,
             pos: IVec2::ZERO,
             goal: Some(IVec2::new(4, 4)),
@@ -774,35 +774,37 @@ mod tests {
             task_leg: TaskLeg::Free,
         }];
 
-        let ctx = SolverContext { grid: &grid, zones: &zones, tick: 0, num_agents: 1 };
+        let obs = Observation { tick: 0, grid: &grid, zones: &zones, agents: &[] };
 
         // First call should replan immediately (counter starts at W-1)
-        let result = solver.step(&ctx, &agents, &mut cache, &mut rng);
-        assert!(matches!(result, StepResult::Replan(_)));
+        let result = solver.step(&Observation { agents: &agents, ..obs }, &mut cache, &mut rng);
+        assert!(matches!(result, Decision::Plans(_)));
 
         // After replan, agent has a plan — simulate ECS applying it.
         for tick in 1..=4 {
-            let agents_moving = vec![AgentState {
+            let agents_moving = vec![AgentView {
                 index: 0,
                 pos: IVec2::new(tick, 0),
                 goal: Some(IVec2::new(4, 4)),
                 has_plan: true,
                 task_leg: TaskLeg::Free,
             }];
-            let result = solver.step(&ctx, &agents_moving, &mut cache, &mut rng);
-            assert!(matches!(result, StepResult::Continue), "tick {} should be Continue", tick);
+            let result =
+                solver.step(&Observation { agents: &agents_moving, ..obs }, &mut cache, &mut rng);
+            assert!(matches!(result, Decision::Keep), "tick {} should be Continue", tick);
         }
 
         // 5th call after replan should replan again
-        let agents_at_4 = vec![AgentState {
+        let agents_at_4 = vec![AgentView {
             index: 0,
             pos: IVec2::new(4, 1),
             goal: Some(IVec2::new(4, 4)),
             has_plan: true,
             task_leg: TaskLeg::Free,
         }];
-        let result = solver.step(&ctx, &agents_at_4, &mut cache, &mut rng);
-        assert!(matches!(result, StepResult::Replan(_)));
+        let result =
+            solver.step(&Observation { agents: &agents_at_4, ..obs }, &mut cache, &mut rng);
+        assert!(matches!(result, Decision::Plans(_)));
     }
 
     #[test]
@@ -811,7 +813,7 @@ mod tests {
         // not Some(0.0), so downstream code can distinguish "no data" from
         // "zero partials over N windows".
         let cfg = RhcrConfig { horizon: 10, replan_interval: 5, pbs_node_limit: 100 };
-        let solver = RhcrSolver::new(cfg);
+        let solver = RhcrPlanner::new(cfg);
         assert_eq!(solver.pbs_partial_rate(), None);
     }
 
@@ -822,19 +824,19 @@ mod tests {
         let grid = GridMap::new(5, 5);
         let zones = test_zones();
         let cfg = RhcrConfig { horizon: 10, replan_interval: 1, pbs_node_limit: 500 };
-        let mut solver = RhcrSolver::new(cfg);
+        let mut solver = RhcrPlanner::new(cfg);
         let mut cache = DistanceMapCache::default();
         let mut rng = SeededRng::new(42);
-        let agents = vec![AgentState {
+        let agents = vec![AgentView {
             index: 0,
             pos: IVec2::ZERO,
             goal: Some(IVec2::new(4, 4)),
             has_plan: false,
             task_leg: TaskLeg::Free,
         }];
-        let ctx = SolverContext { grid: &grid, zones: &zones, tick: 0, num_agents: 1 };
+        let obs = Observation { tick: 0, grid: &grid, zones: &zones, agents: &[] };
 
-        let _ = solver.step(&ctx, &agents, &mut cache, &mut rng);
+        let _ = solver.step(&Observation { agents: &agents, ..obs }, &mut cache, &mut rng);
 
         match solver.pbs_partial_rate() {
             Some(r) => {
@@ -851,19 +853,19 @@ mod tests {
         let grid = GridMap::new(5, 5);
         let zones = test_zones();
         let cfg = RhcrConfig { horizon: 10, replan_interval: 1, pbs_node_limit: 500 };
-        let mut solver = RhcrSolver::new(cfg);
+        let mut solver = RhcrPlanner::new(cfg);
         let mut cache = DistanceMapCache::default();
         let mut rng = SeededRng::new(42);
-        let agents = vec![AgentState {
+        let agents = vec![AgentView {
             index: 0,
             pos: IVec2::ZERO,
             goal: Some(IVec2::new(4, 4)),
             has_plan: false,
             task_leg: TaskLeg::Free,
         }];
-        let ctx = SolverContext { grid: &grid, zones: &zones, tick: 0, num_agents: 1 };
+        let obs = Observation { tick: 0, grid: &grid, zones: &zones, agents: &[] };
 
-        let _ = solver.step(&ctx, &agents, &mut cache, &mut rng);
+        let _ = solver.step(&Observation { agents: &agents, ..obs }, &mut cache, &mut rng);
         assert!(solver.pbs_partial_rate().is_some(), "must have rate after step");
 
         solver.reset();
@@ -891,13 +893,13 @@ mod tests {
         let grid = GridMap::new(5, 1);
         let zones = test_zones();
         let cfg = RhcrConfig { horizon: 10, replan_interval: 5, pbs_node_limit: 50 };
-        let mut solver = RhcrSolver::new(cfg);
+        let mut solver = RhcrPlanner::new(cfg);
         let mut cache = DistanceMapCache::default();
         let mut rng = SeededRng::new(42);
-        let agents: Vec<AgentState> = [(0, 4), (4, 0)]
+        let agents: Vec<AgentView> = [(0, 4), (4, 0)]
             .iter()
             .enumerate()
-            .map(|(i, &(from, to))| AgentState {
+            .map(|(i, &(from, to))| AgentView {
                 index: i,
                 pos: IVec2::new(from, 0),
                 goal: Some(IVec2::new(to, 0)),
@@ -905,8 +907,10 @@ mod tests {
                 task_leg: TaskLeg::Free,
             })
             .collect();
-        let ctx = SolverContext { grid: &grid, zones: &zones, tick: 0, num_agents: 2 };
-        let StepResult::Replan(plans) = solver.step(&ctx, &agents, &mut cache, &mut rng) else {
+        let obs = Observation { tick: 0, grid: &grid, zones: &zones, agents: &[] };
+        let Decision::Plans(plans) =
+            solver.step(&Observation { agents: &agents, ..obs }, &mut cache, &mut rng)
+        else {
             panic!("first step replans");
         };
         // LRA output must be collision-free.
@@ -924,11 +928,11 @@ mod tests {
         let grid = GridMap::new(5, 5);
         let zones = test_zones();
         let cfg = RhcrConfig { horizon: 10, replan_interval: 2, pbs_node_limit: 100 };
-        let mut solver = RhcrSolver::new(cfg);
+        let mut solver = RhcrPlanner::new(cfg);
         let mut cache = DistanceMapCache::default();
         let mut rng = SeededRng::new(42);
-        let agents: Vec<AgentState> = (0..3)
-            .map(|i| AgentState {
+        let agents: Vec<AgentView> = (0..3)
+            .map(|i| AgentView {
                 index: i,
                 pos: IVec2::new(i as i32, 2),
                 goal: Some(IVec2::new(i as i32, 2)),
@@ -936,10 +940,10 @@ mod tests {
                 task_leg: TaskLeg::Free,
             })
             .collect();
-        let ctx = SolverContext { grid: &grid, zones: &zones, tick: 0, num_agents: 3 };
+        let obs = Observation { tick: 0, grid: &grid, zones: &zones, agents: &[] };
         assert_eq!(solver.congested_window_rate(), None);
         for _ in 0..5 {
-            let _ = solver.step(&ctx, &agents, &mut cache, &mut rng);
+            let _ = solver.step(&Observation { agents: &agents, ..obs }, &mut cache, &mut rng);
         }
         assert_eq!(solver.congested_window_rate(), Some(1.0));
     }
@@ -949,18 +953,18 @@ mod tests {
         let grid = GridMap::new(5, 5);
         let zones = test_zones();
         let config = RhcrConfig { horizon: 15, replan_interval: 1, pbs_node_limit: 500 };
-        let mut solver = RhcrSolver::new(config);
+        let mut solver = RhcrPlanner::new(config);
         let mut cache = DistanceMapCache::default();
         let mut rng = SeededRng::new(42);
         let agents = vec![
-            AgentState {
+            AgentView {
                 index: 0,
                 pos: IVec2::new(0, 0),
                 goal: Some(IVec2::new(4, 0)),
                 has_plan: false,
                 task_leg: TaskLeg::Free,
             },
-            AgentState {
+            AgentView {
                 index: 1,
                 pos: IVec2::new(0, 4),
                 goal: Some(IVec2::new(4, 4)),
@@ -969,10 +973,10 @@ mod tests {
             },
         ];
 
-        let ctx = SolverContext { grid: &grid, zones: &zones, tick: 0, num_agents: 2 };
-        let result = solver.step(&ctx, &agents, &mut cache, &mut rng);
+        let obs = Observation { tick: 0, grid: &grid, zones: &zones, agents: &[] };
+        let result = solver.step(&Observation { agents: &agents, ..obs }, &mut cache, &mut rng);
         match result {
-            StepResult::Replan(plans) => {
+            Decision::Plans(plans) => {
                 assert_eq!(plans.len(), 2);
                 assert!(!plans[0].1.is_empty());
                 assert!(!plans[1].1.is_empty());
@@ -986,10 +990,10 @@ mod tests {
         let grid = GridMap::new(5, 5);
         let zones = test_zones();
         let config = RhcrConfig { horizon: 10, replan_interval: 5, pbs_node_limit: 100 };
-        let mut solver = RhcrSolver::new(config);
+        let mut solver = RhcrPlanner::new(config);
         let mut cache = DistanceMapCache::default();
         let mut rng = SeededRng::new(42);
-        let state = |index, pos, goal, has_plan| AgentState {
+        let state = |index, pos, goal, has_plan| AgentView {
             index,
             pos,
             goal: Some(goal),
@@ -1003,8 +1007,10 @@ mod tests {
             state(0, IVec2::new(0, 2), a0_goal, false),
             state(1, IVec2::new(2, 0), IVec2::new(2, 0), false),
         ];
-        let ctx = SolverContext { grid: &grid, zones: &zones, tick: 0, num_agents: 2 };
-        let StepResult::Replan(plans) = solver.step(&ctx, &agents, &mut cache, &mut rng) else {
+        let obs = Observation { tick: 0, grid: &grid, zones: &zones, agents: &[] };
+        let Decision::Plans(plans) =
+            solver.step(&Observation { agents: &agents, ..obs }, &mut cache, &mut rng)
+        else {
             panic!("tick 0 is a window");
         };
         let p0: Vec<Action> = plans.iter().find(|(i, _)| *i == 0).unwrap().1.to_vec();
@@ -1015,8 +1021,10 @@ mod tests {
         let a1_goal = IVec2::new(2, 4);
         let agents =
             vec![state(0, a0_pos, a0_goal, true), state(1, IVec2::new(2, 0), a1_goal, false)];
-        let ctx = SolverContext { grid: &grid, zones: &zones, tick: 1, num_agents: 2 };
-        let StepResult::Replan(plans) = solver.step(&ctx, &agents, &mut cache, &mut rng) else {
+        let obs = Observation { tick: 1, grid: &grid, zones: &zones, agents: &[] };
+        let Decision::Plans(plans) =
+            solver.step(&Observation { agents: &agents, ..obs }, &mut cache, &mut rng)
+        else {
             panic!("planless agent must be planned before the next window");
         };
         assert_eq!(plans.len(), 1, "agent 0 keeps its path");
@@ -1070,7 +1078,7 @@ mod tests {
             vec![std::collections::VecDeque::new(); n];
 
         let config = RhcrConfig::auto((grid.width * grid.height) as usize, n);
-        let mut solver = RhcrSolver::new(config);
+        let mut solver = RhcrPlanner::new(config);
         let mut cache = DistanceMapCache::default();
         let mut rng = SeededRng::new(42);
 
@@ -1095,8 +1103,8 @@ mod tests {
                 }
             }
 
-            let agent_states: Vec<AgentState> = (0..n)
-                .map(|i| AgentState {
+            let agent_states: Vec<AgentView> = (0..n)
+                .map(|i| AgentView {
                     index: i,
                     pos: positions[i],
                     goal: Some(goals[i]),
@@ -1113,11 +1121,11 @@ mod tests {
                 zone_type: zones.zone_type.clone(),
                 queue_lines: Vec::new(),
             };
-            let ctx = SolverContext { grid: &grid, zones: &solver_zones, tick, num_agents: n };
+            let obs = Observation { tick, grid: &grid, zones: &solver_zones, agents: &[] };
 
-            match solver.step(&ctx, &agent_states, &mut cache, &mut rng) {
-                StepResult::Continue => {}
-                StepResult::Replan(new_plans) => {
+            match solver.step(&Observation { agents: &agent_states, ..obs }, &mut cache, &mut rng) {
+                Decision::Keep => {}
+                Decision::Plans(new_plans) => {
                     for (idx, actions) in new_plans {
                         if *idx < n {
                             plans[*idx] = actions.iter().copied().collect();
@@ -1133,14 +1141,14 @@ mod tests {
         let grid = GridMap::new(5, 5);
         let zones = test_zones();
         let config = RhcrConfig::auto(25, 0);
-        let mut solver = RhcrSolver::new(config);
+        let mut solver = RhcrPlanner::new(config);
         let mut cache = DistanceMapCache::default();
         let mut rng = SeededRng::new(42);
 
-        let ctx = SolverContext { grid: &grid, zones: &zones, tick: 0, num_agents: 0 };
-        let result = solver.step(&ctx, &[], &mut cache, &mut rng);
+        let obs = Observation { tick: 0, grid: &grid, zones: &zones, agents: &[] };
+        let result = solver.step(&Observation { agents: &[], ..obs }, &mut cache, &mut rng);
         match result {
-            StepResult::Replan(plans) => assert_eq!(plans.len(), 0),
+            Decision::Plans(plans) => assert_eq!(plans.len(), 0),
             _ => panic!("expected Replan with empty plans"),
         }
     }
@@ -1150,24 +1158,24 @@ mod tests {
         let grid = GridMap::new(5, 5);
         let zones = test_zones();
         let config = RhcrConfig::auto(25, 1);
-        let mut solver = RhcrSolver::new(config);
+        let mut solver = RhcrPlanner::new(config);
         let mut cache = DistanceMapCache::default();
         let mut rng = SeededRng::new(42);
 
-        let agents = vec![AgentState {
+        let agents = vec![AgentView {
             index: 0,
             pos: IVec2::ZERO,
             goal: Some(IVec2::new(4, 4)),
             has_plan: false,
             task_leg: TaskLeg::Free,
         }];
-        let ctx = SolverContext { grid: &grid, zones: &zones, tick: 0, num_agents: 1 };
-        let _ = solver.step(&ctx, &agents, &mut cache, &mut rng);
+        let obs = Observation { tick: 0, grid: &grid, zones: &zones, agents: &[] };
+        let _ = solver.step(&Observation { agents: &agents, ..obs }, &mut cache, &mut rng);
 
         solver.reset();
         // After reset, first call should replan again
-        let result = solver.step(&ctx, &agents, &mut cache, &mut rng);
-        assert!(matches!(result, StepResult::Replan(_)));
+        let result = solver.step(&Observation { agents: &agents, ..obs }, &mut cache, &mut rng);
+        assert!(matches!(result, Decision::Plans(_)));
     }
 
     /// Regression test for the RHCR-PBS audit (Step 2 of solver-refocus).

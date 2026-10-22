@@ -20,8 +20,8 @@
 //! | `CONFLICT_TABLE[t][cell] != NIL`   | `MasterConstraintIndex::is_vertex_blocked(cell, t)` |
 //! | endpoint blocking via `token_endpoints[v]` + `TOKEN[k].size()-1 < t` | `MasterConstraintIndex::add_path` extends final-cell vertex constraints to `max_time` |
 //! | `checkAstarFin: g + current_t > max_constraint_time` | `ArriveAfter` blocks the goal cell up to the last time another token path uses it |
-//! | task selection (tp.cpp:64-96) | `core::task::TokenPassingTaskSelection`, used via `LifelongSolver::task_scheduler` |
-//! | `updatePath2` parking (tp.cpp:99-123, 206-248) | `free_parking` + `drain_goal_overrides` |
+//! | task selection (tp.cpp:64-96) | `core::task::TokenPassingTaskSelection`, used via `Planner::task_scheduler` |
+//! | `updatePath2` parking (tp.cpp:99-123, 206-248) | `free_parking` + `goal_overrides` |
 //!
 //! ## Algorithm TP in MAFIS
 //!
@@ -75,7 +75,7 @@ use super::common::{MasterConstraintIndex, Token};
 use crate::planners::toolkit::astar::{ConstraintChecker, SpacetimeGrid, spacetime_astar_fast};
 use crate::planning::heuristics::{DistanceMap, DistanceMapCache};
 use crate::planning::planner::{
-    AgentPlan, AgentRestoreState, AgentState, LifelongSolver, SolverContext, StepResult,
+    AgentPlan, AgentView, Decision, Observation, Planner, RestoredAgent,
 };
 use crate::planning::traits::{Optimality, Scalability, SolverInfo};
 
@@ -85,7 +85,7 @@ use crate::constants::{ASTAR_MAX_EXPANSIONS, TOKEN_ASTAR_MAX_TIME, TOKEN_PATH_MA
 // Token Passing Solver
 // ---------------------------------------------------------------------------
 
-pub struct TokenPassingSolver {
+pub struct TokenPassingPlanner {
     token: Token,
     plan_buffer: Vec<AgentPlan>,
     agent_map: Vec<usize>,
@@ -123,13 +123,13 @@ impl ConstraintChecker for ArriveAfter<'_> {
     }
 }
 
-impl Default for TokenPassingSolver {
+impl Default for TokenPassingPlanner {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl TokenPassingSolver {
+impl TokenPassingPlanner {
     pub fn new() -> Self {
         Self {
             token: Token::new(),
@@ -146,7 +146,7 @@ impl TokenPassingSolver {
         }
     }
 
-    fn ensure_initialized(&mut self, agents: &[AgentState]) {
+    fn ensure_initialized(&mut self, agents: &[AgentView]) {
         let same_set = self.initialized
             && self.last_agent_indices.len() == agents.len()
             && self.last_agent_indices.iter().zip(agents.iter()).all(|(&a, b)| a == b.index);
@@ -234,12 +234,12 @@ impl TokenPassingSolver {
     /// pibt2 `updatePath2` (tp.cpp:206-248): nearest parking endpoint (BFS
     /// distance) that is walkable and not the end of another token path.
     /// `None` if every parking cell is taken (pibt2 halts: not well-formed).
-    fn free_parking(&self, local: usize, pos: IVec2, ctx: &SolverContext) -> Option<IVec2> {
-        let dm = DistanceMap::compute(ctx.grid, pos);
-        ctx.zones
+    fn free_parking(&self, local: usize, pos: IVec2, obs: &Observation) -> Option<IVec2> {
+        let dm = DistanceMap::compute(obs.grid, pos);
+        obs.zones
             .parking_cells()
             .into_iter()
-            .filter(|&p| ctx.grid.is_walkable(p) && dm.get(p) != u64::MAX)
+            .filter(|&p| obs.grid.is_walkable(p) && dm.get(p) != u64::MAX)
             .filter(|&p| {
                 self.token
                     .paths
@@ -251,7 +251,7 @@ impl TokenPassingSolver {
     }
 }
 
-impl LifelongSolver for TokenPassingSolver {
+impl Planner for TokenPassingPlanner {
     fn name(&self) -> &'static str {
         "token_passing"
     }
@@ -288,7 +288,7 @@ impl LifelongSolver for TokenPassingSolver {
         self.initialized = false;
     }
 
-    fn drain_goal_overrides(&mut self) -> Vec<(usize, IVec2)> {
+    fn goal_overrides(&mut self) -> Vec<(usize, IVec2)> {
         std::mem::take(&mut self.goal_overrides)
     }
 
@@ -297,18 +297,18 @@ impl LifelongSolver for TokenPassingSolver {
     /// the master constraint index rebuilt on the next `step()` would be
     /// empty (every token length 1), which changes A* results and makes the
     /// rewound replay diverge from the original run.
-    fn restore_state(&mut self, agents: &[AgentRestoreState]) {
+    fn restore_state(&mut self, agents: &[RestoredAgent]) {
         if agents.is_empty() {
             return;
         }
 
         // Re-initialise agent_map / reverse_map from the post-rewind agent
-        // set. We fabricate the minimal `AgentState` slice that
+        // set. We fabricate the minimal `AgentView` slice that
         // `ensure_initialized` needs — `has_plan` / `task_leg` are ignored
         // there, only `index` and `pos` matter.
-        let init_states: Vec<AgentState> = agents
+        let init_states: Vec<AgentView> = agents
             .iter()
-            .map(|a| AgentState {
+            .map(|a| AgentView {
                 index: a.index,
                 pos: a.pos,
                 goal: a.goal,
@@ -344,14 +344,14 @@ impl LifelongSolver for TokenPassingSolver {
 
     fn step<'a>(
         &'a mut self,
-        ctx: &SolverContext,
-        agents: &[AgentState],
+        obs: &Observation,
         distance_cache: &mut DistanceMapCache,
         _rng: &mut SeededRng,
-    ) -> StepResult<'a> {
+    ) -> Decision<'a> {
+        let agents = obs.agents;
         if agents.is_empty() {
             self.plan_buffer.clear();
-            return StepResult::Replan(&self.plan_buffer);
+            return Decision::Plans(&self.plan_buffer);
         }
 
         self.ensure_initialized(agents);
@@ -410,7 +410,7 @@ impl LifelongSolver for TokenPassingSolver {
         // MasterConstraintIndex is the MAFIS equivalent: it adds vertex+edge
         // constraints for every cell in every TOKEN path, plus extends the
         // final cell of each path forever (the endpoint blocking).
-        self.master_ci.reset(ctx.grid.width, ctx.grid.height, TOKEN_PATH_MAX_TIME);
+        self.master_ci.reset(obs.grid.width, obs.grid.height, TOKEN_PATH_MAX_TIME);
         for path in &self.token.paths {
             self.master_ci.add_path(path, TOKEN_PATH_MAX_TIME);
         }
@@ -444,9 +444,9 @@ impl LifelongSolver for TokenPassingSolver {
                 && a.task_leg == TaskLeg::Free
                 && a.goal == Some(a.pos)
                 && self.free_last_step.contains(&a.index)
-                && ctx.zones.delivery_cells.contains(&a.pos)
+                && obs.zones.delivery_cells.contains(&a.pos)
             {
-                self.free_parking(local, a.pos, ctx)
+                self.free_parking(local, a.pos, obs)
             } else {
                 None
             };
@@ -473,12 +473,12 @@ impl LifelongSolver for TokenPassingSolver {
             // task scheduler manages the leg transitions externally.
             let path = match &a.task_leg {
                 TaskLeg::TravelEmpty(pickup) => {
-                    self.plan_for_agent(local, a.pos, *pickup, ctx.grid, distance_cache)
+                    self.plan_for_agent(local, a.pos, *pickup, obs.grid, distance_cache)
                 }
                 TaskLeg::TravelLoaded { from: _, to } => {
-                    self.plan_for_agent(local, a.pos, *to, ctx.grid, distance_cache)
+                    self.plan_for_agent(local, a.pos, *to, obs.grid, distance_cache)
                 }
-                _ => self.plan_for_agent(local, a.pos, goal, ctx.grid, distance_cache),
+                _ => self.plan_for_agent(local, a.pos, goal, obs.grid, distance_cache),
             };
 
             if let Some(positions) = path {
@@ -535,7 +535,7 @@ impl LifelongSolver for TokenPassingSolver {
                 .map(|a| a.index),
         );
 
-        StepResult::Replan(&self.plan_buffer)
+        Decision::Plans(&self.plan_buffer)
     }
 }
 
@@ -567,19 +567,19 @@ mod tests {
     fn tp_empty_agents() {
         let grid = GridMap::new(5, 5);
         let zones = test_zones();
-        let mut solver = TokenPassingSolver::new();
+        let mut solver = TokenPassingPlanner::new();
         let mut cache = DistanceMapCache::default();
         let mut rng = SeededRng::new(42);
-        let ctx = SolverContext { grid: &grid, zones: &zones, tick: 0, num_agents: 0 };
-        let result = solver.step(&ctx, &[], &mut cache, &mut rng);
-        assert!(matches!(result, StepResult::Replan(plans) if plans.is_empty()));
+        let obs = Observation { tick: 0, grid: &grid, zones: &zones, agents: &[] };
+        let result = solver.step(&Observation { agents: &[], ..obs }, &mut cache, &mut rng);
+        assert!(matches!(result, Decision::Plans(plans) if plans.is_empty()));
     }
 
     #[test]
     fn tp_single_agent_reaches_goal() {
         let grid = GridMap::new(5, 5);
         let zones = test_zones();
-        let mut solver = TokenPassingSolver::new();
+        let mut solver = TokenPassingPlanner::new();
         let mut cache = DistanceMapCache::default();
         let mut rng = SeededRng::new(42);
 
@@ -587,7 +587,7 @@ mod tests {
         let goal = IVec2::new(4, 4);
 
         for tick in 0..20 {
-            let agents = vec![AgentState {
+            let agents = vec![AgentView {
                 index: 0,
                 pos,
                 goal: Some(goal),
@@ -595,9 +595,9 @@ mod tests {
                 task_leg: TaskLeg::TravelEmpty(goal),
             }];
 
-            let ctx = SolverContext { grid: &grid, zones: &zones, tick, num_agents: 1 };
-            match solver.step(&ctx, &agents, &mut cache, &mut rng) {
-                StepResult::Replan(plans) => {
+            let obs = Observation { tick, grid: &grid, zones: &zones, agents: &[] };
+            match solver.step(&Observation { agents: &agents, ..obs }, &mut cache, &mut rng) {
+                Decision::Plans(plans) => {
                     if let Some((_, actions)) = plans.first() {
                         if let Some(action) = actions.first() {
                             let new_pos = action.apply(pos);
@@ -606,7 +606,7 @@ mod tests {
                         }
                     }
                 }
-                StepResult::Continue => {}
+                Decision::Keep => {}
             }
 
             if pos == goal {
@@ -621,7 +621,7 @@ mod tests {
     fn tp_two_agents_no_collision() {
         let grid = GridMap::new(5, 5);
         let zones = test_zones();
-        let mut solver = TokenPassingSolver::new();
+        let mut solver = TokenPassingPlanner::new();
         let mut cache = DistanceMapCache::default();
         let mut rng = SeededRng::new(42);
 
@@ -629,8 +629,8 @@ mod tests {
         let goals = [IVec2::new(4, 2), IVec2::new(0, 2)];
 
         for tick in 0..30 {
-            let agents: Vec<AgentState> = (0..2)
-                .map(|i| AgentState {
+            let agents: Vec<AgentView> = (0..2)
+                .map(|i| AgentView {
                     index: i,
                     pos: positions[i],
                     goal: Some(goals[i]),
@@ -639,9 +639,9 @@ mod tests {
                 })
                 .collect();
 
-            let ctx = SolverContext { grid: &grid, zones: &zones, tick, num_agents: 2 };
-            match solver.step(&ctx, &agents, &mut cache, &mut rng) {
-                StepResult::Replan(plans) => {
+            let obs = Observation { tick, grid: &grid, zones: &zones, agents: &[] };
+            match solver.step(&Observation { agents: &agents, ..obs }, &mut cache, &mut rng) {
+                Decision::Plans(plans) => {
                     for (idx, actions) in plans {
                         if let Some(action) = actions.first() {
                             let new_pos = action.apply(positions[*idx]);
@@ -650,7 +650,7 @@ mod tests {
                         }
                     }
                 }
-                StepResult::Continue => {}
+                Decision::Keep => {}
             }
 
             if positions[0] == positions[1] {
@@ -659,8 +659,8 @@ mod tests {
         }
     }
 
-    fn tp_agent(index: usize, pos: IVec2, goal: IVec2, task_leg: TaskLeg) -> AgentState {
-        AgentState { index, pos, goal: Some(goal), has_plan: false, task_leg }
+    fn tp_agent(index: usize, pos: IVec2, goal: IVec2, task_leg: TaskLeg) -> AgentView {
+        AgentView { index, pos, goal: Some(goal), has_plan: false, task_leg }
     }
 
     /// pibt2 tp.cpp:255-272 (`checkAstarFin`): an agent may only finish at its
@@ -670,7 +670,7 @@ mod tests {
     fn tp_arrives_after_other_paths_leave_goal() {
         let grid = GridMap::new(5, 3);
         let zones = test_zones();
-        let mut solver = TokenPassingSolver::new();
+        let mut solver = TokenPassingPlanner::new();
         let mut cache = DistanceMapCache::default();
         let mut rng = SeededRng::new(42);
         let goal = IVec2::new(2, 1);
@@ -679,8 +679,8 @@ mod tests {
             tp_agent(0, IVec2::new(0, 1), IVec2::new(4, 1), TaskLeg::TravelEmpty(IVec2::new(4, 1))),
             tp_agent(1, IVec2::new(2, 0), goal, TaskLeg::TravelEmpty(goal)),
         ];
-        let ctx = SolverContext { grid: &grid, zones: &zones, tick: 0, num_agents: 2 };
-        let _ = solver.step(&ctx, &agents, &mut cache, &mut rng);
+        let obs = Observation { tick: 0, grid: &grid, zones: &zones, agents: &[] };
+        let _ = solver.step(&Observation { agents: &agents, ..obs }, &mut cache, &mut rng);
         let crossing = solver.token.paths[0].iter().position(|&p| p == goal).unwrap();
         let arrival = solver.token.paths[1].iter().position(|&p| p == goal).unwrap();
         assert_eq!(solver.token.paths[1].back(), Some(&goal));
@@ -705,19 +705,19 @@ mod tests {
     fn tp_free_agent_on_delivery_moves_to_free_parking() {
         let grid = GridMap::new(5, 3);
         let zones = parking_zones();
-        let mut solver = TokenPassingSolver::new();
+        let mut solver = TokenPassingPlanner::new();
         let mut cache = DistanceMapCache::default();
         let mut rng = SeededRng::new(42);
         let dock = IVec2::new(4, 0);
         let rest = IVec2::new(4, 2); // nearest parking, but agent 1 rests there
         let agents =
             vec![tp_agent(0, dock, dock, TaskLeg::Free), tp_agent(1, rest, rest, TaskLeg::Free)];
-        let ctx = SolverContext { grid: &grid, zones: &zones, tick: 0, num_agents: 2 };
-        let _ = solver.step(&ctx, &agents, &mut cache, &mut rng);
-        assert!(solver.drain_goal_overrides().is_empty(), "just turned Free: no request yet");
-        let ctx = SolverContext { grid: &grid, zones: &zones, tick: 1, num_agents: 2 };
-        let _ = solver.step(&ctx, &agents, &mut cache, &mut rng);
-        assert_eq!(solver.drain_goal_overrides(), vec![(0, IVec2::new(0, 2))]);
+        let obs = Observation { tick: 0, grid: &grid, zones: &zones, agents: &[] };
+        let _ = solver.step(&Observation { agents: &agents, ..obs }, &mut cache, &mut rng);
+        assert!(solver.goal_overrides().is_empty(), "just turned Free: no request yet");
+        let obs = Observation { tick: 1, grid: &grid, zones: &zones, agents: &[] };
+        let _ = solver.step(&Observation { agents: &agents, ..obs }, &mut cache, &mut rng);
+        assert_eq!(solver.goal_overrides(), vec![(0, IVec2::new(0, 2))]);
         assert_eq!(solver.token.paths[0].back(), Some(&IVec2::new(0, 2)));
         assert_eq!(solver.token.paths[1].iter().copied().collect::<Vec<_>>(), vec![rest]);
     }
@@ -728,16 +728,16 @@ mod tests {
         let mut grid = GridMap::new(5, 3);
         grid.set_obstacle(IVec2::new(4, 2));
         let zones = parking_zones();
-        let mut solver = TokenPassingSolver::new();
+        let mut solver = TokenPassingPlanner::new();
         let mut cache = DistanceMapCache::default();
         let mut rng = SeededRng::new(42);
         let dock = IVec2::new(4, 0);
         let agents = vec![tp_agent(0, dock, dock, TaskLeg::Free)];
         for tick in 0..2 {
-            let ctx = SolverContext { grid: &grid, zones: &zones, tick, num_agents: 1 };
-            let _ = solver.step(&ctx, &agents, &mut cache, &mut rng);
+            let obs = Observation { tick, grid: &grid, zones: &zones, agents: &[] };
+            let _ = solver.step(&Observation { agents: &agents, ..obs }, &mut cache, &mut rng);
         }
-        assert_eq!(solver.drain_goal_overrides(), vec![(0, IVec2::new(0, 2))]);
+        assert_eq!(solver.goal_overrides(), vec![(0, IVec2::new(0, 2))]);
     }
 
     /// 10×7 well-formed map: 4 parking (row 1), 3 pickups (row 3), one dock
@@ -783,7 +783,7 @@ mod tests {
             grid,
             zones.clone(),
             agents,
-            Box::new(TokenPassingSolver::new()),
+            Box::new(TokenPassingPlanner::new()),
             rng,
             FaultConfig { enabled: false, ..Default::default() },
             FaultSchedule::default(),
@@ -846,10 +846,10 @@ mod tests {
         let registry = TopologyRegistry::load_from_dir(std::path::Path::new("topologies"));
         let zones_of =
             |id: &str| TopologyRegistry::parse_entry(registry.find(id).unwrap()).unwrap().1;
-        let tp = TokenPassingSolver::new();
+        let tp = TokenPassingPlanner::new();
         assert_eq!(tp.max_agents(&zones_of("warehouse_single_dock")), Some(60));
         assert_eq!(tp.max_agents(&zones_of("warehouse_dual_dock")), Some(120));
-        let pibt = crate::planners::pibt::PibtLifelongSolver::new();
+        let pibt = crate::planners::pibt::PibtPlanner::new();
         assert_eq!(pibt.max_agents(&zones_of("warehouse_single_dock")), None);
     }
 
@@ -857,15 +857,15 @@ mod tests {
     /// taking them from the configured scheduler.
     #[test]
     fn tp_provides_its_own_task_selection() {
-        let solver = TokenPassingSolver::new();
+        let solver = TokenPassingPlanner::new();
         assert_eq!(solver.task_scheduler().map(|s| s.name()), Some("token_passing"));
-        let pibt = crate::planners::pibt::PibtLifelongSolver::new();
+        let pibt = crate::planners::pibt::PibtPlanner::new();
         assert!(pibt.task_scheduler().is_none());
     }
 
     #[test]
     fn tp_reset_clears_state() {
-        let mut solver = TokenPassingSolver::new();
+        let mut solver = TokenPassingPlanner::new();
         solver.reset();
         assert!(!solver.initialized);
         assert!(solver.token.paths.is_empty());
@@ -880,7 +880,7 @@ mod tests {
     fn tp_goal_change_resets_token() {
         let grid = GridMap::new(8, 3);
         let zones = test_zones();
-        let mut solver = TokenPassingSolver::new();
+        let mut solver = TokenPassingPlanner::new();
         let mut cache = DistanceMapCache::default();
         let mut rng = SeededRng::new(42);
 
@@ -889,15 +889,15 @@ mod tests {
         let near_goal = IVec2::new(2, 1);
         let start = IVec2::new(0, 1);
 
-        let ctx = SolverContext { grid: &grid, zones: &zones, tick: 0, num_agents: 1 };
-        let agents_far = vec![AgentState {
+        let obs = Observation { tick: 0, grid: &grid, zones: &zones, agents: &[] };
+        let agents_far = vec![AgentView {
             index: 0,
             pos: start,
             goal: Some(far_goal),
             has_plan: false,
             task_leg: TaskLeg::TravelEmpty(far_goal),
         }];
-        let _ = solver.step(&ctx, &agents_far, &mut cache, &mut rng);
+        let _ = solver.step(&Observation { agents: &agents_far, ..obs }, &mut cache, &mut rng);
         let token_end_after_first_step = solver.token.paths[0].back().copied();
         assert_eq!(
             token_end_after_first_step,
@@ -911,15 +911,15 @@ mod tests {
 
         // Tick 1: same agent, same position — but target has changed from
         // far_goal to near_goal (analogous to the queue-kick case).
-        let ctx1 = SolverContext { grid: &grid, zones: &zones, tick: 1, num_agents: 1 };
-        let agents_near = vec![AgentState {
+        let obs1 = Observation { tick: 1, grid: &grid, zones: &zones, agents: &[] };
+        let agents_near = vec![AgentView {
             index: 0,
             pos: start,
             goal: Some(near_goal),
             has_plan: true,
             task_leg: TaskLeg::TravelEmpty(near_goal),
         }];
-        let _ = solver.step(&ctx1, &agents_near, &mut cache, &mut rng);
+        let _ = solver.step(&Observation { agents: &agents_near, ..obs1 }, &mut cache, &mut rng);
         let token_end_after_second_step = solver.token.paths[0].back().copied();
         assert_eq!(
             token_end_after_second_step,
@@ -936,9 +936,9 @@ mod tests {
     #[test]
     fn tp_restore_state_rebuilds_token_from_actions() {
         use crate::core::action::{Action, Direction};
-        use crate::planning::planner::AgentRestoreState;
+        use crate::planning::planner::RestoredAgent;
 
-        let mut solver = TokenPassingSolver::new();
+        let mut solver = TokenPassingPlanner::new();
         solver.reset(); // starts uninitialised
 
         let actions_0 = vec![
@@ -949,14 +949,14 @@ mod tests {
         let actions_1 = vec![Action::Move(Direction::North), Action::Move(Direction::North)];
 
         let restore = vec![
-            AgentRestoreState {
+            RestoredAgent {
                 index: 0,
                 pos: IVec2::new(0, 0),
                 goal: Some(IVec2::new(3, 0)),
                 task_leg: TaskLeg::TravelEmpty(IVec2::new(3, 0)),
                 planned_actions: &actions_0,
             },
-            AgentRestoreState {
+            RestoredAgent {
                 index: 1,
                 pos: IVec2::new(5, 0),
                 goal: Some(IVec2::new(5, 2)),
@@ -980,9 +980,9 @@ mod tests {
     /// Empty restore is a no-op (exercises the early-return branch).
     #[test]
     fn tp_restore_state_empty_is_noop() {
-        use crate::planning::planner::AgentRestoreState;
-        let mut solver = TokenPassingSolver::new();
-        solver.restore_state(&[] as &[AgentRestoreState]);
+        use crate::planning::planner::RestoredAgent;
+        let mut solver = TokenPassingPlanner::new();
+        solver.restore_state(&[] as &[RestoredAgent]);
         assert!(solver.token.paths.is_empty(), "empty restore must not touch tokens");
         assert!(!solver.initialized);
     }

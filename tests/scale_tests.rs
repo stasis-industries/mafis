@@ -34,7 +34,7 @@ fn run_ticks(
     let rng_after = rng.clone();
 
     let solver = mafis::planners::lifelong_solver_from_name(solver_name, grid_area, actual_agents)
-        .unwrap_or_else(|| Box::new(mafis::planners::pibt::PibtLifelongSolver::new()));
+        .unwrap_or_else(|| Box::new(mafis::planners::pibt::PibtPlanner::new()));
 
     let mut runner = SimulationRunner::new(
         output.grid,

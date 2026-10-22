@@ -1092,7 +1092,7 @@ fn delete_fault_determinism() {
         snapshot_tasks_completed = runner.tasks_completed;
         _snapshot_completion_ticks = runner.completion_ticks().clone();
         _snapshot_agent_states = runner.agents.iter().map(|a| (a.pos, a.goal, a.alive)).collect();
-        _snapshot_solver_priorities = runner.solver().save_priorities();
+        _snapshot_solver_priorities = runner.planner().save_priorities();
 
         eprintln!("  Faulted run at tick {snapshot_tick}: tasks = {snapshot_tasks_completed}");
         eprintln!("  Faulted rng_word_pos = {snapshot_rng_pos}");
@@ -1315,7 +1315,7 @@ fn delete_fault_double_restore_determinism() {
                 (a.pos, a.goal, a.task_leg.clone(), actions, a.alive)
             })
             .collect();
-        snap_solver_pri = r.solver().save_priorities();
+        snap_solver_pri = r.planner().save_priorities();
         eprintln!("  Snapshot at tick {}: tasks={snap_tasks}, rng_pos={snap_rng_pos}", r.tick);
     }
 
@@ -1475,7 +1475,7 @@ fn delete_fault_inplace_restore_determinism() {
                 (a.pos, a.goal, a.task_leg.clone(), actions, a.alive, a.heat, a.operational_age)
             })
             .collect();
-        let snap_solver_pri = runner.solver().save_priorities();
+        let snap_solver_pri = runner.planner().save_priorities();
 
         eprintln!("  Snapshot at tick {snap_tick}: tasks={snap_tasks}, rng={snap_rng_pos}");
 
@@ -1530,7 +1530,7 @@ fn delete_fault_inplace_restore_determinism() {
         runner.fault_rng_mut().rng.set_word_pos(snap_fault_rng_pos);
 
         // Restore solver
-        runner.solver_mut().restore_priorities(&snap_solver_pri);
+        runner.planner_mut().restore_priorities(&snap_solver_pri);
 
         // Restore completion state
         runner.restore_completion_state(snap_tasks, snap_completion_ticks.clone());
@@ -1579,7 +1579,7 @@ fn delete_fault_inplace_restore_determinism() {
         runner.rng_mut().rng.set_word_pos(snap_rng_pos);
         runner.fault_rng_mut().reseed(fault_seed);
         runner.fault_rng_mut().rng.set_word_pos(snap_fault_rng_pos);
-        runner.solver_mut().restore_priorities(&snap_solver_pri);
+        runner.planner_mut().restore_priorities(&snap_solver_pri);
         runner.restore_completion_state(snap_tasks, snap_completion_ticks);
         runner.clear_transient_state();
 
@@ -1674,7 +1674,7 @@ fn restore_runner_from_snapshot(
 
     // Restore solver
     if !solver_priorities.is_empty() {
-        runner.solver_mut().restore_priorities(solver_priorities);
+        runner.planner_mut().restore_priorities(solver_priorities);
     }
 
     // Restore completion state

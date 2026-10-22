@@ -46,7 +46,7 @@ fn run(solver: &str, topo: &str, n: usize, seed: u64) -> (f64, bool, f64, Option
     }
     let us_per_tick = start.elapsed().as_micros() as f64 / TICKS as f64;
     let stalled = per_tick.windows(STALL_WINDOW).any(|w| w.iter().all(|&c| c == 0));
-    let s = runner.solver();
+    let s = runner.planner();
     (
         prev as f64 / TICKS as f64,
         stalled,

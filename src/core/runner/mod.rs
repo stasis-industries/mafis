@@ -29,9 +29,7 @@ use crate::constants::THROUGHPUT_WINDOW_SIZE;
 use crate::fault::config::{FaultConfig, FaultSource, FaultType};
 use crate::fault::scenario::{FaultSchedule, ScheduledAction};
 use crate::planning::heuristics::DistanceMapCache;
-use crate::planning::planner::{
-    AgentState as SolverAgentState, LifelongSolver, SolverContext, StepResult,
-};
+use crate::planning::planner::{AgentView, Decision, Observation, Planner};
 
 // ---------------------------------------------------------------------------
 // SimulationRunner
@@ -49,7 +47,7 @@ const RECYCLE_SHUFFLE_SALT: u64 = 0x2545_f491_4f6c_dd1d;
 /// Salt for the per-tick fairness shuffle of queue joins.
 const QUEUE_SHUFFLE_SALT: u64 = 0x5851_f42d_4c95_7f2d;
 /// Salt for the per-tick stream handed to the solver.
-const SOLVER_RNG_SALT: u64 = 0xd1b5_4a32_d192_ed03;
+const PLANNER_RNG_SALT: u64 = 0xd1b5_4a32_d192_ed03;
 
 pub struct SimulationRunner {
     // ── Map (owned — faults can mutate grid) ──────────────────────────
@@ -61,7 +59,7 @@ pub struct SimulationRunner {
     pub agents: Vec<SimAgent>,
 
     // ── Solver ────────────────────────────────────────────────────────
-    solver: Box<dyn LifelongSolver>,
+    planner: Box<dyn Planner>,
     dist_cache: DistanceMapCache,
 
     // ── Delivery queue ───────────────────────────────────────────────
@@ -83,7 +81,7 @@ pub struct SimulationRunner {
     /// Task-demand stream: consumed only by pickup-task creation.
     rng: SeededRng,
     /// Solver stream, re-keyed to the current tick before every `step()`.
-    solver_rng: SeededRng,
+    planner_rng: SeededRng,
     /// Separate RNG stream for fault detection (Weibull + intermittent).
     ///
     /// Seeded with `rng.seed() ^ FAULT_RNG_SALT` so it is independent of the
@@ -99,7 +97,7 @@ pub struct SimulationRunner {
     task_completion_ticks: VecDeque<u64>,
 
     // ── Scratch buffers (reused across ticks to avoid per-tick allocation) ──
-    solver_states_buf: Vec<SolverAgentState>,
+    agent_views_buf: Vec<AgentView>,
     task_snapshots_buf: Vec<TaskAgentSnapshot>,
     /// Reusable collision resolution state (flat grid, zero alloc after first tick).
     collision: CollisionBuffers,
@@ -139,13 +137,13 @@ impl SimulationRunner {
         grid: GridMap,
         zones: ZoneMap,
         agents: Vec<SimAgent>,
-        solver: Box<dyn LifelongSolver>,
+        planner: Box<dyn Planner>,
         rng: SeededRng,
         fault_config: FaultConfig,
         fault_schedule: FaultSchedule,
     ) -> Self {
         let mut fault_rng = SeededRng::new(rng.seed() ^ FAULT_RNG_SALT);
-        let solver_rng = SeededRng::new(rng.seed() ^ SOLVER_RNG_SALT);
+        let planner_rng = SeededRng::new(rng.seed() ^ PLANNER_RNG_SALT);
         let queue_manager = QueueManager::new(&zones.queue_lines);
         let weibull_failure_ticks = if fault_config.weibull_enabled {
             Self::sample_weibull_ticks(
@@ -161,7 +159,7 @@ impl SimulationRunner {
             grid,
             zones,
             agents,
-            solver,
+            planner,
             dist_cache: DistanceMapCache::default(),
             queue_manager,
             fault_config,
@@ -169,12 +167,12 @@ impl SimulationRunner {
             weibull_failure_ticks,
             command_queue: Vec::new(),
             rng,
-            solver_rng,
+            planner_rng,
             fault_rng,
             tick: 0,
             tasks_completed: 0,
             task_completion_ticks: VecDeque::new(),
-            solver_states_buf: Vec::new(),
+            agent_views_buf: Vec::new(),
             task_snapshots_buf: Vec::new(),
             collision: CollisionBuffers::new(),
             fault_events_buf: Vec::new(),
@@ -266,8 +264,8 @@ impl SimulationRunner {
         &mut self.fault_schedule
     }
 
-    pub fn solver(&self) -> &dyn LifelongSolver {
-        self.solver.as_ref()
+    pub fn planner(&self) -> &dyn Planner {
+        self.planner.as_ref()
     }
 
     /// Agents ejected from blocked delivery-queue lanes so far.
@@ -275,8 +273,8 @@ impl SimulationRunner {
         self.queue_manager.reroutes
     }
 
-    pub fn solver_mut(&mut self) -> &mut dyn LifelongSolver {
-        self.solver.as_mut()
+    pub fn planner_mut(&mut self) -> &mut dyn Planner {
+        self.planner.as_mut()
     }
 
     /// Instantaneous throughput at the current tick.
@@ -331,7 +329,7 @@ impl SimulationRunner {
         self.tasks_completed = 0;
         self.tick_completions = 0;
         self.task_completion_ticks.clear();
-        self.solver.reset();
+        self.planner.reset();
         self.dist_cache = DistanceMapCache::default();
         self.queue_manager.reset(&self.zones.queue_lines);
         self.command_queue.clear();
@@ -402,7 +400,7 @@ impl SimulationRunner {
         self.run_queue_manager(queue_policy, &just_loaded);
 
         // Phase 6: Solver step
-        self.run_solver();
+        self.run_planner();
 
         // Phase 7: Fault pipeline (heat + detect)
         self.run_fault_pipeline(&mut fault_events);
@@ -849,7 +847,7 @@ impl SimulationRunner {
         }));
 
         // Token Passing selects its own tasks (Ma et al. 2017).
-        let scheduler = self.solver.task_scheduler().unwrap_or(scheduler);
+        let scheduler = self.planner.task_scheduler().unwrap_or(scheduler);
         let mut shuffle_rng = keyed_rng(self.rng.seed(), RECYCLE_SHUFFLE_SALT, self.tick);
         let recycle = recycle_goals_core(
             &task_input,
@@ -973,16 +971,16 @@ impl SimulationRunner {
         }
     }
 
-    /// Solver step: plan paths for agents that need them.
+    /// Planner step: plan paths for agents that need them.
     /// Dead agents are excluded — they are grid obstacles, not participants.
-    fn run_solver(&mut self) {
+    fn run_planner(&mut self) {
         let n = self.agents.len();
 
         // Temporarily take scratch buffer to avoid borrow conflicts
-        let mut agent_states = std::mem::take(&mut self.solver_states_buf);
-        agent_states.clear();
-        agent_states.extend(self.agents.iter().enumerate().filter(|(_, a)| a.alive).map(
-            |(i, a)| SolverAgentState {
+        let mut agent_views = std::mem::take(&mut self.agent_views_buf);
+        agent_views.clear();
+        agent_views.extend(self.agents.iter().enumerate().filter(|(_, a)| a.alive).map(
+            |(i, a)| AgentView {
                 index: i,
                 pos: a.pos,
                 goal: Some(a.goal),
@@ -991,13 +989,17 @@ impl SimulationRunner {
             },
         ));
 
-        let ctx =
-            SolverContext { grid: &self.grid, zones: &self.zones, tick: self.tick, num_agents: n };
+        let obs = Observation {
+            tick: self.tick,
+            grid: &self.grid,
+            zones: &self.zones,
+            agents: &agent_views,
+        };
 
-        self.solver_rng.rng.set_stream(self.tick);
-        self.solver_rng.rng.set_word_pos(0);
-        match self.solver.step(&ctx, &agent_states, &mut self.dist_cache, &mut self.solver_rng) {
-            StepResult::Replan(plans) => {
+        self.planner_rng.rng.set_stream(self.tick);
+        self.planner_rng.rng.set_word_pos(0);
+        match self.planner.step(&obs, &mut self.dist_cache, &mut self.planner_rng) {
+            Decision::Plans(plans) => {
                 for (idx, actions) in plans {
                     if *idx < n {
                         self.agents[*idx].planned_path.clear();
@@ -1005,11 +1007,11 @@ impl SimulationRunner {
                     }
                 }
             }
-            StepResult::Continue => {}
+            Decision::Keep => {}
         }
 
         // Apply goal overrides from solvers that swap tasks (default no-op for current set).
-        let overrides = self.solver.drain_goal_overrides();
+        let overrides = self.planner.goal_overrides();
         for (idx, new_goal) in overrides {
             if idx < n && self.agents[idx].alive {
                 self.agents[idx].goal = new_goal;
@@ -1017,7 +1019,7 @@ impl SimulationRunner {
         }
 
         // Put scratch buffer back
-        self.solver_states_buf = agent_states;
+        self.agent_views_buf = agent_views;
 
         // Evict stale cache entries periodically
         if self.tick.is_multiple_of(crate::constants::DIST_CACHE_EVICT_INTERVAL) {
@@ -1340,8 +1342,8 @@ mod tests {
         }
     }
 
-    fn test_solver() -> Box<dyn LifelongSolver> {
-        Box::new(crate::planners::pibt::PibtLifelongSolver::new())
+    fn test_solver() -> Box<dyn Planner> {
+        Box::new(crate::planners::pibt::PibtPlanner::new())
     }
 
     fn disabled_fault_config() -> FaultConfig {

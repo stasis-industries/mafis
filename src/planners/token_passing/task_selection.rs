@@ -2,7 +2,7 @@
 //! lines 7-12; pibt2 `tp.cpp:64-96`).
 //!
 //! Used in place of the configured scheduler whenever the solver is Token
-//! Passing (see `LifelongSolver::task_scheduler`). Task creation is the same
+//! Passing (see `Planner::task_scheduler`). Task creation is the same
 //! random pool as `ClosestFirstScheduler`; assignment follows TP:
 //! - agents request the token in agent-index order (`tp.cpp:52`);
 //! - a task is eligible only if no other agent's path ends at its pickup

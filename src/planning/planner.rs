@@ -1,8 +1,8 @@
-//! LifelongSolver — the single trait for all lifelong MAPF solvers.
+//! Planner — the contract every planner implements.
 //!
-//! Every tick, the ECS system calls `step()`. The solver decides internally
-//! whether to replan (based on its own cadence) and returns either new plans
-//! or `Continue` (no work this tick).
+//! Every tick, the runner calls `step()` with an `Observation`. The planner
+//! decides internally whether to replan (based on its own cadence) and returns
+//! either new plans or `Keep` (no work this tick).
 
 use bevy::ecs::resource::Resource;
 use bevy::math::IVec2;
@@ -17,22 +17,24 @@ use super::heuristics::DistanceMapCache;
 use super::traits::SolverInfo;
 
 // ---------------------------------------------------------------------------
-// Context passed to solvers each tick
+// Observation passed to planners each tick
 // ---------------------------------------------------------------------------
 
-pub struct SolverContext<'a> {
+pub struct Observation<'a> {
+    pub tick: u64,
+    /// Dead agents are obstacles in the grid.
     pub grid: &'a GridMap,
     pub zones: &'a ZoneMap,
-    pub tick: u64,
-    pub num_agents: usize,
+    /// Alive agents only.
+    pub agents: &'a [AgentView],
 }
 
 // ---------------------------------------------------------------------------
-// Agent snapshot — flat data, no ECS references
+// Agent view — flat data, no ECS references
 // ---------------------------------------------------------------------------
 
 #[derive(Clone, Debug)]
-pub struct AgentState {
+pub struct AgentView {
     pub index: usize,
     pub pos: IVec2,
     pub goal: Option<IVec2>,
@@ -40,13 +42,13 @@ pub struct AgentState {
     pub task_leg: TaskLeg,
 }
 
-/// Per-agent data passed to `LifelongSolver::restore_state` during rewind.
+/// Per-agent data passed to `Planner::restore_state` during rewind.
 ///
-/// Bundles the subset of `AgentState` needed to reconstruct solver-internal
+/// Bundles the subset of `AgentView` needed to reconstruct planner-internal
 /// planning caches (e.g. Token Passing's per-agent token paths) from the
 /// restored snapshot.
 #[derive(Clone, Debug)]
-pub struct AgentRestoreState<'a> {
+pub struct RestoredAgent<'a> {
     pub index: usize,
     pub pos: IVec2,
     pub goal: Option<IVec2>,
@@ -55,24 +57,24 @@ pub struct AgentRestoreState<'a> {
 }
 
 // ---------------------------------------------------------------------------
-// Step result — borrows from solver's internal buffer
+// Decision — borrows from the planner's internal buffer
 // ---------------------------------------------------------------------------
 
 /// Action plan for one agent: (agent_index, actions).
 pub type AgentPlan = (usize, SmallVec<[crate::core::action::Action; 20]>);
 
-pub enum StepResult<'a> {
-    /// Solver produced new plans — borrow from its internal buffer.
-    Replan(&'a [AgentPlan]),
+pub enum Decision<'a> {
+    /// New plans — borrowed from the planner's internal buffer.
+    Plans(&'a [AgentPlan]),
     /// No work this tick — keep executing current plans.
-    Continue,
+    Keep,
 }
 
 // ---------------------------------------------------------------------------
-// LifelongSolver trait
+// Planner trait
 // ---------------------------------------------------------------------------
 
-pub trait LifelongSolver: Send + Sync + 'static {
+pub trait Planner: Send + Sync + 'static {
     /// Short identifier (e.g. `"pibt"`, `"rhcr_pbs"`).
     fn name(&self) -> &'static str;
 
@@ -82,14 +84,13 @@ pub trait LifelongSolver: Send + Sync + 'static {
     /// Called when the solver is activated or the scenario resets.
     fn reset(&mut self);
 
-    /// Called every tick. Solver decides whether to replan.
+    /// Called every tick. The planner decides whether to replan.
     fn step<'a>(
         &'a mut self,
-        ctx: &SolverContext,
-        agents: &[AgentState],
+        obs: &Observation,
         distance_cache: &mut DistanceMapCache,
         rng: &mut SeededRng,
-    ) -> StepResult<'a>;
+    ) -> Decision<'a>;
 
     /// Save internal priority state for deterministic rewind.
     /// Default: no state to save.
@@ -113,14 +114,14 @@ pub trait LifelongSolver: Send + Sync + 'static {
     ///
     /// Default: no-op (PIBT, RHCR-PBS have no path-based state to restore —
     /// they replan fresh each tick or each window).
-    fn restore_state(&mut self, _agents: &[AgentRestoreState]) {}
+    fn restore_state(&mut self, _agents: &[RestoredAgent]) {}
 
     /// Drain pending goal overrides produced by the last `step()`.
-    /// Solvers that swap goals (e.g. future solvers implementing task-swapping)
+    /// Planners that change goals (Token Passing sends idle agents to parking)
     /// return `(agent_index, new_goal)` pairs. The runner applies these to
     /// update `agent.goal` in the task system.
     /// Default: no overrides.
-    fn drain_goal_overrides(&mut self) -> Vec<(usize, IVec2)> {
+    fn goal_overrides(&mut self) -> Vec<(usize, IVec2)> {
         Vec::new()
     }
 
@@ -167,21 +168,21 @@ pub trait LifelongSolver: Send + Sync + 'static {
 
 #[derive(Resource)]
 pub struct ActiveSolver {
-    solver: Box<dyn LifelongSolver>,
+    solver: Box<dyn Planner>,
     name: String,
 }
 
 impl ActiveSolver {
-    pub fn new(solver: Box<dyn LifelongSolver>) -> Self {
+    pub fn new(solver: Box<dyn Planner>) -> Self {
         let name = solver.name().to_string();
         Self { solver, name }
     }
 
-    pub fn solver(&self) -> &dyn LifelongSolver {
+    pub fn solver(&self) -> &dyn Planner {
         self.solver.as_ref()
     }
 
-    pub fn solver_mut(&mut self) -> &mut dyn LifelongSolver {
+    pub fn solver_mut(&mut self) -> &mut dyn Planner {
         self.solver.as_mut()
     }
 
@@ -195,12 +196,11 @@ impl ActiveSolver {
 
     pub fn step<'a>(
         &'a mut self,
-        ctx: &SolverContext,
-        agents: &[AgentState],
+        obs: &Observation,
         distance_cache: &mut DistanceMapCache,
         rng: &mut SeededRng,
-    ) -> StepResult<'a> {
-        self.solver.step(ctx, agents, distance_cache, rng)
+    ) -> Decision<'a> {
+        self.solver.step(obs, distance_cache, rng)
     }
 
     pub fn reset(&mut self) {
@@ -215,7 +215,7 @@ impl ActiveSolver {
         self.solver.restore_priorities(priorities);
     }
 
-    pub fn restore_state(&mut self, agents: &[AgentRestoreState]) {
+    pub fn restore_state(&mut self, agents: &[RestoredAgent]) {
         self.solver.restore_state(agents);
     }
 }

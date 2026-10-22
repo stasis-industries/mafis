@@ -10,12 +10,12 @@ pub mod rhcr;
 pub mod token_passing;
 pub mod toolkit;
 
-use crate::planning::planner::LifelongSolver;
+use crate::planning::planner::Planner;
 
-use self::pibt::PibtLifelongSolver;
+use self::pibt::PibtPlanner;
 #[cfg(not(target_arch = "wasm32"))]
-use self::rhcr::{RhcrConfig, RhcrSolver};
-use self::token_passing::TokenPassingSolver;
+use self::rhcr::{RhcrConfig, RhcrPlanner};
+use self::token_passing::TokenPassingPlanner;
 
 /// Ablation override for RHCR-PBS `RhcrConfig`, applied after auto-computation.
 ///
@@ -63,7 +63,7 @@ pub fn is_known_planner(id: &str) -> bool {
     SOLVER_NAMES.iter().any(|&(name, _)| name == id)
 }
 
-/// Create a LifelongSolver by name with auto-computed defaults.
+/// Create a Planner by name with auto-computed defaults.
 /// `grid_area` and `num_agents` are used for RHCR auto-config.
 ///
 /// **For production WASM callers, prefer [`lifelong_solver_from_name_sized`]**
@@ -77,7 +77,7 @@ pub fn lifelong_solver_from_name(
     name: &str,
     grid_area: usize,
     num_agents: usize,
-) -> Option<Box<dyn LifelongSolver>> {
+) -> Option<Box<dyn Planner>> {
     lifelong_solver_from_name_with_override(name, grid_area, num_agents, None)
 }
 
@@ -92,21 +92,21 @@ pub fn lifelong_solver_from_name_with_override(
     #[cfg_attr(target_arch = "wasm32", allow(unused_variables))] rhcr_override: Option<
         &RhcrConfigOverride,
     >,
-) -> Option<Box<dyn LifelongSolver>> {
+) -> Option<Box<dyn Planner>> {
     match name {
-        "pibt" => Some(Box::new(PibtLifelongSolver::new())),
+        "pibt" => Some(Box::new(PibtPlanner::new())),
         #[cfg(not(target_arch = "wasm32"))]
         "rhcr_pbs" => {
             let cfg =
                 RhcrConfig::auto(grid_area, num_agents).with_override(rhcr_override, num_agents);
-            Some(Box::new(RhcrSolver::new(cfg)))
+            Some(Box::new(RhcrPlanner::new(cfg)))
         }
-        "token_passing" => Some(Box::new(TokenPassingSolver::new())),
+        "token_passing" => Some(Box::new(TokenPassingPlanner::new())),
         _ => None,
     }
 }
 
-/// Create a LifelongSolver by name. Currently only RHCR-PBS uses the grid
+/// Create a Planner by name. Currently only RHCR-PBS uses the grid
 /// dimensions: it pre-allocates the `FlatConstraintIndex` / `SeqGoalGrid` /
 /// `FlatCAT` slabs (~3 MB at 1000 cells × 20 horizon) so the first
 /// `plan_window` call doesn't trigger an allocation spike on the WASM main
@@ -121,15 +121,15 @@ pub fn lifelong_solver_from_name_sized(
     #[cfg_attr(target_arch = "wasm32", allow(unused_variables))] grid_w: usize,
     #[cfg_attr(target_arch = "wasm32", allow(unused_variables))] grid_h: usize,
     #[cfg_attr(target_arch = "wasm32", allow(unused_variables))] num_agents: usize,
-) -> Option<Box<dyn LifelongSolver>> {
+) -> Option<Box<dyn Planner>> {
     match name {
-        "pibt" => Some(Box::new(PibtLifelongSolver::new())),
+        "pibt" => Some(Box::new(PibtPlanner::new())),
         #[cfg(not(target_arch = "wasm32"))]
         "rhcr_pbs" => {
             let cfg = RhcrConfig::auto(grid_w * grid_h, num_agents);
-            Some(Box::new(RhcrSolver::with_grid(cfg, grid_w, grid_h)))
+            Some(Box::new(RhcrPlanner::with_grid(cfg, grid_w, grid_h)))
         }
-        "token_passing" => Some(Box::new(TokenPassingSolver::new())),
+        "token_passing" => Some(Box::new(TokenPassingPlanner::new())),
         _ => None,
     }
 }
@@ -182,7 +182,7 @@ mod factory_tests {
     #[test]
     fn rhcr_override_applied() {
         // Build an RHCR solver through the override factory, then downcast
-        // via the direct RhcrSolver path to verify the override landed.
+        // via the direct RhcrPlanner path to verify the override landed.
         let num_agents = 50;
         let cfg = rhcr::RhcrConfig::auto(1000, num_agents).with_override(
             Some(&RhcrConfigOverride { horizon: Some(5), node_limit_mult: Some(6) }),

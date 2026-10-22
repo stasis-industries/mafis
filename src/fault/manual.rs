@@ -401,17 +401,17 @@ fn restore_world_state(
     // active at this tick. PIBT and RHCR-PBS default to no-op.
     {
         use crate::core::action::Action;
-        use crate::planning::planner::AgentRestoreState;
+        use crate::planning::planner::RestoredAgent;
         let actions_per_agent: Vec<Vec<Action>> = snapshot
             .agents
             .iter()
             .map(|s| s.planned_actions.iter().map(|&b| Action::from_u8(b)).collect())
             .collect();
-        let restore_data: Vec<AgentRestoreState> = snapshot
+        let restore_data: Vec<RestoredAgent> = snapshot
             .agents
             .iter()
             .zip(actions_per_agent.iter())
-            .map(|(s, actions)| AgentRestoreState {
+            .map(|(s, actions)| RestoredAgent {
                 index: s.index,
                 pos: s.pos,
                 goal: Some(s.goal),
@@ -490,25 +490,25 @@ fn restore_runner_state(
     // Solver — always reset first to clear transient state (congestion_streak,
     // plan_buffer, ticks_since_replan, etc.), then restore priorities if available.
     // Without the unconditional reset, RHCR's transient state persists across rewind.
-    runner.solver_mut().reset();
+    runner.planner_mut().reset();
     if !snapshot.solver_priorities.is_empty() {
-        runner.solver_mut().restore_priorities(&snapshot.solver_priorities);
+        runner.planner_mut().restore_priorities(&snapshot.solver_priorities);
     }
 
     // Rebuild solver-specific planning caches (see comment on the ECS path).
     {
         use crate::core::action::Action;
-        use crate::planning::planner::AgentRestoreState;
+        use crate::planning::planner::RestoredAgent;
         let actions_per_agent: Vec<Vec<Action>> = snapshot
             .agents
             .iter()
             .map(|s| s.planned_actions.iter().map(|&b| Action::from_u8(b)).collect())
             .collect();
-        let restore_data: Vec<AgentRestoreState> = snapshot
+        let restore_data: Vec<RestoredAgent> = snapshot
             .agents
             .iter()
             .zip(actions_per_agent.iter())
-            .map(|(s, actions)| AgentRestoreState {
+            .map(|(s, actions)| RestoredAgent {
                 index: s.index,
                 pos: s.pos,
                 goal: Some(s.goal),
@@ -516,7 +516,7 @@ fn restore_runner_state(
                 planned_actions: actions.as_slice(),
             })
             .collect();
-        runner.solver_mut().restore_state(&restore_data);
+        runner.planner_mut().restore_state(&restore_data);
     }
 
     // Completion state

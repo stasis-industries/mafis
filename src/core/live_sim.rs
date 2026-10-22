@@ -177,7 +177,7 @@ pub fn sync_runner_to_ecs(
     ecs_rng.rng.set_word_pos(runner.rng().rng.get_word_pos());
 
     // Sync solver priorities (for tick history snapshots)
-    let priorities = runner.solver().save_priorities();
+    let priorities = runner.planner().save_priorities();
     ecs_solver.restore_priorities(&priorities);
 
     // Sync grid (faults may add/remove obstacles via temp blockages)
