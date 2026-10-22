@@ -16,7 +16,8 @@ use crate::solver::pibt::PibtLifelongSolver;
 
 const AGENTS: usize = 12;
 const TICKS: u64 = 60;
-const FAULT_TICK: u64 = 20;
+/// Faults land no earlier than this, so both runs have warmed up.
+const EARLIEST_FAULT_TICK: u64 = 20;
 
 fn mean(values: &[f64]) -> f64 {
     values.iter().sum::<f64>() / values.len() as f64
@@ -54,16 +55,22 @@ fn observatory_ft_matches_experiment_formula() {
         .world_mut()
         .insert_resource(BaselineStore { record: Some(twin_record), computing: false });
 
-    // Live run: agent 0 is killed at FAULT_TICK.
-    h.run_ticks(FAULT_TICK - 1);
+    // Fault on a tick where the twin delivers, so a window starting one tick
+    // late would change the ratio.
+    let fault_tick = (EARLIEST_FAULT_TICK..TICKS)
+        .find(|&t| twin_tp[(t - 1) as usize] > 0.0)
+        .expect("the twin delivers after warm-up");
+
+    // Live run: agent 0 is killed at `fault_tick`.
+    h.run_ticks(fault_tick - 1);
     h.app
         .world_mut()
         .resource_mut::<LiveSim>()
         .runner
         .enqueue_command(SimCommand::KillAgent { index: 0, source: FaultSource::Manual });
-    h.run_ticks(TICKS - FAULT_TICK + 1);
+    h.run_ticks(TICKS - fault_tick + 1);
 
-    let start = (FAULT_TICK - 1) as usize;
+    let start = (fault_tick - 1) as usize;
     let live_tp = &h.app.world().resource::<LiveSim>().analysis.throughput_series;
     assert_eq!(live_tp.len(), TICKS as usize);
     let expected = mean(&live_tp[start..]) / mean(&twin_tp[start..]);
