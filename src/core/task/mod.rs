@@ -4,15 +4,15 @@ use smallvec::SmallVec;
 use std::collections::{HashSet, VecDeque};
 
 use super::topology::ZoneMap;
-use crate::constants::{PBS_GOAL_SEQUENCE_MAX_LEN, THROUGHPUT_WINDOW_SIZE};
+use crate::constants::{GOAL_SEQUENCE_MAX_LEN, THROUGHPUT_WINDOW_SIZE};
 use crate::planning::heuristics::DistanceMapCache;
 
 // `peek_task_chain` returns a `SmallVec<[IVec2; N]>`. Rust does not let us
 // parameterise the inline-array length by a `const usize` import in a generic
 // context, so we hardcode the literal `8` and assert it matches the canonical
-// constant. Bumping `PBS_GOAL_SEQUENCE_MAX_LEN` requires updating the `8` below
+// constant. Bumping `GOAL_SEQUENCE_MAX_LEN` requires updating the `8` below
 // and the same assertion will fail-loud at compile time.
-const _: () = assert!(PBS_GOAL_SEQUENCE_MAX_LEN == 8);
+const _: () = assert!(GOAL_SEQUENCE_MAX_LEN == 8);
 
 pub mod closest;
 pub use closest::ClosestFirstScheduler;
@@ -165,7 +165,7 @@ pub trait TaskScheduler: Send + Sync + 'static {
     /// alternating pickup/delivery goals based on `current_leg`, rejects any goal equal
     /// to `current_goal` (KivaSystem.cpp:83-85), and terminates when cumulative Manhattan
     /// distance exceeds `max_cumulative_distance` OR length reaches
-    /// `PBS_GOAL_SEQUENCE_MAX_LEN` OR `PEEK_CHAIN_MAX_RETRIES` consecutive rejections.
+    /// `GOAL_SEQUENCE_MAX_LEN` OR `PEEK_CHAIN_MAX_RETRIES` consecutive rejections.
     ///
     /// **Determinism contract**: must consume RNG only via the passed-in `rng`. Must
     /// not allocate a private RNG. Fault rewind tests rely on this.

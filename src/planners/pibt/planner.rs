@@ -146,13 +146,17 @@ impl Planner for PibtPlanner {
 // Legacy MAPFSolver impl — used by solve_on_enter (kept for compatibility)
 // ---------------------------------------------------------------------------
 
+/// Default maximum timesteps for the legacy `PibtSolver::solve` (one-shot
+/// MAPFSolver impl, used by `solve_on_enter` for the initial loading solve).
+const PIBT_DEFAULT_MAX_TIMESTEPS: u64 = 1000;
+
 pub struct PibtSolver {
     pub max_timesteps: u64,
 }
 
 impl Default for PibtSolver {
     fn default() -> Self {
-        Self { max_timesteps: crate::constants::PIBT_DEFAULT_MAX_TIMESTEPS }
+        Self { max_timesteps: PIBT_DEFAULT_MAX_TIMESTEPS }
     }
 }
 

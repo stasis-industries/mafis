@@ -6,7 +6,7 @@ use std::collections::HashSet;
 
 use super::super::topology::ZoneMap;
 use super::{TaskLeg, TaskScheduler};
-use crate::constants::{PBS_GOAL_SEQUENCE_MAX_LEN, PEEK_CHAIN_MAX_RETRIES};
+use crate::constants::{GOAL_SEQUENCE_MAX_LEN, PEEK_CHAIN_MAX_RETRIES};
 
 // ---------------------------------------------------------------------------
 // Task creation helper
@@ -138,7 +138,7 @@ impl TaskScheduler for RandomScheduler {
         let mut consecutive_rejections: usize = 0;
 
         loop {
-            if chain.len() >= PBS_GOAL_SEQUENCE_MAX_LEN {
+            if chain.len() >= GOAL_SEQUENCE_MAX_LEN {
                 break;
             }
             if consecutive_rejections >= PEEK_CHAIN_MAX_RETRIES {
@@ -386,11 +386,11 @@ mod tests {
             &mut rng,
         );
         assert!(
-            chain.len() <= PBS_GOAL_SEQUENCE_MAX_LEN,
+            chain.len() <= GOAL_SEQUENCE_MAX_LEN,
             "chain length {} exceeds cap {}",
             chain.len(),
-            PBS_GOAL_SEQUENCE_MAX_LEN
+            GOAL_SEQUENCE_MAX_LEN
         );
-        assert_eq!(PBS_GOAL_SEQUENCE_MAX_LEN, 8);
+        assert_eq!(GOAL_SEQUENCE_MAX_LEN, 8);
     }
 }

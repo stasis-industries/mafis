@@ -76,7 +76,15 @@ use crate::planners::toolkit::astar::{ConstraintChecker, SpacetimeGrid, spacetim
 use crate::planning::heuristics::{DistanceMap, DistanceMapCache};
 use crate::planning::planner::{AgentPlan, AgentView, Decision, Observation, Planner};
 
-use crate::constants::{ASTAR_MAX_EXPANSIONS, TOKEN_ASTAR_MAX_TIME, TOKEN_PATH_MAX_TIME};
+use crate::constants::ASTAR_MAX_EXPANSIONS;
+
+/// Maximum spacetime horizon for Token Passing A*. Increase if large topologies
+/// produce NoSolution on paths that require more than 200 steps.
+const TOKEN_PATH_MAX_TIME: u64 = 300;
+
+/// Maximum spacetime A* time horizon per agent per tick in Token Passing.
+/// Lower = faster but may fail to find paths in dense/large grids.
+const TOKEN_ASTAR_MAX_TIME: u64 = 200;
 
 // ---------------------------------------------------------------------------
 // Token Passing Solver

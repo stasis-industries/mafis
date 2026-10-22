@@ -26,10 +26,14 @@
 //!
 //! See `pbs_planner.rs` for inner-planner deviations from `PBS.cpp`.
 
+use super::constants::{
+    PBS_MAX_NODE_LIMIT, PBS_MIN_NODE_LIMIT, PBS_NODES_PER_AGENT, RHCR_MAX_HORIZON,
+    RHCR_MAX_REPLAN_INTERVAL, RHCR_MIN_HORIZON, RHCR_MIN_REPLAN_INTERVAL,
+    RHCR_PLANNING_HORIZON_DEFAULT, RHCR_SIMULATION_WINDOW_DEFAULT,
+};
 use bevy::prelude::*;
 use smallvec::smallvec;
 
-use crate::constants;
 use crate::core::action::Action;
 use crate::core::grid::GridMap;
 use crate::core::seed::SeededRng;
@@ -63,9 +67,9 @@ pub const PARAMS: &[ParamSpec] = &[
         label: "Planning window (H)",
         help: "Ticks over which PBS resolves conflicts.",
         kind: ParamKind::Int {
-            min: constants::RHCR_MIN_HORIZON as i64,
-            max: constants::RHCR_MAX_HORIZON as i64,
-            default: constants::RHCR_PLANNING_HORIZON_DEFAULT as i64,
+            min: RHCR_MIN_HORIZON as i64,
+            max: RHCR_MAX_HORIZON as i64,
+            default: RHCR_PLANNING_HORIZON_DEFAULT as i64,
         },
     },
     ParamSpec {
@@ -73,9 +77,9 @@ pub const PARAMS: &[ParamSpec] = &[
         label: "Replan interval (W)",
         help: "Ticks between planning windows.",
         kind: ParamKind::Int {
-            min: constants::RHCR_MIN_REPLAN_INTERVAL as i64,
-            max: constants::RHCR_MAX_REPLAN_INTERVAL as i64,
-            default: constants::RHCR_SIMULATION_WINDOW_DEFAULT as i64,
+            min: RHCR_MIN_REPLAN_INTERVAL as i64,
+            max: RHCR_MAX_REPLAN_INTERVAL as i64,
+            default: RHCR_SIMULATION_WINDOW_DEFAULT as i64,
         },
     },
     ParamSpec {
@@ -84,8 +88,8 @@ pub const PARAMS: &[ParamSpec] = &[
         help: "PBS node budget per agent; the fleet's total is kept within the node-limit bounds.",
         kind: ParamKind::Int {
             min: 1,
-            max: constants::PBS_MAX_NODE_LIMIT as i64,
-            default: constants::PBS_NODES_PER_AGENT as i64,
+            max: PBS_MAX_NODE_LIMIT as i64,
+            default: PBS_NODES_PER_AGENT as i64,
         },
     },
 ];
@@ -98,7 +102,7 @@ impl RhcrConfig {
             horizon: params.int("horizon") as usize,
             replan_interval: params.int("replan_interval") as usize,
             pbs_node_limit: (fleet * params.int("nodes_per_agent") as usize)
-                .clamp(constants::PBS_MIN_NODE_LIMIT, constants::PBS_MAX_NODE_LIMIT),
+                .clamp(PBS_MIN_NODE_LIMIT, PBS_MAX_NODE_LIMIT),
         }
     }
 }
@@ -873,12 +877,11 @@ mod tests {
         // RHCR README / driver.cpp:116-119: h = 5, w = 10, at any scale.
         for n in [5, 400] {
             let cfg = config_for(&ParamValues::default(), n);
-            assert_eq!(cfg.replan_interval, constants::RHCR_SIMULATION_WINDOW_DEFAULT);
-            assert_eq!(cfg.horizon, constants::RHCR_PLANNING_HORIZON_DEFAULT);
+            assert_eq!(cfg.replan_interval, RHCR_SIMULATION_WINDOW_DEFAULT);
+            assert_eq!(cfg.horizon, RHCR_PLANNING_HORIZON_DEFAULT);
             assert_eq!(
                 cfg.pbs_node_limit,
-                (n * constants::PBS_NODES_PER_AGENT)
-                    .clamp(constants::PBS_MIN_NODE_LIMIT, constants::PBS_MAX_NODE_LIMIT)
+                (n * PBS_NODES_PER_AGENT).clamp(PBS_MIN_NODE_LIMIT, PBS_MAX_NODE_LIMIT)
             );
         }
     }

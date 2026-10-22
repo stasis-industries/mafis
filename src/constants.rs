@@ -166,99 +166,17 @@ pub const REPLAN_INTERVAL: u64 = 20;
 /// change constantly — computing 1000 steps wastes ~98% of work.
 pub const LIFELONG_PLAN_HORIZON: u64 = 20;
 
-/// Default maximum timesteps for the legacy `PibtSolver::solve` (one-shot
-/// MAPFSolver impl, used by `solve_on_enter` for the initial loading solve).
-pub const PIBT_DEFAULT_MAX_TIMESTEPS: u64 = 1000;
-
-// ── RHCR (Rolling-Horizon Collision Resolution) ───────────────────
-
-/// Maximum planning horizon (H). Li et al. 2021 use H=20 for dense warehouses;
-/// 40 allows larger maps where agents need longer paths to reach goals.
-pub const RHCR_MAX_HORIZON: usize = 40;
-
-/// Minimum planning horizon. Below 5, plans are too short for agents to clear
-/// even simple intersections (average aisle length ~4 cells in compact grids).
-pub const RHCR_MIN_HORIZON: usize = 5;
-
-/// Maximum replan interval (W). W > H makes no sense.
-pub const RHCR_MAX_REPLAN_INTERVAL: usize = 40;
-
-/// Minimum replan interval. Every-tick defeats RHCR's purpose.
-pub const RHCR_MIN_REPLAN_INTERVAL: usize = 2;
-
-/// PBS high-level node budget per agent. The reference stops PBS on a 60 s
-/// clock (driver.cpp:108); MAFIS needs a deterministic budget. Once A* stopped
-/// returning unholdable end cells, solved windows needed at most 23 nodes at
-/// DD n=40 (10 seeds) and 54 at DD n=80, well inside 3n, while a 10,000-node
-/// budget made one DD n=120 window run for hours. The budget therefore only
-/// cuts off windows PBS would not solve; those go to LRA and are counted in
-/// `pbs_partial_rate`.
-pub const PBS_NODES_PER_AGENT: usize = 3;
-
-/// Floor on the PBS node budget for small fleets.
-pub const PBS_MIN_NODE_LIMIT: usize = 50;
-
-/// Maximum PBS tree nodes before aborting (memory + compute safeguard).
-#[cfg(target_arch = "wasm32")]
-pub const PBS_MAX_NODE_LIMIT: usize = 1_000;
-#[cfg(not(target_arch = "wasm32"))]
-pub const PBS_MAX_NODE_LIMIT: usize = 10_000;
-
-// ── RHCR / PBS (reference-aligned) ──────────────────────────────────
-//
-// Constants for the faithful PBS port.
-// Each value cites a specific line in the canonical Jiaoyang-Li/RHCR
-// reference (`docs/papers_codes/rhcr/`) so reviewers can verify fidelity.
-
-/// Default RHCR replan interval (W).
-/// REFERENCE: `docs/papers_codes/rhcr/src/driver.cpp:116` — `simulation_window`.
-pub const RHCR_SIMULATION_WINDOW_DEFAULT: usize = 5;
-
-/// Default RHCR planning window (H): conflicts resolved for the next 10 ticks.
-/// REFERENCE: RHCR README example `--simulation_window=5 --planning_window=10`
-/// (driver.cpp:118 defaults to unbounded).
-pub const RHCR_PLANNING_HORIZON_DEFAULT: usize = 10;
-
-/// Per-call expansion cap for PBS's sequential A* (deterministic; the
-/// reference only has the global solver time limit). Non-binding at the
-/// default planning window: a single-goal search over w = 10 can close at
-/// most sum_{t=0..10}(2t^2 + 2t + 1) = 891 (cell, time) states. Binds only
-/// for w >= 14.
-pub const PBS_ASTAR_MAX_EXPANSIONS: u64 = 2_000;
-
-/// PBS `find_consistent_paths` cycle guard: abort cascade replan if
-/// `count > paths.len() * MULT`.
-/// REFERENCE: `docs/papers_codes/rhcr/src/PBS.cpp:423`.
-pub const PBS_CONSISTENT_PATHS_REPLAN_MULT: usize = 5;
-
-/// Maximum length of the per-agent goal sequence used by `WindowAgent`
-/// and the peek chain. Worst case: `RHCR_SIMULATION_WINDOW_DEFAULT` (=5)
-/// minimum-cost legs of length 1 plus a 3-step safety margin. Matches
-/// the unbounded `KivaSystem.cpp` `goal_locations` vector with a sane cap.
-pub const PBS_GOAL_SEQUENCE_MAX_LEN: usize = 8;
-
-/// Whether PBS uses lazy priority resolution.
-/// REFERENCE: `docs/papers_codes/rhcr/src/driver.cpp:114` — reference default
-/// `lazyP = false` (i.e. eager mode is the canonical default).
-pub const PBS_LAZY_PRIORITY_DEFAULT: bool = false;
-
-/// Whether PBS's `find_replan_agents` skips agents still waiting at start.
-/// REFERENCE: `docs/papers_codes/rhcr/inc/PBS.h:13` — `prioritize_start = true`
-/// declaration.
-pub const PBS_PRIORITIZE_START_DEFAULT: bool = true;
+/// Maximum length of the per-agent goal sequence the workload's peek chain
+/// produces (used by windowed planners). Worst case: the windowed planner's
+/// default replan interval (5) of minimum-cost legs of length 1, plus a 3-step
+/// safety margin. Matches the unbounded `KivaSystem.cpp` `goal_locations`
+/// vector with a sane cap.
+pub const GOAL_SEQUENCE_MAX_LEN: usize = 8;
 
 /// Maximum consecutive rejections in `peek_task_chain` before terminating
 /// the chain. Mirrors the implicit retry budget in `KivaSystem.cpp:143–196`
 /// where `update_goal_locations` retries on `next == curr`.
 pub const PEEK_CHAIN_MAX_RETRIES: usize = 10;
-
-/// Maximum spacetime horizon for Token Passing A*. Increase if large topologies
-/// produce NoSolution on paths that require more than 200 steps.
-pub const TOKEN_PATH_MAX_TIME: u64 = 300;
-
-/// Maximum spacetime A* time horizon per agent per tick in Token Passing.
-/// Lower = faster but may fail to find paths in dense/large grids.
-pub const TOKEN_ASTAR_MAX_TIME: u64 = 200;
 
 /// Maximum number of nodes expanded per spacetime A* call.
 /// Without this, A* explores up to cells × timesteps states (e.g., 160K

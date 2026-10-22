@@ -21,10 +21,6 @@ mod desktop_tests {
         "Native MAX_AGENTS should be >= 2000 for research workloads",
     );
     const _: () = assert!(
-        constants::PBS_MAX_NODE_LIMIT >= 5000,
-        "Native PBS_MAX_NODE_LIMIT should be >= 5000",
-    );
-    const _: () = assert!(
         constants::LOADING_OBSTACLE_BATCH >= 1000,
         "Native LOADING_OBSTACLE_BATCH should be >= 1000",
     );
@@ -37,10 +33,6 @@ mod desktop_tests {
         "Native BASELINE_TICKS_PER_FRAME should be >= 100",
     );
     const _: () = assert!(constants::MAX_AGENTS <= 100_000, "MAX_AGENTS is unreasonably high",);
-    const _: () = assert!(
-        constants::PBS_MAX_NODE_LIMIT <= 1_000_000,
-        "PBS_MAX_NODE_LIMIT is unreasonably high",
-    );
 
     // Grid dim consistency
     const _: () = assert!(constants::MIN_GRID_DIM > 0);
@@ -67,11 +59,6 @@ mod desktop_tests {
     }
 
     #[test]
-    fn native_pbs_node_limit_exceeds_wasm_default() {
-        let _ = constants::PBS_MAX_NODE_LIMIT;
-    }
-
-    #[test]
     fn native_loading_batches_exceed_wasm_defaults() {
         let _ = (constants::LOADING_OBSTACLE_BATCH, constants::LOADING_AGENT_BATCH);
     }
@@ -84,11 +71,6 @@ mod desktop_tests {
     #[test]
     fn max_agents_has_sane_upper_bound() {
         let _ = constants::MAX_AGENTS;
-    }
-
-    #[test]
-    fn pbs_node_limit_has_sane_upper_bound() {
-        let _ = constants::PBS_MAX_NODE_LIMIT;
     }
 
     #[test]

@@ -16,7 +16,6 @@ const ALLOWLIST: &[(&str, &str)] = &[
     ("cli/src/commands/fun.rs", "M6"),
     ("cli/src/commands/solver.rs", "M6"),
     ("src/analysis/baseline.rs", "M2"),
-    ("src/constants.rs", "M2"),
     ("src/core/runner/mod.rs", "M2"),
     ("src/experiment/config.rs", "M2"),
     ("src/experiment/export.rs", "M2"),

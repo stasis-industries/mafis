@@ -90,7 +90,7 @@ type ArcPlan = Arc<Vec<Action>>;
 /// changes.
 type ArcTimeline = Arc<Vec<IVec2>>;
 
-use crate::constants::{
+use super::constants::{
     PBS_ASTAR_MAX_EXPANSIONS, PBS_CONSISTENT_PATHS_REPLAN_MULT, PBS_PRIORITIZE_START_DEFAULT,
 };
 use crate::core::action::Action;

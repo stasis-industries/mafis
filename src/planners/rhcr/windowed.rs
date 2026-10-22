@@ -6,7 +6,7 @@
 use bevy::prelude::*;
 use smallvec::SmallVec;
 
-use crate::constants::PBS_GOAL_SEQUENCE_MAX_LEN;
+use crate::constants::GOAL_SEQUENCE_MAX_LEN;
 use crate::core::action::Action;
 use crate::core::grid::GridMap;
 use crate::core::seed::SeededRng;
@@ -16,9 +16,9 @@ use crate::planning::heuristics::{DistanceMap, DistanceMapCache};
 // `WindowAgent.goal_sequence` is a `SmallVec<[IVec2; N]>`. Rust does not let us
 // parameterise the inline-array length by a `const usize` import in a generic
 // context, so we hardcode the literal `8` and assert it matches the canonical
-// constant. Bumping `PBS_GOAL_SEQUENCE_MAX_LEN` requires updating the `8` in
+// constant. Bumping `GOAL_SEQUENCE_MAX_LEN` requires updating the `8` in
 // `WindowAgent.goal_sequence` and this assertion fail-loud at compile time.
-const _: () = assert!(PBS_GOAL_SEQUENCE_MAX_LEN == 8);
+const _: () = assert!(GOAL_SEQUENCE_MAX_LEN == 8);
 
 // ---------------------------------------------------------------------------
 // Context for windowed planning
@@ -58,7 +58,7 @@ pub struct WindowAgent {
     /// Additional goals after `goal` is reached within the planning window.
     /// Reference RHCR fills goals until horizon is covered. Optional — planners
     /// that don't support sequences use only `goal`. Inline cap matches
-    /// `PBS_GOAL_SEQUENCE_MAX_LEN` (literal 8 — see assertion at module top).
+    /// `GOAL_SEQUENCE_MAX_LEN` (literal 8 — see assertion at module top).
     pub goal_sequence: SmallVec<[IVec2; 8]>,
 }
 
