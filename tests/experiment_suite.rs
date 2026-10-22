@@ -240,7 +240,8 @@ fn fault_from_env() {
     let fault_type = std::env::var("MAFIS_FAULT_TYPE").unwrap_or_else(|_| "burst_failure".into());
 
     // --- Read experiment parameters ---
-    let solver = std::env::var("MAFIS_FAULT_SOLVER").unwrap_or_else(|_| "pibt".into());
+    let solver =
+        std::env::var("MAFIS_FAULT_SOLVER").unwrap_or_else(|_| mafis::planners::DEFAULT.into());
     let topology =
         std::env::var("MAFIS_FAULT_TOPOLOGY").unwrap_or_else(|_| "warehouse_single_dock".into());
     let scheduler = std::env::var("MAFIS_FAULT_SCHEDULER").unwrap_or_else(|_| "random".into());

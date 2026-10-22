@@ -3,7 +3,7 @@
 //! audit team can decide whether the metric reading is genuine instant absorb
 //! or a smoothing-window edge case.
 //!
-//! Run: `cargo test --release --test trace_rapidity trace_rapidity_pibt_intermittent -- --ignored --nocapture`
+//! Run: `cargo test --release --test trace_rapidity trace_rapidity_intermittent -- --ignored --nocapture`
 
 use mafis::analysis::baseline::place_agents;
 use mafis::core::queue::ActiveQueuePolicy;
@@ -244,24 +244,14 @@ fn run_trace(
 
 #[test]
 #[ignore]
-fn trace_rapidity_pibt_intermittent() {
-    run_trace("pibt", "intermittent_80s80m15r", "warehouse_single_dock", 40, 42);
+fn trace_rapidity_intermittent() {
+    for entry in mafis::planning::registry::entries() {
+        run_trace(entry.info.id, "intermittent_80s80m15r", "warehouse_single_dock", 40, 42);
+    }
 }
 
 #[test]
 #[ignore]
-fn trace_rapidity_pibt_burst20() {
-    run_trace("pibt", "burst_20pct", "warehouse_single_dock", 40, 42);
-}
-
-#[test]
-#[ignore]
-fn trace_rapidity_rhcr_intermittent() {
-    run_trace("rhcr_pbs", "intermittent_80s80m15r", "warehouse_single_dock", 40, 42);
-}
-
-#[test]
-#[ignore]
-fn trace_rapidity_token_intermittent() {
-    run_trace("token_passing", "intermittent_80s80m15r", "warehouse_single_dock", 40, 42);
+fn trace_rapidity_burst20() {
+    run_trace(mafis::planners::DEFAULT, "burst_20pct", "warehouse_single_dock", 40, 42);
 }

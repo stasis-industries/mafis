@@ -17,6 +17,7 @@ use mafis::experiment::config::ExperimentConfig;
 use mafis::experiment::runner::run_single_experiment;
 use mafis::fault::config::FaultConfig;
 use mafis::fault::scenario::{FaultScenario, FaultScenarioType, FaultSchedule, WearHeatRate};
+use mafis::planners::DEFAULT;
 
 const TICK_COUNT: u64 = 500;
 
@@ -44,57 +45,8 @@ fn run(
     run_single_experiment(&config)
 }
 
-// ═══════════════════════════════════════════════════════════════════════
-// 1. Solver × Topology: every solver runs on every topology without panic
-// ═══════════════════════════════════════════════════════════════════════
-
-const SOLVERS: &[&str] = &["pibt", "rhcr_pbs", "token_passing"];
-
-const TOPOLOGIES: &[(&str, usize)] = &[
-    ("warehouse_medium", 15),
-    ("warehouse_single_dock", 20),
-    ("warehouse_dual_dock", 30),
-    ("sorting_center", 15),
-    ("compact_grid", 15),
-    ("fulfilment_center", 20),
-];
-
-#[test]
-fn all_solvers_on_all_topologies() {
-    let mut failures = Vec::new();
-
-    // Known limitations: PBS hits node limit on open maps with chokepoints.
-    let known_zero = [("rhcr_pbs", "sorting_center"), ("rhcr_pbs", "warehouse_single_dock")];
-
-    for &solver in SOLVERS {
-        for &(topology, agents) in TOPOLOGIES {
-            let label = format!("{solver}/{topology}");
-            eprint!("  {label:<40}");
-
-            let r = run(solver, topology, "random", agents, None, 42);
-            let tasks = r.baseline_metrics.total_tasks;
-            let tp = r.baseline_metrics.avg_throughput;
-
-            if tasks == 0 {
-                if known_zero.contains(&(solver, topology)) {
-                    eprintln!("SKIP (known: PBS node limit on this topology)");
-                } else {
-                    failures.push(format!("{label}: zero tasks in {TICK_COUNT} ticks"));
-                    eprintln!("FAIL (0 tasks)");
-                }
-            } else {
-                eprintln!("OK  tasks={tasks:>4}  tp={tp:.2}");
-            }
-        }
-    }
-
-    if !failures.is_empty() {
-        panic!(
-            "\n{} solver/topology combos produced zero tasks:\n  {}",
-            failures.len(),
-            failures.join("\n  ")
-        );
-    }
+fn planner_ids() -> impl Iterator<Item = &'static str> {
+    mafis::planning::registry::entries().iter().map(|entry| entry.info.id)
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -104,7 +56,7 @@ fn all_solvers_on_all_topologies() {
 #[test]
 fn both_schedulers_produce_throughput() {
     for &sched in &["random", "closest"] {
-        let r = run("pibt", "warehouse_single_dock", sched, 20, None, 42);
+        let r = run(DEFAULT, "warehouse_single_dock", sched, 20, None, 42);
         assert!(r.baseline_metrics.total_tasks > 0, "{sched} scheduler produced 0 tasks");
         assert!(r.baseline_metrics.avg_throughput > 0.0, "{sched} scheduler has zero throughput");
         eprintln!(
@@ -127,7 +79,7 @@ fn burst_failure_kills_agents() {
         burst_at_tick: 50,
         ..Default::default()
     };
-    let r = run("pibt", "warehouse_single_dock", "random", 20, Some(scenario), 42);
+    let r = run(DEFAULT, "warehouse_single_dock", "random", 20, Some(scenario), 42);
 
     // Both runs should produce tasks
     assert!(r.baseline_metrics.total_tasks > 0, "baseline should produce tasks");
@@ -159,7 +111,7 @@ fn wear_based_kills_agents_over_time() {
     // Use closest scheduler + few agents to ensure enough movement for
     // operational_age to reach Weibull failure ticks. Dense fleets congest
     // and accumulate very little operational_age.
-    let r = run("pibt", "warehouse_single_dock", "closest", 5, Some(scenario), 42);
+    let r = run(DEFAULT, "warehouse_single_dock", "closest", 5, Some(scenario), 42);
 
     // Wear should kill agents progressively
     assert!(
@@ -185,7 +137,7 @@ fn zone_outage_injects_latency() {
         zone_latency_duration: 30,
         ..Default::default()
     };
-    let r = run("pibt", "warehouse_single_dock", "random", 20, Some(scenario), 42);
+    let r = run(DEFAULT, "warehouse_single_dock", "random", 20, Some(scenario), 42);
 
     // Zone outage should cause throughput dip but agents survive
     assert!(
@@ -212,7 +164,7 @@ fn intermittent_faults_reduce_throughput() {
         intermittent_recovery_ticks: 10,
         ..Default::default()
     };
-    let r = run("pibt", "warehouse_single_dock", "random", 20, Some(scenario), 42);
+    let r = run(DEFAULT, "warehouse_single_dock", "random", 20, Some(scenario), 42);
 
     // Intermittent faults should not kill agents
     assert!(
@@ -246,7 +198,7 @@ fn metrics_in_valid_ranges() {
         burst_at_tick: 50,
         ..Default::default()
     };
-    let r = run("pibt", "warehouse_single_dock", "random", 20, Some(scenario), 42);
+    let r = run(DEFAULT, "warehouse_single_dock", "random", 20, Some(scenario), 42);
     let m = &r.faulted_metrics;
 
     // FT should be >= 0 (can exceed 1.0 for Braess's paradox — killing agents
@@ -296,8 +248,8 @@ fn deterministic_replay() {
         ..Default::default()
     };
 
-    let r1 = run("pibt", "warehouse_single_dock", "random", 20, Some(scenario.clone()), 42);
-    let r2 = run("pibt", "warehouse_single_dock", "random", 20, Some(scenario), 42);
+    let r1 = run(DEFAULT, "warehouse_single_dock", "random", 20, Some(scenario.clone()), 42);
+    let r2 = run(DEFAULT, "warehouse_single_dock", "random", 20, Some(scenario), 42);
 
     assert_eq!(
         r1.baseline_metrics.total_tasks, r2.baseline_metrics.total_tasks,
@@ -328,10 +280,10 @@ fn deterministic_replay() {
     );
 }
 
-/// Determinism holds across solvers — not just PIBT.
+/// Determinism holds for every registered planner.
 #[test]
 fn deterministic_across_solvers() {
-    for &solver in &["rhcr_pbs", "token_passing"] {
+    for solver in planner_ids() {
         let r1 = run(solver, "warehouse_single_dock", "random", 8, None, 42);
         let r2 = run(solver, "warehouse_single_dock", "random", 8, None, 42);
         assert_eq!(
@@ -363,7 +315,7 @@ fn new_topologies_under_fault() {
         ("warehouse_single_dock_w2", 30),
         ("warehouse_single_dock_w3", 30),
     ] {
-        let r = run("pibt", topology, "random", agents, Some(scenario.clone()), 42);
+        let r = run(DEFAULT, topology, "random", agents, Some(scenario.clone()), 42);
         assert!(r.baseline_metrics.total_tasks > 0, "{topology}: baseline produced no tasks");
         assert!(r.faulted_metrics.survival_rate < 1.0, "{topology}: burst should kill agents");
         eprintln!(
@@ -382,9 +334,7 @@ fn new_topologies_under_fault() {
 
 #[test]
 fn all_solvers_no_collisions_500_ticks() {
-    let solvers = ["pibt", "rhcr_pbs", "token_passing"];
-
-    for solver_name in &solvers {
+    for solver_name in planner_ids() {
         let topo = ActiveTopology::from_name("warehouse_single_dock");
         let output = topo.topology().generate(42);
         let mut rng = SeededRng::new(42);
@@ -447,149 +397,14 @@ fn all_solvers_no_collisions_500_ticks() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// A2. Token Passing edge-swap audit on compact_grid
-// ═══════════════════════════════════════════════════════════════════════
-
-#[test]
-fn token_passing_no_edge_swaps() {
-    let topo = ActiveTopology::from_name("compact_grid");
-    let output = topo.topology().generate(42);
-    let mut rng = SeededRng::new(42);
-    let agents = place_agents(30, &output.grid, &output.zones, &mut rng);
-
-    let solver = mafis::planning::registry::build("token_passing", &Default::default(), 30)
-        .expect("solver creation failed");
-    let scheduler = ActiveScheduler::from_name("random");
-    let queue_policy = ActiveQueuePolicy::from_name("closest");
-
-    let mut runner = SimulationRunner::new(
-        output.grid,
-        output.zones,
-        agents,
-        solver,
-        rng,
-        FaultConfig { enabled: false, ..Default::default() },
-        FaultSchedule::default(),
-    );
-
-    let mut prev_positions: Vec<IVec2> = runner.agents.iter().map(|a| a.pos).collect();
-
-    for tick in 0..500 {
-        runner.tick(scheduler.scheduler(), queue_policy.policy());
-
-        // Vertex collision check
-        let alive_positions: Vec<IVec2> =
-            runner.agents.iter().filter(|a| a.alive).map(|a| a.pos).collect();
-        let unique: HashSet<IVec2> = alive_positions.iter().copied().collect();
-        assert_eq!(
-            unique.len(),
-            alive_positions.len(),
-            "token_passing/compact_grid tick {tick}: vertex collision ({} agents, {} unique)",
-            alive_positions.len(),
-            unique.len()
-        );
-
-        // Edge swap check
-        for i in 0..runner.agents.len() {
-            if !runner.agents[i].alive {
-                continue;
-            }
-            for j in (i + 1)..runner.agents.len() {
-                if !runner.agents[j].alive {
-                    continue;
-                }
-                if runner.agents[i].pos == prev_positions[j]
-                    && runner.agents[j].pos == prev_positions[i]
-                    && runner.agents[i].pos != runner.agents[j].pos
-                {
-                    panic!(
-                        "token_passing/compact_grid tick {tick}: edge swap between agents {i} and {j}"
-                    );
-                }
-            }
-        }
-
-        prev_positions = runner.agents.iter().map(|a| a.pos).collect();
-    }
-    eprintln!("  token_passing/compact_grid: 500 ticks, 30 agents -- no collisions");
-}
-
-// ═══════════════════════════════════════════════════════════════════════
-// A3. RHCR-PBS fallback remains collision-free under dense conditions
-// ═══════════════════════════════════════════════════════════════════════
-
-#[test]
-fn rhcr_fallback_collision_free() {
-    let topo = ActiveTopology::from_name("warehouse_single_dock");
-    let output = topo.topology().generate(42);
-    let mut rng = SeededRng::new(42);
-    let agents = place_agents(40, &output.grid, &output.zones, &mut rng);
-
-    let solver = mafis::planning::registry::build("rhcr_pbs", &Default::default(), 40)
-        .expect("solver creation failed");
-    let scheduler = ActiveScheduler::from_name("random");
-    let queue_policy = ActiveQueuePolicy::from_name("closest");
-
-    let mut runner = SimulationRunner::new(
-        output.grid,
-        output.zones,
-        agents,
-        solver,
-        rng,
-        FaultConfig { enabled: false, ..Default::default() },
-        FaultSchedule::default(),
-    );
-
-    let mut prev_positions: Vec<IVec2> = runner.agents.iter().map(|a| a.pos).collect();
-
-    for tick in 0..500 {
-        runner.tick(scheduler.scheduler(), queue_policy.policy());
-
-        // Vertex collision check
-        let alive_positions: Vec<IVec2> =
-            runner.agents.iter().filter(|a| a.alive).map(|a| a.pos).collect();
-        let unique: HashSet<IVec2> = alive_positions.iter().copied().collect();
-        assert_eq!(
-            unique.len(),
-            alive_positions.len(),
-            "rhcr_pbs(dense) tick {tick}: vertex collision ({} agents, {} unique)",
-            alive_positions.len(),
-            unique.len()
-        );
-
-        // Edge swap check
-        for i in 0..runner.agents.len() {
-            if !runner.agents[i].alive {
-                continue;
-            }
-            for j in (i + 1)..runner.agents.len() {
-                if !runner.agents[j].alive {
-                    continue;
-                }
-                if runner.agents[i].pos == prev_positions[j]
-                    && runner.agents[j].pos == prev_positions[i]
-                    && runner.agents[i].pos != runner.agents[j].pos
-                {
-                    panic!("rhcr_pbs(dense) tick {tick}: edge swap between agents {i} and {j}");
-                }
-            }
-        }
-
-        prev_positions = runner.agents.iter().map(|a| a.pos).collect();
-    }
-    eprintln!("  rhcr_pbs(dense): 500 ticks, 40 agents -- collision-free (fallback exercised)");
-}
-
-// ═══════════════════════════════════════════════════════════════════════
 // C1. Determinism: all solvers x all schedulers produce bit-identical runs
 // ═══════════════════════════════════════════════════════════════════════
 
 #[test]
 fn determinism_all_solvers_all_schedulers() {
-    let solvers = ["pibt", "rhcr_pbs", "token_passing"];
     let schedulers = ["random", "closest"];
 
-    for solver in &solvers {
+    for solver in planner_ids() {
         for sched in &schedulers {
             let r1 = run(solver, "warehouse_single_dock", sched, 20, None, 42);
             let r2 = run(solver, "warehouse_single_dock", sched, 20, None, 42);
@@ -631,7 +446,7 @@ fn baseline_faulted_parity_before_burst() {
     let queue_policy = ActiveQueuePolicy::from_name("closest");
 
     // Baseline runner (no faults)
-    let solver_bl = mafis::planning::registry::build("pibt", &Default::default(), 20).unwrap();
+    let solver_bl = mafis::planning::registry::build(DEFAULT, &Default::default(), 20).unwrap();
     let mut runner_bl = SimulationRunner::new(
         output.grid.clone(),
         output.zones.clone(),
@@ -650,7 +465,7 @@ fn baseline_faulted_parity_before_burst() {
         burst_at_tick: 100,
         ..Default::default()
     };
-    let solver_f = mafis::planning::registry::build("pibt", &Default::default(), 20).unwrap();
+    let solver_f = mafis::planning::registry::build(DEFAULT, &Default::default(), 20).unwrap();
     let fc = scenario.to_fault_config();
     let fs = scenario.generate_schedule(200, 20);
     let mut runner_f =
@@ -686,7 +501,7 @@ fn baseline_faulted_parity_before_wear() {
     let queue_policy = ActiveQueuePolicy::from_name("closest");
 
     // Baseline runner (no faults)
-    let solver_bl = mafis::planning::registry::build("pibt", &Default::default(), 15).unwrap();
+    let solver_bl = mafis::planning::registry::build(DEFAULT, &Default::default(), 15).unwrap();
     let mut runner_bl = SimulationRunner::new(
         output.grid.clone(),
         output.zones.clone(),
@@ -704,7 +519,7 @@ fn baseline_faulted_parity_before_wear() {
         wear_heat_rate: WearHeatRate::High,
         ..Default::default()
     };
-    let solver_f = mafis::planning::registry::build("pibt", &Default::default(), 15).unwrap();
+    let solver_f = mafis::planning::registry::build(DEFAULT, &Default::default(), 15).unwrap();
     let fc = scenario.to_fault_config();
     let fs = scenario.generate_schedule(200, 15);
     let mut runner_f =
@@ -763,7 +578,7 @@ fn baseline_faulted_parity_before_intermittent() {
     let queue_policy = ActiveQueuePolicy::from_name("closest");
 
     // Baseline runner (no faults)
-    let solver_bl = mafis::planning::registry::build("pibt", &Default::default(), 15).unwrap();
+    let solver_bl = mafis::planning::registry::build(DEFAULT, &Default::default(), 15).unwrap();
     let mut runner_bl = SimulationRunner::new(
         output.grid.clone(),
         output.zones.clone(),
@@ -782,7 +597,7 @@ fn baseline_faulted_parity_before_intermittent() {
         intermittent_recovery_ticks: 10,
         ..Default::default()
     };
-    let solver_f = mafis::planning::registry::build("pibt", &Default::default(), 15).unwrap();
+    let solver_f = mafis::planning::registry::build(DEFAULT, &Default::default(), 15).unwrap();
     let fc = scenario.to_fault_config();
     let fs = scenario.generate_schedule(200, 15);
     let mut runner_f =
@@ -825,7 +640,7 @@ fn baseline_faulted_parity_before_intermittent() {
 fn all_schedulers_nonzero_throughput() {
     for sched in &["random", "closest"] {
         let config = ExperimentConfig {
-            solver_name: "pibt".into(),
+            solver_name: DEFAULT.into(),
             topology_name: "warehouse_single_dock".into(),
             scenario: None,
             scheduler_name: sched.to_string(),
@@ -848,7 +663,7 @@ fn all_schedulers_nonzero_throughput() {
 #[test]
 fn ft_pipeline_end_to_end() {
     // No faults -> FT should be 1.0
-    let r_clean = run("pibt", "warehouse_single_dock", "random", 30, None, 42);
+    let r_clean = run(DEFAULT, "warehouse_single_dock", "random", 30, None, 42);
     assert!(
         (r_clean.faulted_metrics.fault_tolerance - 1.0).abs() < 1e-10,
         "FT should be 1.0 with no faults, got {}",
@@ -867,7 +682,7 @@ fn ft_pipeline_end_to_end() {
         burst_at_tick: 50,
         ..Default::default()
     };
-    let r_fault = run("pibt", "warehouse_single_dock", "random", 30, Some(scenario), 42);
+    let r_fault = run(DEFAULT, "warehouse_single_dock", "random", 30, Some(scenario), 42);
     assert!(
         r_fault.faulted_metrics.fault_tolerance > 0.0,
         "FT should be > 0 (agents still complete tasks), got ft={}, faulted_tasks={}, baseline_tasks={}",
@@ -902,7 +717,7 @@ fn burst_kills_exact_count() {
         burst_at_tick: 50,
         ..Default::default()
     };
-    let r = run("pibt", "warehouse_single_dock", "random", 50, Some(scenario), 42);
+    let r = run(DEFAULT, "warehouse_single_dock", "random", 50, Some(scenario), 42);
 
     // 20% of 50 = 10 agents should die
     // survival_rate = (50 - 10) / 50 = 0.80
@@ -933,7 +748,7 @@ fn wear_rate_ordering_invariant() {
         // (faster operational_age accumulation). warehouse_single_dock has queue
         // infrastructure that keeps agents moving consistently.
         let config = ExperimentConfig {
-            solver_name: "pibt".into(),
+            solver_name: DEFAULT.into(),
             topology_name: "warehouse_single_dock".into(),
             scenario: Some(scenario),
             scheduler_name: "closest".into(),
@@ -972,7 +787,7 @@ fn wear_rate_ordering_invariant() {
 #[test]
 fn delivery_direct_no_hotspot() {
     // compact_grid has no queue lines -> uses assign_delivery_direct
-    let r = run("pibt", "compact_grid", "closest", 15, None, 42);
+    let r = run(DEFAULT, "compact_grid", "closest", 15, None, 42);
     assert!(r.baseline_metrics.total_tasks > 0, "compact_grid/closest should produce tasks");
     // The test verifies the path doesn't panic and produces throughput.
     // A proper hotspot test would need access to per-delivery-cell counts,
@@ -997,7 +812,7 @@ fn delete_fault_determinism() {
     let seed = 42u64;
     let total_ticks: u64 = 300;
     let fault_tick: u64 = 100;
-    let solver_name = "pibt";
+    let solver_name = DEFAULT;
     let topo_name = "warehouse_single_dock";
     let num_agents = 20;
 
@@ -1222,7 +1037,7 @@ fn delete_fault_double_restore_determinism() {
     let seed = 42u64;
     let total_ticks: u64 = 500;
     let fault_tick: u64 = 100;
-    let solver_name = "pibt";
+    let solver_name = DEFAULT;
     let topo_name = "warehouse_single_dock";
     let num_agents = 20;
 
@@ -1382,7 +1197,7 @@ fn delete_fault_inplace_restore_determinism() {
     let seed = 42u64;
     let total_ticks: u64 = 500;
     let fault_tick: u64 = 100;
-    let solver_name = "pibt";
+    let solver_name = DEFAULT;
     let topo_name = "warehouse_single_dock";
     let num_agents = 20;
 
@@ -1681,88 +1496,6 @@ fn restore_planner(runner: &mut SimulationRunner, snapshot: Option<&[u8]>) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// T1. Throughput ordering sanity: all 8 solvers produce nonzero throughput
-//     and PIBT stays competitive with Token Passing at moderate density.
-// ═══════════════════════════════════════════════════════════════════════
-
-/// Sanity check (not a benchmark): verify that the 3 active solvers produce
-/// positive throughput on warehouse_single_dock, and that no single solver
-/// collapses to below 5% of the best-performing solver. Catches catastrophic
-/// regressions (e.g., a solver always returning Wait actions) without being
-/// fragile to normal performance variation between paradigms.
-///
-/// Active solvers: PIBT, RHCR-PBS, Token Passing. Ordering is topology- and
-/// density-dependent and should not be asserted as a fixed invariant; the
-/// 5%-of-best floor is the meaningful regression guard.
-#[test]
-fn solver_throughput_ordering_sanity() {
-    // Run 200 ticks (shorter than TICK_COUNT=500 to keep CI fast).
-    let tick_count: u64 = 200;
-
-    let mut throughputs: std::collections::HashMap<&str, f64> = std::collections::HashMap::new();
-
-    let all_solvers = ["pibt", "rhcr_pbs", "token_passing"];
-
-    for &solver in &all_solvers {
-        let config = ExperimentConfig {
-            solver_name: solver.into(),
-            topology_name: "warehouse_single_dock".into(),
-            scenario: None,
-            scheduler_name: "random".into(),
-            num_agents: 20,
-            seed: 42,
-            tick_count,
-            custom_map: None,
-            planner_params: Default::default(),
-        };
-        let r = run_single_experiment(&config);
-        let tp = r.baseline_metrics.avg_throughput;
-        throughputs.insert(solver, tp);
-
-        eprintln!(
-            "  throughput_sanity {solver:<22} tasks={:<4} tp={:.3}",
-            r.baseline_metrics.total_tasks, tp
-        );
-    }
-
-    // All solvers must produce positive throughput on warehouse_single_dock.
-    // Exception: rhcr_pbs hits its node limit on larger maps and falls back to
-    // per-agent PIBT which can produce zero tasks at low density.
-    for &solver in &all_solvers {
-        let tp = throughputs[solver];
-        if solver == "rhcr_pbs" {
-            continue;
-        }
-        assert!(
-            tp > 0.0,
-            "solver_throughput_ordering_sanity: {solver} produced zero throughput on \
-             warehouse_single_dock with 20 agents / 200 ticks"
-        );
-    }
-
-    // No solver should collapse to below 1% of the best solver's throughput.
-    let best_tp = throughputs.values().cloned().fold(f64::NEG_INFINITY, f64::max);
-    for &solver in &all_solvers {
-        if solver == "rhcr_pbs" {
-            continue;
-        } // PBS hits node limit on large maps
-        let tp = throughputs[solver];
-        assert!(
-            tp >= best_tp * 0.01,
-            "solver_throughput_ordering_sanity: {solver} throughput ({tp:.3}) is less than 1% \
-             of the best solver ({best_tp:.3}). Likely a catastrophic regression."
-        );
-    }
-
-    eprintln!(
-        "  throughput_sanity: all {} solvers > 0, best={:.3}, floor(1%)={:.4}",
-        all_solvers.len(),
-        best_tp,
-        best_tp * 0.01
-    );
-}
-
-// ═══════════════════════════════════════════════════════════════════════
 // D1. Rewind determinism: reset() clears all solver state, re-run matches
 // ═══════════════════════════════════════════════════════════════════════
 
@@ -1771,15 +1504,13 @@ fn solver_throughput_ordering_sanity() {
 /// visited sets, token paths) that would poison the re-run.
 #[test]
 fn rewind_determinism_reset_matches_fresh() {
-    let solvers_with_state = ["pibt", "rhcr_pbs", "token_passing"];
-
     let topo = ActiveTopology::from_name("warehouse_single_dock");
     let output = topo.topology().generate(42);
 
     let scheduler = ActiveScheduler::from_name("random");
     let queue_policy = ActiveQueuePolicy::from_name("closest");
 
-    for &solver_name in &solvers_with_state {
+    for solver_name in planner_ids() {
         // Fresh run
         let mut rng_fresh = SeededRng::new(42);
         let agents_fresh = place_agents(15, &output.grid, &output.zones, &mut rng_fresh);
@@ -1901,7 +1632,7 @@ fn intermittent_respects_start_tick() {
         intermittent_start_tick: start_tick,
         ..Default::default()
     };
-    let solver = mafis::planning::registry::build("pibt", &Default::default(), 20).unwrap();
+    let solver = mafis::planning::registry::build(DEFAULT, &Default::default(), 20).unwrap();
     let mut runner = SimulationRunner::new(
         output.grid.clone(),
         output.zones.clone(),
@@ -1969,7 +1700,7 @@ fn intermittent_first_fire_median() {
             intermittent_start_tick: 0,
             ..Default::default()
         };
-        let solver = mafis::planning::registry::build("pibt", &Default::default(), 1).unwrap();
+        let solver = mafis::planning::registry::build(DEFAULT, &Default::default(), 1).unwrap();
         let mut runner = SimulationRunner::new(
             output.grid.clone(),
             output.zones.clone(),
@@ -2061,8 +1792,8 @@ fn no_stuck_loading_on_delivery_corridor() {
     let agents = place_agents(agent_count, &output.grid, &output.zones, &mut rng_seed);
     let rng_after_placement = rng_seed.clone();
 
-    let solver = mafis::planning::registry::build("pibt", &Default::default(), agent_count)
-        .expect("pibt solver creation");
+    let solver = mafis::planning::registry::build(DEFAULT, &Default::default(), agent_count)
+        .expect("planner creation");
     let mut runner = SimulationRunner::new(
         output.grid,
         output.zones,
@@ -2105,181 +1836,6 @@ fn no_stuck_loading_on_delivery_corridor() {
     );
 }
 
-/// Diagnostic: matches the user-reported WASM scenario (SD-w2, Token Passing,
-/// 72 agents, closest scheduler) and dumps the worst 10 Loading streaks on
-/// the delivery corridor so we can distinguish (a) natural queue-wait,
-/// (b) kick-back residual, (c) unknown state-machine bug.
-#[test]
-#[ignore]
-fn diagnose_stuck_tp_sd_w2() {
-    use mafis::core::runner::SimulationRunner;
-    use mafis::core::task::TaskLeg;
-
-    let topo = ActiveTopology::from_name("warehouse_single_dock_w2");
-    let output = topo.topology().generate(42);
-    let scheduler = ActiveScheduler::from_name("closest");
-    let queue_policy = ActiveQueuePolicy::from_name("closest");
-    let agent_count: usize = 72;
-    let mut rng_seed = SeededRng::new(42);
-    let agents = place_agents(agent_count, &output.grid, &output.zones, &mut rng_seed);
-    let rng_after = rng_seed.clone();
-    let solver =
-        mafis::planning::registry::build("token_passing", &Default::default(), agent_count)
-            .expect("tp");
-    let mut runner = SimulationRunner::new(
-        output.grid.clone(),
-        output.zones.clone(),
-        agents,
-        solver,
-        rng_after,
-        FaultConfig { enabled: false, ..Default::default() },
-        FaultSchedule::default(),
-    );
-
-    // Delivery cells are at x=55 on SD-w2. Corridor = x∈[51,54]. Also track
-    // "at delivery column" = x ∈ [54, 55].
-    let in_corridor = |p: IVec2| p.x >= 51 && p.x <= 54;
-    let at_delivery = |p: IVec2| p.x >= 54;
-
-    let mut streak_corridor: Vec<u64> = vec![0; agent_count];
-    let mut max_corridor: Vec<u64> = vec![0; agent_count];
-    let mut streak_delivery: Vec<u64> = vec![0; agent_count];
-    let mut max_delivery: Vec<u64> = vec![0; agent_count];
-    let mut streak_any_loading: Vec<u64> = vec![0; agent_count];
-    let mut max_any_loading: Vec<u64> = vec![0; agent_count];
-
-    // "picking" visual colour = Loading OR TravelEmpty (both amber).
-    let is_amber =
-        |tl: &TaskLeg| matches!(tl, TaskLeg::Loading(_)) || matches!(tl, TaskLeg::TravelEmpty(_));
-    // Track per-agent total AMBER-at-delivery-column tick counts across
-    // the whole run — not just consecutive streaks — because a hot-cycling
-    // agent can look "stuck" even with 2-tick bursts if it keeps returning.
-    let mut total_amber_delivery: Vec<u64> = vec![0; agent_count];
-
-    for _t in 1..=500u64 {
-        let _ = runner.tick(scheduler.scheduler(), queue_policy.policy());
-        for (i, a) in runner.agents.iter().enumerate() {
-            let is_loading = matches!(a.task_leg, TaskLeg::Loading(_));
-            if is_loading {
-                streak_any_loading[i] += 1;
-                max_any_loading[i] = max_any_loading[i].max(streak_any_loading[i]);
-            } else {
-                streak_any_loading[i] = 0;
-            }
-            if is_loading && in_corridor(a.pos) {
-                streak_corridor[i] += 1;
-                max_corridor[i] = max_corridor[i].max(streak_corridor[i]);
-            } else {
-                streak_corridor[i] = 0;
-            }
-            if is_loading && at_delivery(a.pos) {
-                streak_delivery[i] += 1;
-                max_delivery[i] = max_delivery[i].max(streak_delivery[i]);
-            } else {
-                streak_delivery[i] = 0;
-            }
-            if is_amber(&a.task_leg) && a.pos.x >= 51 {
-                total_amber_delivery[i] += 1;
-            }
-        }
-    }
-
-    let w_any = *max_any_loading.iter().max().unwrap_or(&0);
-    let w_cor = *max_corridor.iter().max().unwrap_or(&0);
-    let w_del = *max_delivery.iter().max().unwrap_or(&0);
-    let total_agent_ticks = 500 * agent_count as u64;
-    let total_amber_sum: u64 = total_amber_delivery.iter().sum();
-    eprintln!("=== SD-w2 / TP / n=72 / 500 ticks — amber-at-delivery diagnostic ===");
-    eprintln!("  worst Loading streak anywhere    : {w_any}");
-    eprintln!("  worst Loading streak in corridor : {w_cor}  (x∈[51,54])");
-    eprintln!("  worst Loading streak at delivery : {w_del}  (x≥54)");
-    eprintln!(
-        "  total amber-ticks at delivery area (Loading|TravelEmpty with x≥51) : {total_amber_sum} / {total_agent_ticks}  ({:.2}%)",
-        100.0 * total_amber_sum as f64 / total_agent_ticks as f64
-    );
-    let worst_total = *total_amber_delivery.iter().max().unwrap_or(&0);
-    let avg_total = total_amber_sum as f64 / agent_count as f64;
-    eprintln!("  worst per-agent amber-ticks at delivery : {worst_total}");
-    eprintln!("  avg per-agent amber-ticks at delivery   : {avg_total:.1}");
-
-    // --- Movement / freeze diagnostic: same scenario at user's exact n=85
-    // and 800 ticks to catch post-200 freeze pattern --------------------
-    eprintln!("\n=== SD-w2 / TP / n=85 / 800 ticks — FREEZE diagnostic ===");
-    let topo2 = ActiveTopology::from_name("warehouse_single_dock_w2");
-    let output2 = topo2.topology().generate(42);
-    let n2: usize = 85;
-    let mut rng_seed2 = SeededRng::new(42);
-    let agents2 = place_agents(n2, &output2.grid, &output2.zones, &mut rng_seed2);
-    let rng_after2 = rng_seed2.clone();
-    let solver2 =
-        mafis::planning::registry::build("token_passing", &Default::default(), n2).expect("tp");
-    let mut runner2 = SimulationRunner::new(
-        output2.grid.clone(),
-        output2.zones.clone(),
-        agents2,
-        solver2,
-        rng_after2,
-        FaultConfig { enabled: false, ..Default::default() },
-        FaultSchedule::default(),
-    );
-
-    let mut prev_pos: Vec<IVec2> = runner2.agents.iter().map(|a| a.pos).collect();
-    let mut motionless_streak: Vec<u64> = vec![0; n2];
-    let mut max_motionless: Vec<u64> = vec![0; n2];
-    let mut tasks_over_time: Vec<u64> = Vec::new();
-
-    for _t in 1..=800u64 {
-        let r = runner2.tick(scheduler.scheduler(), queue_policy.policy());
-        tasks_over_time.push(r.tasks_completed);
-        for (i, a) in runner2.agents.iter().enumerate() {
-            if a.pos == prev_pos[i] {
-                motionless_streak[i] += 1;
-                max_motionless[i] = max_motionless[i].max(motionless_streak[i]);
-            } else {
-                motionless_streak[i] = 0;
-            }
-            prev_pos[i] = a.pos;
-        }
-    }
-
-    let w_frozen = *max_motionless.iter().max().unwrap_or(&0);
-    let frozen_count_200 = motionless_streak.iter().filter(|&&s| s >= 200).count();
-    let final_tasks = *tasks_over_time.last().unwrap_or(&0);
-    let tasks_first_200 = tasks_over_time.get(199).copied().unwrap_or(0);
-    let tasks_last_600 = final_tasks.saturating_sub(tasks_first_200);
-    eprintln!("  worst motionless streak : {w_frozen} ticks");
-    eprintln!("  agents motionless ≥ 200 ticks at end of run : {frozen_count_200} / {n2}");
-    eprintln!("  tasks completed in first 200 ticks  : {tasks_first_200}");
-    eprintln!("  tasks completed in last 600 ticks   : {tasks_last_600}");
-    eprintln!(
-        "  throughput collapse ratio (last-600 avg / first-200 avg) : {:.2}x",
-        (tasks_last_600 as f64 / 600.0) / (tasks_first_200 as f64 / 200.0).max(1e-9)
-    );
-    // Dump top 10 most-frozen agents
-    let mut idx2: Vec<usize> = (0..n2).collect();
-    idx2.sort_by_key(|&i| std::cmp::Reverse(max_motionless[i]));
-    eprintln!("  top 10 most-frozen agents:");
-    for i in idx2.iter().take(10) {
-        let a = &runner2.agents[*i];
-        eprintln!(
-            "    agent={} max_motionless={} final pos={:?} goal={:?} task_leg={:?}",
-            i, max_motionless[*i], a.pos, a.goal, a.task_leg
-        );
-    }
-
-    // Dump top 10 offenders
-    let mut idx: Vec<usize> = (0..agent_count).collect();
-    idx.sort_by_key(|&i| std::cmp::Reverse(max_any_loading[i]));
-    eprintln!("  top 10 Loading streaks:");
-    for i in idx.iter().take(10) {
-        let a = &runner.agents[*i];
-        eprintln!(
-            "    agent={} max_any={} max_corridor={} final pos={:?} goal={:?} task_leg={:?}",
-            i, max_any_loading[*i], max_corridor[*i], a.pos, a.goal, a.task_leg
-        );
-    }
-}
-
 /// Rewind determinism: run to T, reset to T/2 (restoring next_fault_tick),
 /// replay forward to T — fault event sequence must have identical count.
 #[test]
@@ -2300,7 +1856,7 @@ fn intermittent_rewind_determinism() {
         let rng = SeededRng::new(99);
         // Consume the same RNG as place_agents did
         let solver =
-            mafis::planning::registry::build("pibt", &Default::default(), agents.len()).unwrap();
+            mafis::planning::registry::build(DEFAULT, &Default::default(), agents.len()).unwrap();
         let fc = FaultConfig {
             enabled: true,
             intermittent_enabled: true,

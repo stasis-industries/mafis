@@ -9,6 +9,7 @@
 use mafis::experiment::config::ExperimentConfig;
 use mafis::experiment::runner::run_single_experiment;
 use mafis::fault::scenario::FaultScenario;
+use mafis::planners::DEFAULT;
 
 // ─── Helper ─────────────────────────────────────────────────────────────
 
@@ -45,12 +46,12 @@ const SEEDS: &[u64] = &[42, 123, 456, 789, 1024];
 // count then saturates or decreases at high density. There exists a density
 // where adding agents no longer helps.
 //
-// Test: run PIBT at increasing densities, verify per-agent throughput
+// Test: run the default planner at increasing densities, verify per-agent throughput
 // decreases at high density compared to low density.
 // =========================================================================
 
 #[test]
-fn property_throughput_saturation_pibt() {
+fn property_throughput_saturation() {
     let topology = "warehouse_single_dock"; // 32×21 = 672 cells
     let ticks = 300;
 
@@ -59,9 +60,9 @@ fn property_throughput_saturation_pibt() {
     let mut throughputs = Vec::new();
 
     for &n in &densities {
-        let t = run_multi_seed("pibt", topology, n, ticks, SEEDS);
+        let t = run_multi_seed(DEFAULT, topology, n, ticks, SEEDS);
         let per_agent = t / n as f64;
-        eprintln!("PIBT n={n}: throughput={t:.1} tasks ({per_agent:.3} tasks/agent)");
+        eprintln!("n={n}: throughput={t:.1} tasks ({per_agent:.3} tasks/agent)");
         throughputs.push((t, per_agent));
     }
 
@@ -77,79 +78,14 @@ fn property_throughput_saturation_pibt() {
     );
 
     eprintln!(
-        "[OK] PIBT throughput saturation confirmed: per-agent drops from {per_agent_low:.3} (n=5) to {per_agent_high:.3} (n=80)"
+        "[OK] Throughput saturation confirmed: per-agent drops from {per_agent_low:.3} (n=5) to {per_agent_high:.3} (n=80)"
     );
-}
-
-// =========================================================================
-// Property 2: PIBT completeness (liveness on connected graphs)
-//
-// Published property (Okumura 2022): PIBT is complete for well-formed
-// instances. No permanent deadlock on connected graphs. Every agent
-// eventually reaches its goal.
-//
-// Test: run PIBT for enough ticks with moderate density. Verify that
-// tasks are completed (throughput > 0) on every topology.
-// =========================================================================
-
-#[test]
-fn property_pibt_completeness() {
-    // Run on all topologies at moderate density
-    let topologies =
-        ["warehouse_single_dock", "warehouse_dual_dock", "sorting_center", "compact_grid"];
-    let ticks = 500;
-    let agents = 20;
-
-    for topo in &topologies {
-        for &seed in SEEDS {
-            let tasks = run("pibt", topo, agents, ticks, seed);
-            assert!(
-                tasks > 0.0,
-                "PIBT on {topo} (seed={seed}) completed 0 tasks — liveness violation"
-            );
-        }
-        let avg = run_multi_seed("pibt", topo, agents, ticks, SEEDS);
-        eprintln!("[OK] PIBT completeness on {topo}: avg {avg:.1} tasks in {ticks} ticks");
-    }
-}
-
-// =========================================================================
-// Property 3: PIBT liveness at high density
-//
-// PIBT should remain live (produce tasks) even at high agent density.
-// This tests that the solver does not deadlock on a dense grid.
-//
-// Note: this does not specifically isolate priority inheritance as the
-// mechanism. It verifies the observable consequence: continued task
-// completion under congestion.
-// =========================================================================
-
-#[test]
-fn property_pibt_liveness_at_high_density() {
-    let topology = "compact_grid"; // 24x24 grid
-    let ticks = 500;
-
-    for &n in &[30, 50, 70] {
-        let avg = run_multi_seed("pibt", topology, n, ticks, SEEDS);
-        // Minimum throughput threshold: priority inheritance must keep agents
-        // moving on dense grids. A correct PIBT implementation achieves 300+
-        // tasks at n=30 on compact_grid (26×26). If throughput drops below
-        // 100, priority inheritance is broken (e.g., agents can't push blockers).
-        let min_tasks = 100.0;
-        assert!(
-            avg > min_tasks,
-            "PIBT produced only {avg:.1} tasks at n={n} on {topology}: \
-             expected >{min_tasks} — possible priority inheritance bug"
-        );
-        let per_agent = avg / n as f64;
-        eprintln!("[OK] PIBT n={n} on {topology}: {avg:.1} tasks ({per_agent:.2}/agent)");
-    }
 }
 
 // =========================================================================
 // Property 4: All solvers functional
 //
-// Verify that all 8 solvers produce positive throughput and that no
+// Verify that every registered planner produces positive throughput and that no
 // solver is orders of magnitude worse than the others (which would
 // indicate a broken implementation).
 //
@@ -166,11 +102,9 @@ fn property_solver_paradigm_consistency() {
     let ticks = 300;
     let agents = 20;
 
-    let solvers = ["pibt", "rhcr_pbs", "token_passing"];
-
     let mut results = Vec::new();
 
-    for &solver in &solvers {
+    for solver in mafis::planning::registry::entries().iter().map(|entry| entry.info.id) {
         let avg = run_multi_seed(solver, topology, agents, ticks, SEEDS);
         eprintln!("{solver:20}: {avg:.1} tasks");
         assert!(avg > 0.0, "{solver} produced 0 tasks — broken solver");
@@ -187,7 +121,7 @@ fn property_solver_paradigm_consistency() {
         "Solver spread too large ({min_t:.1} to {max_t:.1}): likely broken solver"
     );
 
-    eprintln!("[OK] All 8 solvers functional: range {min_t:.1} to {max_t:.1} tasks");
+    eprintln!("[OK] All planners functional: range {min_t:.1} to {max_t:.1} tasks");
 }
 
 // =========================================================================
@@ -210,8 +144,8 @@ fn property_topology_sensitivity() {
     let mut throughputs = Vec::new();
 
     for &topo in &topologies {
-        let avg = run_multi_seed("pibt", topo, agents, ticks, SEEDS);
-        eprintln!("PIBT on {topo}: {avg:.1} tasks");
+        let avg = run_multi_seed(DEFAULT, topo, agents, ticks, SEEDS);
+        eprintln!("{topo}: {avg:.1} tasks");
         throughputs.push((topo, avg));
     }
 
@@ -248,8 +182,8 @@ fn property_differential_measurement_validity() {
 
     // Test 1: determinism — two identical runs produce identical results
     for &seed in &[42u64, 123, 456] {
-        let baseline_1 = run("pibt", topology, agents, ticks, seed);
-        let baseline_2 = run("pibt", topology, agents, ticks, seed);
+        let baseline_1 = run(DEFAULT, topology, agents, ticks, seed);
+        let baseline_2 = run(DEFAULT, topology, agents, ticks, seed);
         assert!(
             (baseline_1 - baseline_2).abs() < 1e-10,
             "Baseline runs differ (seed={seed}): {baseline_1} vs {baseline_2} — determinism broken"
@@ -263,7 +197,7 @@ fn property_differential_measurement_validity() {
     let mut faulted_total = 0.0;
 
     for &seed in SEEDS {
-        let baseline = run("pibt", topology, agents, ticks, seed);
+        let baseline = run(DEFAULT, topology, agents, ticks, seed);
         baseline_total += baseline;
 
         let scenario = FaultScenario {
@@ -274,7 +208,7 @@ fn property_differential_measurement_validity() {
         };
 
         let config = ExperimentConfig {
-            solver_name: "pibt".into(),
+            solver_name: DEFAULT.into(),
             topology_name: topology.into(),
             scenario: Some(scenario),
             scheduler_name: "random".into(),

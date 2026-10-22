@@ -1,7 +1,9 @@
 //! MET-MAPF Metamorphic Testing — systematic correctness validation.
 //!
-//! Implements 5 metamorphic relations from the MET-MAPF framework
+//! Implements metamorphic relations from the MET-MAPF framework
 //! (ACM Transactions on Software Engineering and Methodology, 2024).
+//! MR1, MR2 and MR6 expect throughput from specific planners, so they live in
+//! `planner_expectations.rs`.
 //! These tests validate solver correctness WITHOUT needing a ground-truth
 //! oracle — they check that properties are preserved under transformations.
 //!
@@ -23,18 +25,13 @@ use mafis::experiment::runner::run_single_experiment;
 use mafis::fault::config::FaultConfig;
 use mafis::fault::scenario::FaultSchedule;
 
-/// All faithful solvers — used for MR3 (collision freedom) and MR4 (determinism),
-/// which only require that the solver runs without panic and produces consistent
-/// results. They do NOT require meaningful throughput.
-const SOLVERS: &[&str] = &["pibt", "rhcr_pbs", "token_passing"];
-
-/// Solvers expected to produce meaningful throughput on synthetic open grids
-/// (16x16 / 20x20 with random zone assignments). RHCR-PBS is excluded because
-/// its PBS node limit (clamp(N*3, 50, max) = 50 for N≤16 agents) is too tight
-/// for unstructured open-space planning — it falls back to PIBT per-agent but
-/// still produces near-zero task completion in 200 ticks. PBS works correctly
-/// on structured topologies like warehouse_single_dock (verified in verification.rs).
-const LIVENESS_SOLVERS: &[&str] = &["pibt", "token_passing"];
+/// Every registered planner — used for MR3 (collision freedom), MR4
+/// (determinism) and MR5, which only require that the planner runs without
+/// panic and produces consistent results. They do NOT require meaningful
+/// throughput.
+fn planner_ids() -> impl Iterator<Item = &'static str> {
+    mafis::planning::registry::entries().iter().map(|entry| entry.info.id)
+}
 
 const TICK_COUNT: u64 = 200;
 
@@ -79,87 +76,6 @@ fn make_open_grid(w: i32, h: i32) -> (GridMap, ZoneMap) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// MR1: Agent Removal — removing an agent should not cause deadlock
-// ═══════════════════════════════════════════════════════════════════════
-
-/// If a solver produces throughput with N agents, it should also produce
-/// throughput with N-1 agents (removing one agent can't cause total failure).
-#[test]
-fn mr1_agent_removal_preserves_liveness() {
-    let (grid, zones) = make_open_grid(16, 16);
-
-    for solver in LIVENESS_SOLVERS {
-        let r_full = run_custom(solver, grid.clone(), zones.clone(), 10, 42);
-        let r_reduced = run_custom(solver, grid.clone(), zones.clone(), 9, 42);
-
-        assert!(
-            r_reduced.baseline_metrics.total_tasks > 0,
-            "MR1 failed for {solver}: removing 1 agent caused zero throughput \
-             (full={}, reduced=0)",
-            r_full.baseline_metrics.total_tasks
-        );
-        eprintln!(
-            "  MR1 {solver:<20} full(10)={:<4} reduced(9)={:<4} OK",
-            r_full.baseline_metrics.total_tasks, r_reduced.baseline_metrics.total_tasks
-        );
-    }
-}
-
-// ═══════════════════════════════════════════════════════════════════════
-// MR2: Obstacle Addition — adding obstacles on unused cells shouldn't
-//      cause total failure
-// ═══════════════════════════════════════════════════════════════════════
-
-/// Adding a few obstacles to an open grid should not reduce throughput to zero.
-/// The solver must adapt to the new obstacles.
-#[test]
-fn mr2_obstacle_addition_preserves_liveness() {
-    for solver in LIVENESS_SOLVERS {
-        // Base: open 16x16 grid
-        let (grid_open, zones_open) = make_open_grid(16, 16);
-        let r_open = run_custom(solver, grid_open, zones_open, 8, 42);
-
-        // Modified: add 10 obstacles in corners (unlikely to block paths)
-        let mut obstacles = HashSet::new();
-        for i in 0..5 {
-            obstacles.insert(IVec2::new(15, i)); // top-right column
-            obstacles.insert(IVec2::new(0, 15 - i)); // bottom-left column
-        }
-        let grid_obs = GridMap::with_obstacles(16, 16, obstacles);
-        let mut zones_obs = ZoneMap {
-            pickup_cells: Vec::new(),
-            delivery_cells: Vec::new(),
-            corridor_cells: Vec::new(),
-            recharging_cells: Vec::new(),
-            zone_type: std::collections::HashMap::new(),
-            queue_lines: Vec::new(),
-        };
-        for y in 0..16 {
-            for x in 0..16 {
-                let pos = IVec2::new(x, y);
-                if grid_obs.is_walkable(pos) {
-                    zones_obs.corridor_cells.push(pos);
-                }
-            }
-        }
-        assign_random_zones(&mut zones_obs, 8, 8);
-
-        let r_obs = run_custom(solver, grid_obs, zones_obs, 8, 42);
-
-        assert!(
-            r_obs.baseline_metrics.total_tasks > 0,
-            "MR2 failed for {solver}: adding corner obstacles killed throughput \
-             (open={}, obs=0)",
-            r_open.baseline_metrics.total_tasks
-        );
-        eprintln!(
-            "  MR2 {solver:<20} open={:<4} +obstacles={:<4} OK",
-            r_open.baseline_metrics.total_tasks, r_obs.baseline_metrics.total_tasks
-        );
-    }
-}
-
-// ═══════════════════════════════════════════════════════════════════════
 // MR3: Collision freedom is preserved under different seeds
 // ═══════════════════════════════════════════════════════════════════════
 
@@ -169,7 +85,7 @@ fn mr2_obstacle_addition_preserves_liveness() {
 fn mr3_collision_free_across_seeds() {
     let (grid, zones) = make_open_grid(16, 16);
 
-    for solver in SOLVERS {
+    for solver in planner_ids() {
         for seed in [42, 123, 456, 789, 1024] {
             let mut rng = SeededRng::new(seed);
             let agents = place_agents(15, &grid, &zones, &mut rng);
@@ -237,7 +153,7 @@ fn mr3_collision_free_across_seeds() {
 fn mr4_determinism_on_custom_map() {
     let (grid, zones) = make_open_grid(16, 16);
 
-    for solver in SOLVERS {
+    for solver in planner_ids() {
         let r1 = run_custom(solver, grid.clone(), zones.clone(), 12, 42);
         let r2 = run_custom(solver, grid.clone(), zones.clone(), 12, 42);
 
@@ -257,8 +173,8 @@ fn mr4_determinism_on_custom_map() {
 // ═══════════════════════════════════════════════════════════════════════
 // MR5: Scale monotonicity — more ticks should never reduce total tasks
 // ═══════════════════════════════════════════════════════════════════════
-// Uses all 8 SOLVERS including rhcr_pbs. MR5 only asserts that tasks(200t)
-// >= tasks(100t) — it does not require positive throughput — so even RHCR-PBS
+// Uses every registered planner. MR5 only asserts that tasks(200t)
+// >= tasks(100t) — it does not require positive throughput — so even a planner
 // producing 0 tasks at 100t and 1 task at 200t satisfies the relation.
 
 /// Running for more ticks should produce at least as many completed tasks.
@@ -267,7 +183,7 @@ fn mr4_determinism_on_custom_map() {
 fn mr5_more_ticks_more_tasks() {
     let (grid, zones) = make_open_grid(16, 16);
 
-    for solver in SOLVERS {
+    for solver in planner_ids() {
         let r_short = ExperimentConfig {
             solver_name: solver.to_string(),
             topology_name: "custom".into(),
@@ -304,50 +220,5 @@ fn mr5_more_ticks_more_tasks() {
             "  MR5 {solver:<20} 100t={:<4} 200t={:<4} OK",
             result_short.baseline_metrics.total_tasks, result_long.baseline_metrics.total_tasks
         );
-    }
-}
-
-// ═══════════════════════════════════════════════════════════════════════
-// MR6: Agent scale monotonicity — more agents should produce at least as
-//      much throughput at low density (20x20 grid so 10 agents is only 2.5%
-//      density — well below any congestion regime)
-// ═══════════════════════════════════════════════════════════════════════
-
-/// On a sufficiently large open grid, scaling from 5 to 10 agents should
-/// not reduce total throughput — more workers at low density means more
-/// tasks can be completed in the same number of ticks.
-///
-/// Uses LIVENESS_SOLVERS (excludes RHCR-PBS). PBS hits its node limit of 50
-/// even on a 20x20 open grid at 5–10 agents, producing near-zero throughput.
-/// PBS is verified to be collision-free (MR3) and deterministic (MR4) on open
-/// grids; its throughput on unstructured maps is separately documented as a
-/// known limitation in verification.rs.
-#[test]
-fn mr6_agent_scale_monotonicity_throughput() {
-    // 20x20 gives density=5/400=1.25% (5 agents) and 2.5% (10 agents).
-    // Both are in the uncongested regime for every LIVENESS_SOLVER.
-    let (grid, zones) = make_open_grid(20, 20);
-
-    for solver in LIVENESS_SOLVERS.iter().copied() {
-        let r5 = run_custom(solver, grid.clone(), zones.clone(), 5, 42);
-        let r10 = run_custom(solver, grid.clone(), zones.clone(), 10, 42);
-
-        let tasks5 = r5.baseline_metrics.total_tasks;
-        let tasks10 = r10.baseline_metrics.total_tasks;
-
-        // Primary assertion: 10 agents must produce at least as many tasks as 5.
-        assert!(
-            tasks10 >= tasks5,
-            "MR6 failed for {solver}: 10 agents produced fewer tasks than 5 \
-             (5-agents={tasks5}, 10-agents={tasks10})"
-        );
-
-        // Liveness assertion: 10 agents must produce some throughput.
-        assert!(
-            tasks10 > 0,
-            "MR6 failed for {solver}: 10 agents on 20x20 grid produced zero throughput"
-        );
-
-        eprintln!("  MR6 {solver:<20} 5-agents={:<4} 10-agents={:<4} OK", tasks5, tasks10);
     }
 }

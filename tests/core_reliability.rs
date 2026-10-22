@@ -18,8 +18,8 @@ use mafis::fault::scenario::{
 };
 use mafis::planning::heuristics::DistanceMapCache;
 use mafis::planning::planner::{Decision, Observation, Planner};
+use mafis::planning::registry;
 
-const SOLVERS: [&str; 3] = ["pibt", "rhcr_pbs", "token_passing"];
 const TOPOLOGY: &str = "warehouse_single_dock";
 
 fn runner_with(
@@ -36,7 +36,11 @@ fn runner_with(
 }
 
 fn solver(name: &str, n: usize) -> Box<dyn Planner> {
-    mafis::planning::registry::build(name, &Default::default(), n).expect("known solver")
+    registry::build(name, &Default::default(), n).expect("known solver")
+}
+
+fn planner_ids() -> impl Iterator<Item = &'static str> {
+    registry::entries().iter().map(|entry| entry.info.id)
 }
 
 fn no_faults() -> FaultConfig {
@@ -55,14 +59,14 @@ fn positions(runner: &SimulationRunner) -> Vec<(IVec2, bool)> {
 
 // ── 1. RNG stream isolation ─────────────────────────────────────────
 
-/// PIBT wrapper that burns a tick-dependent number of draws from the solver
+/// Planner wrapper that burns a tick-dependent number of draws from the solver
 /// RNG after planning. If the solver stream is shared with task demand or
-/// carried across ticks, the trajectory diverges from plain PIBT.
-struct NoisyPibt {
+/// carried across ticks, the trajectory diverges from the plain planner.
+struct NoisyPlanner {
     inner: Box<dyn Planner>,
 }
 
-impl Planner for NoisyPibt {
+impl Planner for NoisyPlanner {
     fn reset(&mut self) {
         self.inner.reset();
     }
@@ -83,9 +87,15 @@ impl Planner for NoisyPibt {
 #[test]
 fn solver_rng_consumption_does_not_leak_into_other_streams() {
     let n = 40;
-    let mut plain = runner_with(solver("pibt", n), n, 42, no_faults(), FaultSchedule::default());
+    let mut plain = runner_with(
+        solver(mafis::planners::DEFAULT, n),
+        n,
+        42,
+        no_faults(),
+        FaultSchedule::default(),
+    );
     let mut noisy = runner_with(
-        Box::new(NoisyPibt { inner: solver("pibt", n) }),
+        Box::new(NoisyPlanner { inner: solver(mafis::planners::DEFAULT, n) }),
         n,
         42,
         no_faults(),
@@ -104,7 +114,7 @@ fn burst_equals_direct_kill_of_the_same_agents() {
     // consume the task-demand stream.
     let n = 40;
     let burst_tick = 100;
-    for name in SOLVERS {
+    for name in planner_ids() {
         let schedule = FaultSchedule {
             events: vec![ScheduledEvent {
                 tick: burst_tick,
@@ -165,7 +175,7 @@ fn zero_magnitude_faults_leave_the_run_identical() {
         zone_latency_duration: 0,
         ..Default::default()
     };
-    for name in SOLVERS {
+    for name in planner_ids() {
         for scenario in [burst_zero.clone(), zone_zero.clone()] {
             let label = format!("{name} {:?}", scenario.scenario_type);
             let r = run_single_experiment(&zero_magnitude_config(name, scenario));
@@ -209,10 +219,12 @@ fn wear_deaths_happen_at_the_same_tick_under_every_solver() {
         }
         deaths
     };
-    let reference = deaths_under("pibt");
+    let mut ids = planner_ids();
+    let first = ids.next().expect("a registered planner");
+    let reference = deaths_under(first);
     assert!(!reference.is_empty(), "Wear-Medium should kill some agents within 300 ticks");
-    for name in ["rhcr_pbs", "token_passing"] {
-        assert_eq!(deaths_under(name), reference, "{name}: death schedule differs from PIBT");
+    for name in ids {
+        assert_eq!(deaths_under(name), reference, "{name}: death schedule differs from {first}");
     }
 }
 
@@ -221,7 +233,7 @@ fn wear_deaths_happen_at_the_same_tick_under_every_solver() {
 #[test]
 fn no_alive_agent_targets_a_blocked_cell_after_a_burst() {
     let n = 40;
-    for name in SOLVERS {
+    for name in planner_ids() {
         let schedule = FaultSchedule {
             events: vec![ScheduledEvent {
                 tick: 100,
@@ -249,7 +261,7 @@ fn no_alive_agent_targets_a_blocked_cell_after_a_burst() {
 #[test]
 fn fault_free_runs_never_eject_queued_agents() {
     let n = 40;
-    for name in SOLVERS {
+    for name in planner_ids() {
         let mut runner = runner_with(solver(name, n), n, 42, no_faults(), FaultSchedule::default());
         for _ in 0..300 {
             tick(&mut runner);
@@ -261,8 +273,8 @@ fn fault_free_runs_never_eject_queued_agents() {
 // ── 5. Collision accounting ─────────────────────────────────────────
 
 #[test]
-fn runs_export_zero_violations_and_pibt_never_needs_the_resolver() {
-    for name in SOLVERS {
+fn runs_export_zero_violations() {
+    for name in planner_ids() {
         let r = run_single_experiment(&ExperimentConfig {
             scenario: None,
             ..zero_magnitude_config(name, FaultScenario::default())
@@ -270,8 +282,5 @@ fn runs_export_zero_violations_and_pibt_never_needs_the_resolver() {
         let m = &r.baseline_metrics;
         assert_eq!(m.collision_violations, 0, "{name}: post-hoc collision");
         eprintln!("{name}: forced_waits = {}", m.forced_waits);
-        if name == "pibt" {
-            assert_eq!(m.forced_waits, 0, "pibt: resolver overrode a PIBT move");
-        }
     }
 }

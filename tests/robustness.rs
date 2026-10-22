@@ -350,7 +350,7 @@ fn solver_factory_empty_name_returns_none() {
 #[test]
 fn solver_factory_zero_agents() {
     // All solvers should accept 0 agents without panic
-    for name in ["pibt", "rhcr_pbs", "token_passing"] {
+    for name in registry::entries().iter().map(|entry| entry.info.id) {
         let solver = registry::build(name, &Default::default(), 0);
         assert!(solver.is_ok(), "{name} should accept 0 agents");
     }
@@ -359,7 +359,7 @@ fn solver_factory_zero_agents() {
 #[test]
 fn solver_factory_agents_exceed_grid() {
     // More agents than could possibly fit — building shouldn't care
-    for name in ["pibt", "rhcr_pbs", "token_passing"] {
+    for name in registry::entries().iter().map(|entry| entry.info.id) {
         let solver = registry::build(name, &Default::default(), 1000);
         assert!(solver.is_ok(), "{name} should accept large agent count at build time");
     }

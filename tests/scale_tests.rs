@@ -14,6 +14,7 @@ use mafis::core::task::ActiveScheduler;
 use mafis::core::topology::{ActiveTopology, TopologyRegistry, ZoneMap};
 use mafis::fault::config::FaultConfig;
 use mafis::fault::scenario::FaultSchedule;
+use mafis::planners::DEFAULT;
 
 fn run_ticks(
     solver_name: &str,
@@ -61,52 +62,38 @@ fn run_ticks(
 // ═══════════════════════════════════════════════════════════════════════
 
 #[test]
-fn scale_pibt_200_agents_warehouse_single_dock() {
-    let (tasks, alive) = run_ticks("pibt", "warehouse_single_dock", 200, 300, 42);
+fn scale_200_agents_warehouse_single_dock() {
+    let (tasks, alive) = run_ticks(DEFAULT, "warehouse_single_dock", 200, 300, 42);
     assert!(alive > 0, "all agents dead with no faults");
-    eprintln!("  pibt/warehouse_single_dock/200 agents: {tasks} tasks, {alive} alive");
+    eprintln!("  warehouse_single_dock/200 agents: {tasks} tasks, {alive} alive");
 }
 
 #[test]
-fn scale_pibt_300_agents_warehouse_dual_dock() {
-    let (tasks, alive) = run_ticks("pibt", "warehouse_dual_dock", 300, 300, 42);
+fn scale_300_agents_warehouse_dual_dock() {
+    let (tasks, alive) = run_ticks(DEFAULT, "warehouse_dual_dock", 300, 300, 42);
     assert!(alive > 0, "all agents dead with no faults");
-    eprintln!("  pibt/warehouse_dual_dock/300 agents: {tasks} tasks, {alive} alive");
+    eprintln!("  warehouse_dual_dock/300 agents: {tasks} tasks, {alive} alive");
 }
 
 #[test]
-fn scale_rhcr_pbs_150_agents_warehouse_single_dock() {
-    let (tasks, alive) = run_ticks("rhcr_pbs", "warehouse_single_dock", 150, 300, 42);
+fn scale_80_agents_warehouse_dual_dock() {
+    let (tasks, alive) = run_ticks(DEFAULT, "warehouse_dual_dock", 80, 300, 42);
     assert!(alive > 0, "all agents dead with no faults");
-    eprintln!("  rhcr_pbs/warehouse_single_dock/150 agents: {tasks} tasks, {alive} alive");
+    eprintln!("  warehouse_dual_dock/80 agents: {tasks} tasks, {alive} alive");
 }
 
 #[test]
-fn scale_pibt_80_agents_warehouse_dual_dock() {
-    let (tasks, alive) = run_ticks("pibt", "warehouse_dual_dock", 80, 300, 42);
+fn scale_120_agents_fulfilment_center() {
+    let (tasks, alive) = run_ticks(DEFAULT, "fulfilment_center", 120, 300, 42);
     assert!(alive > 0, "all agents dead with no faults");
-    eprintln!("  pibt/warehouse_dual_dock/80 agents: {tasks} tasks, {alive} alive");
+    eprintln!("  fulfilment_center/120 agents: {tasks} tasks, {alive} alive");
 }
 
 #[test]
-fn scale_rhcr_pbs_80_agents_warehouse_dual_dock() {
-    let (tasks, alive) = run_ticks("rhcr_pbs", "warehouse_dual_dock", 80, 300, 42);
+fn scale_60_agents_warehouse_single_dock() {
+    let (tasks, alive) = run_ticks(DEFAULT, "warehouse_single_dock", 60, 300, 42);
     assert!(alive > 0, "all agents dead with no faults");
-    eprintln!("  rhcr_pbs/warehouse_dual_dock/80 agents: {tasks} tasks, {alive} alive");
-}
-
-#[test]
-fn scale_pibt_120_agents_fulfilment_center() {
-    let (tasks, alive) = run_ticks("pibt", "fulfilment_center", 120, 300, 42);
-    assert!(alive > 0, "all agents dead with no faults");
-    eprintln!("  pibt/fulfilment_center/120 agents: {tasks} tasks, {alive} alive");
-}
-
-#[test]
-fn scale_pibt_60_agents_warehouse_single_dock() {
-    let (tasks, alive) = run_ticks("pibt", "warehouse_single_dock", 60, 300, 42);
-    assert!(alive > 0, "all agents dead with no faults");
-    eprintln!("  pibt/warehouse_single_dock/60 agents: {tasks} tasks, {alive} alive");
+    eprintln!("  warehouse_single_dock/60 agents: {tasks} tasks, {alive} alive");
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -117,7 +104,7 @@ fn scale_pibt_60_agents_warehouse_single_dock() {
 fn edge_single_agent_all_topologies() {
     let registry = TopologyRegistry::load_from_dir(std::path::Path::new("topologies"));
     for entry in &registry.entries {
-        let (tasks, alive) = run_ticks("pibt", &entry.id, 1, 100, 42);
+        let (tasks, alive) = run_ticks(DEFAULT, &entry.id, 1, 100, 42);
         assert_eq!(alive, 1, "{}: single agent died with no faults", entry.id);
         eprintln!("  1 agent on {}: {tasks} tasks", entry.id);
     }
@@ -152,7 +139,7 @@ fn edge_max_density_no_crash() {
     let agents = place_agents(64, &grid, &zones, &mut rng);
     let rng_after = rng.clone();
 
-    let solver = mafis::planning::registry::build("pibt", &Default::default(), 64).unwrap();
+    let solver = mafis::planning::registry::build(DEFAULT, &Default::default(), 64).unwrap();
     let mut runner = SimulationRunner::new(
         grid,
         zones,
@@ -200,7 +187,7 @@ fn edge_no_pickup_cells_no_crash() {
     let agents = place_agents(5, &grid, &zones, &mut rng);
     let rng_after = rng.clone();
 
-    let solver = mafis::planning::registry::build("pibt", &Default::default(), 5).unwrap();
+    let solver = mafis::planning::registry::build(DEFAULT, &Default::default(), 5).unwrap();
     let mut runner = SimulationRunner::new(
         grid,
         zones,
@@ -246,7 +233,7 @@ fn edge_no_delivery_cells_no_crash() {
     let agents = place_agents(5, &grid, &zones, &mut rng);
     let rng_after = rng.clone();
 
-    let solver = mafis::planning::registry::build("pibt", &Default::default(), 5).unwrap();
+    let solver = mafis::planning::registry::build(DEFAULT, &Default::default(), 5).unwrap();
     let mut runner = SimulationRunner::new(
         grid,
         zones,

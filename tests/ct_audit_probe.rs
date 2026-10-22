@@ -1,4 +1,4 @@
-//! One-shot probe: run the exact config the user reported (pibt /
+//! One-shot probe: run the exact config the user reported (default planner /
 //! warehouse_medium / burst_20pct / random / 10 agents / seed 456 / 500
 //! ticks) through the experiment pipeline and print CT + summary so we can
 //! compare against the observatory's reported CT=0.858.
@@ -10,7 +10,7 @@ use mafis::experiment::runner::run_single_experiment;
 use mafis::fault::scenario::{FaultScenario, FaultScenarioType};
 
 #[test]
-fn ct_probe_pibt_warehouse_medium_burst20_random_10a_seed456() {
+fn ct_probe_warehouse_medium_burst20_random_10a_seed456() {
     let scenario = FaultScenario {
         enabled: true,
         scenario_type: FaultScenarioType::BurstFailure,
@@ -19,7 +19,7 @@ fn ct_probe_pibt_warehouse_medium_burst20_random_10a_seed456() {
         ..Default::default()
     };
     let config = ExperimentConfig {
-        solver_name: "pibt".into(),
+        solver_name: mafis::planners::DEFAULT.into(),
         topology_name: "warehouse_medium".into(),
         scenario: Some(scenario),
         scheduler_name: "random".into(),

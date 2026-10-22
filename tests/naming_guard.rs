@@ -25,16 +25,8 @@ const ALLOWLIST: &[(&str, &str)] = &[
     ("src/testing/scorecard_parity.rs", "M2"),
     ("src/ui/controls.rs", "M4"),
     ("tests/benchmarks.rs", "M6"),
-    ("tests/calibration.rs", "M2"),
     ("tests/clean_benchmark_validation.rs", "M6"),
-    ("tests/core_reliability.rs", "M2"),
-    ("tests/ct_audit_probe.rs", "M2"),
-    ("tests/experiment_suite.rs", "M2"),
-    ("tests/metamorphic.rs", "M2"),
-    ("tests/robustness.rs", "M2"),
-    ("tests/scale_tests.rs", "M2"),
-    ("tests/trace_rapidity.rs", "M2"),
-    ("tests/verification.rs", "M2"),
+    ("tests/planner_expectations.rs", "M6"),
 ];
 
 const MILESTONES: [&str; 5] = ["M2", "M3", "M4", "M5", "M6"];
