@@ -130,7 +130,7 @@ pub fn write_summary_csv<W: Write>(
     // runs only; censored runs (degraded, never recovered) are counted, not dropped.
     writeln!(
         writer,
-        "solver,topology,scenario,scheduler,num_agents,num_seeds,\
+        "solver,planner_params,topology,scenario,scheduler,num_agents,num_seeds,\
          throughput_mean,throughput_std,throughput_ci95_lo,throughput_ci95_hi,\
          tasks_mean,tasks_std,\
          ft_n,ft_mean,ft_std,ft_ci95_lo,ft_ci95_hi,\
@@ -152,7 +152,7 @@ pub fn write_summary_csv<W: Write>(
     for s in summaries {
         writeln!(
             writer,
-            "{},{},{},{},{},{},\
+            "{},\"{}\",{},{},{},{},{},\
              {:.4},{:.4},{:.4},{:.4},\
              {:.1},{:.1},\
              {},{:.4},{:.4},{:.4},{:.4},\
@@ -169,6 +169,8 @@ pub fn write_summary_csv<W: Write>(
              {:.1},{:.0},\
              {},{},{}",
             s.solver_name,
+            // Quoted in the format string: the canonical text separates parameters with commas.
+            s.planner_params,
             s.topology_name,
             s.scenario_label,
             s.scheduler_name,
@@ -439,9 +441,10 @@ fn write_metrics_json<W: Write>(
 fn write_summary_json<W: Write>(writer: &mut W, s: &ConfigSummary) -> std::io::Result<()> {
     write!(
         writer,
-        "{{\"solver\":\"{}\",\"topology\":\"{}\",\"scenario\":\"{}\",\
+        "{{\"solver\":\"{}\",\"planner_params\":\"{}\",\"topology\":\"{}\",\"scenario\":\"{}\",\
          \"scheduler\":\"{}\",\"num_agents\":{},\"num_seeds\":{},",
         s.solver_name,
+        s.planner_params,
         s.topology_name,
         s.scenario_label,
         s.scheduler_name,
@@ -534,6 +537,8 @@ pub fn parse_summaries_from_json(json: &str) -> Result<Vec<ConfigSummary>, Strin
     let mut result = Vec::with_capacity(summaries.len());
     for s in summaries {
         let solver = s.get("solver").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let planner_params =
+            s.get("planner_params").and_then(|v| v.as_str()).unwrap_or("").to_string();
         let topology = s.get("topology").and_then(|v| v.as_str()).unwrap_or("").to_string();
         let scenario = s.get("scenario").and_then(|v| v.as_str()).unwrap_or("").to_string();
         let scheduler = s.get("scheduler").and_then(|v| v.as_str()).unwrap_or("").to_string();
@@ -542,6 +547,7 @@ pub fn parse_summaries_from_json(json: &str) -> Result<Vec<ConfigSummary>, Strin
 
         result.push(ConfigSummary {
             solver_name: solver,
+            planner_params,
             topology_name: topology,
             scenario_label: scenario,
             scheduler_name: scheduler,
@@ -995,6 +1001,73 @@ mod tests {
         for csv in [runs_csv, summary_csv] {
             let widths: Vec<usize> = csv.lines().map(|l| l.split(',').count()).collect();
             assert!(widths.iter().all(|&w| w == widths[0]), "ragged CSV: {widths:?}");
+        }
+    }
+
+    /// A planner that declares a parameter, two of its values, and one run of
+    /// that planner per value.
+    fn runs_with_two_param_sets() -> Vec<RunResult> {
+        use crate::planning::params::{ParamKind, ParamValue, ParamValues};
+        let (entry, spec) = crate::planning::registry::entries()
+            .iter()
+            .find_map(|entry| entry.info.params.first().map(|spec| (entry, *spec)))
+            .expect("a registered planner declares a parameter");
+        let ParamKind::Int { min, max, .. } = spec.kind;
+        [min, max]
+            .map(|value| {
+                let mut run = dummy_run();
+                run.config.solver_name = entry.info.id.into();
+                run.config.planner_params =
+                    ParamValues::default().with(spec.key, ParamValue::Int(value));
+                run
+            })
+            .to_vec()
+    }
+
+    #[test]
+    fn summaries_keep_parameter_sets_apart() {
+        let runs = runs_with_two_param_sets();
+        let summaries = crate::experiment::runner::compute_summaries(&runs);
+        let mut got: Vec<String> = summaries.iter().map(|s| s.planner_params.clone()).collect();
+        let mut want: Vec<String> = runs.iter().map(|r| r.config.planner_params_text()).collect();
+        got.sort();
+        want.sort();
+        assert_eq!(got, want);
+        assert!(summaries.iter().all(|s| s.num_seeds == 1));
+    }
+
+    #[test]
+    fn summary_exports_name_the_parameter_set() {
+        let summaries = crate::experiment::runner::compute_summaries(&runs_with_two_param_sets());
+
+        let mut buf = Vec::new();
+        write_summary_csv(&mut buf, &summaries).unwrap();
+        let csv = String::from_utf8(buf).unwrap();
+        assert!(csv.starts_with("solver,planner_params,topology,"), "{csv}");
+        for s in &summaries {
+            assert!(csv.contains(&format!("{},\"{}\",", s.solver_name, s.planner_params)), "{csv}");
+        }
+
+        let mut buf = b"{\"summaries\":[".to_vec();
+        for (i, s) in summaries.iter().enumerate() {
+            if i > 0 {
+                buf.push(b',');
+            }
+            write_summary_json(&mut buf, s).unwrap();
+        }
+        buf.extend_from_slice(b"]}");
+        let parsed = parse_summaries_from_json(&String::from_utf8(buf).unwrap()).unwrap();
+        let got: Vec<&str> = parsed.iter().map(|s| s.planner_params.as_str()).collect();
+        let want: Vec<&str> = summaries.iter().map(|s| s.planner_params.as_str()).collect();
+        assert_eq!(got, want);
+    }
+
+    #[test]
+    fn summary_rows_match_only_their_own_runs() {
+        let runs = runs_with_two_param_sets();
+        for s in crate::experiment::runner::compute_summaries(&runs) {
+            let matching = runs.iter().filter(|r| s.matches(&r.config)).count();
+            assert_eq!(matching, 1, "row {}", s.planner_params);
         }
     }
 

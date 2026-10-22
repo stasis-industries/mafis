@@ -321,16 +321,8 @@ pub fn experiment_panel(
         });
 
         // Filter runs matching this config
-        let matching: Vec<&crate::experiment::runner::RunResult> = runs
-            .iter()
-            .filter(|r| {
-                r.config.solver_name == sel.solver_name
-                    && r.config.topology_name == sel.topology_name
-                    && r.config.scenario_label() == sel.scenario_label
-                    && r.config.scheduler_name == sel.scheduler_name
-                    && r.config.num_agents == sel.num_agents
-            })
-            .collect();
+        let matching: Vec<&crate::experiment::runner::RunResult> =
+            runs.iter().filter(|r| sel.matches(&r.config)).collect();
 
         if matching.is_empty() {
             ui.weak("No per-run data available (imported from summaries only)");

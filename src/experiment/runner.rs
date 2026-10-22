@@ -33,6 +33,8 @@ pub struct RunResult {
 pub struct ConfigSummary {
     /// Config identity (without seed — shared across seeds).
     pub solver_name: String,
+    /// Canonical text of the planner's resolved parameters.
+    pub planner_params: String,
     pub topology_name: String,
     pub scenario_label: String,
     pub scheduler_name: String,
@@ -70,6 +72,18 @@ pub struct ConfigSummary {
     pub num_baseline_gridlocked: usize,
     /// Runs that degraded and never recovered (right-censored Rapidity).
     pub rapidity_censored: usize,
+}
+
+impl ConfigSummary {
+    /// Whether `config` is one of the runs this row summarises (any seed).
+    pub fn matches(&self, config: &ExperimentConfig) -> bool {
+        config.solver_name == self.solver_name
+            && config.planner_params_text() == self.planner_params
+            && config.topology_name == self.topology_name
+            && config.scenario_label() == self.scenario_label
+            && config.scheduler_name == self.scheduler_name
+            && config.num_agents == self.num_agents
+    }
 }
 
 /// Full matrix result — all runs + statistical summaries.
@@ -703,7 +717,7 @@ pub fn run_matrix(
             .collect()
     });
 
-    // Compute statistical summaries grouped by (solver, topology, scenario, scheduler, agents)
+    // Compute statistical summaries grouped by (solver, params, topology, scenario, scheduler, agents)
     let summaries = compute_summaries(&runs);
 
     let wall_time_total_ms = wall_start.elapsed().as_millis() as u64;
@@ -720,8 +734,9 @@ pub fn compute_summaries(runs: &[RunResult]) -> Vec<ConfigSummary> {
     let mut groups: BTreeMap<String, Vec<&RunResult>> = BTreeMap::new();
     for run in runs {
         let key = format!(
-            "{}|{}|{}|{}|{}",
+            "{}|{}|{}|{}|{}|{}",
             run.config.solver_name,
+            run.config.planner_params_text(),
             run.config.topology_name,
             run.config.scenario_label(),
             run.config.scheduler_name,
@@ -790,6 +805,7 @@ pub fn compute_summaries(runs: &[RunResult]) -> Vec<ConfigSummary> {
 
             ConfigSummary {
                 solver_name: first.solver_name.clone(),
+                planner_params: first.planner_params_text(),
                 topology_name: first.topology_name.clone(),
                 scenario_label: first.scenario_label(),
                 scheduler_name: first.scheduler_name.clone(),
