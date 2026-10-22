@@ -38,7 +38,6 @@ const ALLOWLIST: &[(&str, &str)] = &[
     ("tests/metamorphic.rs", "M2"),
     ("tests/robustness.rs", "M2"),
     ("tests/scale_tests.rs", "M2"),
-    ("tests/solver_fidelity_probe.rs", "M2"),
     ("tests/trace_rapidity.rs", "M2"),
     ("tests/verification.rs", "M2"),
     ("web/app.js", "M2"),

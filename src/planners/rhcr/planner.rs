@@ -13,7 +13,7 @@
 //!   `planning_window` lookahead (driver.cpp:116-119, KivaSystem.cpp:209).
 //!   Between windows only agents left without a plan are planned, around
 //!   the others' fixed paths (`new_agents` vs `initial_rt`,
-//!   BasicSystem.cpp:604-637), counted by `extra_replan_count()`.
+//!   BasicSystem.cpp:604-637), counted in the `extra_replans` telemetry.
 //! - Goals: MAFIS reveals an agent's next goal only when it arrives, so agents
 //!   plan to their current goal and hold it — the reference's
 //!   `hold_endpoints` mode (KivaSystem.cpp:74), not its default chain of
@@ -39,7 +39,7 @@ use crate::planners::toolkit::bytes::{f32s_from_bytes, f32s_to_bytes};
 use crate::planners::toolkit::pibt_core::PibtCore;
 use crate::planning::heuristics::DistanceMapCache;
 use crate::planning::params::{ParamKind, ParamSpec, ResolvedParams};
-use crate::planning::planner::{AgentPlan, AgentView, Decision, Observation, Planner};
+use crate::planning::planner::{AgentPlan, AgentView, Decision, Observation, Planner, Telemetry};
 
 use super::pbs_planner::PbsPlanner;
 
@@ -681,21 +681,26 @@ impl Planner for RhcrPlanner {
         Decision::Plans(&self.plan_buffer)
     }
 
-    fn pbs_partial_rate(&self) -> Option<f32> {
-        if self.pbs_total_replans == 0 {
-            None
-        } else {
-            Some(self.pbs_partial_count as f32 / self.pbs_total_replans as f32)
+    /// - `pbs_partial_rate`: fraction of replan windows that could not close
+    ///   the full fleet plan within the node budget (`WindowResult::Partial`),
+    ///   a probe for PBS scalability cliffs; once a window ran.
+    /// - `congested_window_rate`: fraction of windows in which more than half
+    ///   the agents never moved (reference `BasicSystem::congested`, where the
+    ///   reference run would stop); once a window was checked.
+    /// - `extra_replans`: plans made between windows for agents left without
+    ///   a plan (new goal, runner-forced wait, fault).
+    fn telemetry(&self) -> Telemetry {
+        let mut telemetry = Vec::new();
+        if self.pbs_total_replans > 0 {
+            let rate = self.pbs_partial_count as f64 / self.pbs_total_replans as f64;
+            telemetry.push(("pbs_partial_rate".to_string(), rate));
         }
-    }
-
-    fn extra_replan_count(&self) -> Option<usize> {
-        Some(self.extra_replans)
-    }
-
-    fn congested_window_rate(&self) -> Option<f32> {
-        (self.congestion_checks > 0)
-            .then(|| self.congested_windows as f32 / self.congestion_checks as f32)
+        if self.congestion_checks > 0 {
+            let rate = self.congested_windows as f64 / self.congestion_checks as f64;
+            telemetry.push(("congested_window_rate".to_string(), rate));
+        }
+        telemetry.push(("extra_replans".to_string(), self.extra_replans as f64));
+        telemetry
     }
 }
 
@@ -703,6 +708,10 @@ impl Planner for RhcrPlanner {
 mod tests {
     use super::*;
     use crate::planning::params::{ParamValue, ParamValues, resolve};
+
+    fn telemetry_value(planner: &RhcrPlanner, key: &str) -> Option<f64> {
+        planner.telemetry().into_iter().find(|(k, _)| k == key).map(|(_, v)| v)
+    }
 
     fn config_for(values: &ParamValues, fleet: usize) -> RhcrConfig {
         RhcrConfig::from_params(&resolve(PARAMS, values).unwrap(), fleet)
@@ -798,7 +807,7 @@ mod tests {
         // "zero partials over N windows".
         let cfg = RhcrConfig { horizon: 10, replan_interval: 5, pbs_node_limit: 100 };
         let solver = RhcrPlanner::new(cfg);
-        assert_eq!(solver.pbs_partial_rate(), None);
+        assert_eq!(telemetry_value(&solver, "pbs_partial_rate"), None);
     }
 
     #[test]
@@ -822,7 +831,7 @@ mod tests {
 
         let _ = solver.step(&Observation { agents: &agents, ..obs }, &mut cache, &mut rng);
 
-        match solver.pbs_partial_rate() {
+        match telemetry_value(&solver, "pbs_partial_rate") {
             Some(r) => {
                 assert!(r.is_finite(), "rate must be finite");
                 assert!((0.0..=1.0).contains(&r), "rate {} out of [0,1]", r);
@@ -850,10 +859,13 @@ mod tests {
         let obs = Observation { tick: 0, grid: &grid, zones: &zones, agents: &[] };
 
         let _ = solver.step(&Observation { agents: &agents, ..obs }, &mut cache, &mut rng);
-        assert!(solver.pbs_partial_rate().is_some(), "must have rate after step");
+        assert!(
+            telemetry_value(&solver, "pbs_partial_rate").is_some(),
+            "must have rate after step"
+        );
 
         solver.reset();
-        assert_eq!(solver.pbs_partial_rate(), None, "reset must clear counters");
+        assert_eq!(telemetry_value(&solver, "pbs_partial_rate"), None, "reset must clear counters");
     }
 
     #[test]
@@ -903,7 +915,7 @@ mod tests {
             .map(|(i, a)| a.first().map_or(agents[*i].pos, |x| x.apply(agents[*i].pos)))
             .collect();
         assert_ne!(p[0], p[1]);
-        assert_eq!(solver.pbs_partial_rate(), Some(1.0));
+        assert_eq!(telemetry_value(&solver, "pbs_partial_rate"), Some(1.0));
     }
 
     #[test]
@@ -925,11 +937,11 @@ mod tests {
             })
             .collect();
         let obs = Observation { tick: 0, grid: &grid, zones: &zones, agents: &[] };
-        assert_eq!(solver.congested_window_rate(), None);
+        assert_eq!(telemetry_value(&solver, "congested_window_rate"), None);
         for _ in 0..5 {
             let _ = solver.step(&Observation { agents: &agents, ..obs }, &mut cache, &mut rng);
         }
-        assert_eq!(solver.congested_window_rate(), Some(1.0));
+        assert_eq!(telemetry_value(&solver, "congested_window_rate"), Some(1.0));
     }
 
     #[test]
@@ -1014,7 +1026,7 @@ mod tests {
         assert_eq!(plans.len(), 1, "agent 0 keeps its path");
         assert_eq!(plans[0].0, 1);
         let p1 = plans[0].1.to_vec();
-        assert_eq!(solver.extra_replan_count(), Some(1));
+        assert_eq!(telemetry_value(&solver, "extra_replans"), Some(1.0));
 
         // Agent 1's new path never meets agent 0's remaining path.
         let (mut x0, mut x1) = (a0_pos, IVec2::new(2, 0));
@@ -1217,6 +1229,23 @@ mod tests {
              in eager-mode PBS, plan_agent sequential A*, or the best-partial \
              fallback. See src/solver/rhcr/pbs_planner.rs."
         );
+    }
+
+    #[test]
+    fn telemetry_reports_window_counters() {
+        use crate::planners::toolkit::testing::{small_run, tick};
+        let mut runner =
+            small_run(Box::new(RhcrPlanner::new(config_for(&ParamValues::default(), 12))));
+        for _ in 0..40 {
+            tick(&mut runner);
+        }
+        let telemetry = runner.planner().telemetry();
+        let value = |key: &str| telemetry.iter().find(|(k, _)| k == key).map(|&(_, v)| v);
+        for key in ["pbs_partial_rate", "congested_window_rate"] {
+            let rate = value(key).unwrap_or_else(|| panic!("{key} missing from {telemetry:?}"));
+            assert!((0.0..=1.0).contains(&rate), "{key} = {rate}");
+        }
+        assert!(value("extra_replans").is_some(), "{telemetry:?}");
     }
 
     #[test]

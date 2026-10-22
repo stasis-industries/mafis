@@ -7,6 +7,7 @@ use crate::analysis::baseline::{BaselineDiff, BaselineRecord};
 use crate::analysis::engine::AnalysisEngine;
 use crate::analysis::fault_metrics::FaultMetrics;
 use crate::analysis::ft;
+use crate::planning::planner::Telemetry;
 
 /// All scalar metrics from a single experiment run.
 #[derive(Debug, Clone)]
@@ -93,12 +94,10 @@ pub struct RunMetrics {
     pub impacted_area: f64,
     pub deficit_integral: i64,
 
-    // ── Solver-specific telemetry ─────────────────────────────────
-    /// Fraction of RHCR-PBS replan windows that returned `WindowResult::Partial`
-    /// and fell through to LRA + PIBT fallback. `None` for non-RHCR solvers or
-    /// when no windows were attempted. Used as an observatory probe for PBS
-    /// scalability cliffs (see paper §6.4 / Appendix B).
-    pub pbs_partial_rate: Option<f32>,
+    // ── Planner telemetry ─────────────────────────────────────────
+    /// The planner's own measurements at the end of the run
+    /// (`Planner::telemetry`), exported as `telemetry.<key>` columns.
+    pub telemetry: Telemetry,
 
     // ── Performance ────────────────────────────────────────────────
     pub solver_step_time_avg_us: f64,
@@ -189,7 +188,7 @@ pub fn compute_baseline_self_metrics(
         survival_rate: 1.0,
         impacted_area: 0.0,
         deficit_integral: 0,
-        pbs_partial_rate: None,
+        telemetry: Vec::new(),
         solver_step_time_avg_us,
         solver_step_time_max_us,
         wall_time_ms,
@@ -380,7 +379,7 @@ pub fn compute_run_metrics(
         survival_rate,
         impacted_area: diff.impacted_area,
         deficit_integral: diff.deficit_integral,
-        pbs_partial_rate: None,
+        telemetry: Vec::new(),
         solver_step_time_avg_us,
         solver_step_time_max_us,
         wall_time_ms,

@@ -6,8 +6,15 @@ use super::runner::{ConfigSummary, MatrixResult, RunResult};
 
 /// Write per-run CSV to a writer.
 pub fn write_runs_csv<W: Write>(writer: &mut W, runs: &[RunResult]) -> std::io::Result<()> {
+    // One telemetry column per key any run reports, in key order.
+    let keys: std::collections::BTreeSet<&str> = runs
+        .iter()
+        .flat_map(|run| [&run.baseline_metrics, &run.faulted_metrics])
+        .flat_map(|m| m.telemetry.iter().map(|(key, _)| key.as_str()))
+        .collect();
+
     // Header
-    writeln!(
+    write!(
         writer,
         "solver,planner_params,topology,scenario,scheduler,num_agents,seed,is_baseline,\
          avg_throughput,total_tasks,unassigned_ratio,wait_ratio,\
@@ -17,17 +24,20 @@ pub fn write_runs_csv<W: Write>(writer: &mut W, runs: &[RunResult]) -> std::io::
          cascade_depth_avg,cascade_spread_avg,\
          structural_cascade_avg,structural_cascade_max,mitigation_delta_avg,\
          itae,rapidity,attack_rate,fleet_utilization,\
-         pbs_partial_rate,\
          solver_step_avg_us,solver_step_max_us,wall_time_ms,\
          twte_undefined_ticks,rapidity_recovered,baseline_gridlocked,attack_rate_total,\
          forced_waits,collision_violations"
     )?;
+    for key in &keys {
+        write!(writer, ",telemetry.{key}")?;
+    }
+    writeln!(writer)?;
 
     for run in runs {
         // Baseline row
-        write_run_row(writer, &run.config, true, &run.baseline_metrics)?;
+        write_run_row(writer, &run.config, true, &run.baseline_metrics, &keys)?;
         // Faulted row
-        write_run_row(writer, &run.config, false, &run.faulted_metrics)?;
+        write_run_row(writer, &run.config, false, &run.faulted_metrics, &keys)?;
     }
 
     Ok(())
@@ -43,8 +53,9 @@ fn write_run_row<W: Write>(
     config: &super::config::ExperimentConfig,
     is_baseline: bool,
     m: &super::metrics::RunMetrics,
+    telemetry_keys: &std::collections::BTreeSet<&str>,
 ) -> std::io::Result<()> {
-    writeln!(
+    write!(
         writer,
         "{},\"{}\",{},{},{},{},{},{},\
          {},{},{},{},\
@@ -54,7 +65,6 @@ fn write_run_row<W: Write>(
          {},{},\
          {},{},{},\
          {},{},{},{},\
-         {},\
          {},{},{},\
          {},{},{},{},{},{}",
         config.solver_name,
@@ -88,7 +98,6 @@ fn write_run_row<W: Write>(
         csv_f64(m.rapidity, 2),
         csv_f64(m.attack_rate, 4),
         csv_f64(m.fleet_utilization, 4),
-        m.pbs_partial_rate.map_or("".to_string(), |v| format!("{:.4}", v)),
         csv_f64(m.solver_step_time_avg_us, 1),
         csv_f64(m.solver_step_time_max_us, 1),
         m.wall_time_ms,
@@ -98,7 +107,14 @@ fn write_run_row<W: Write>(
         csv_f64(m.attack_rate_total, 4),
         m.forced_waits,
         m.collision_violations,
-    )
+    )?;
+    for key in telemetry_keys {
+        match m.telemetry.iter().find(|(k, _)| k == key) {
+            Some((_, value)) if value.is_finite() => write!(writer, ",{value}")?,
+            _ => write!(writer, ",")?,
+        }
+    }
+    writeln!(writer)
 }
 
 /// Write summary CSV (one row per config, across seeds).
@@ -374,7 +390,8 @@ fn write_metrics_json<W: Write>(
          \"solver_step_avg_us\":{},\"solver_step_max_us\":{},\
          \"wall_time_ms\":{},\
          \"twte_undefined_ticks\":{},\"rapidity_recovered\":{},\"baseline_gridlocked\":{},\
-         \"attack_rate_total\":{},\"forced_waits\":{},\"collision_violations\":{}}}",
+         \"attack_rate_total\":{},\"forced_waits\":{},\"collision_violations\":{},\
+         \"telemetry\":{{",
         json_f64(m.avg_throughput, 4),
         m.total_tasks,
         json_f64(m.unassigned_ratio, 4),
@@ -407,6 +424,15 @@ fn write_metrics_json<W: Write>(
         m.forced_waits,
         m.collision_violations,
     )?;
+    for (i, (key, value)) in m.telemetry.iter().enumerate() {
+        let sep = if i == 0 { "" } else { "," };
+        if value.is_finite() {
+            write!(writer, "{sep}\"{key}\":{value}")?;
+        } else {
+            write!(writer, "{sep}\"{key}\":null")?;
+        }
+    }
+    write!(writer, "}}}}")?;
     Ok(())
 }
 
@@ -992,6 +1018,46 @@ mod tests {
         assert_eq!(s.rapidity.n, 1, "Rapidity aggregates recovered runs only");
         assert_eq!(s.rapidity.mean, 30.0);
         assert_eq!(s.rapidity_censored, 1);
+    }
+
+    /// Runs carrying different telemetry keys share one header: the union of
+    /// keys, with each run's missing keys left empty.
+    #[test]
+    fn telemetry_columns_are_the_union() {
+        let mut first = dummy_run();
+        first.faulted_metrics.telemetry = vec![("a".into(), 1.0)];
+        let mut second = dummy_run();
+        second.faulted_metrics.telemetry = vec![("b".into(), 0.5)];
+        let mut buf = Vec::new();
+        write_runs_csv(&mut buf, &[first, second]).unwrap();
+        let csv = String::from_utf8(buf).unwrap();
+        let lines: Vec<&str> = csv.lines().collect();
+        assert!(lines[0].ends_with(",telemetry.a,telemetry.b"), "{}", lines[0]);
+        assert!(lines[2].ends_with(",1,"), "{}", lines[2]);
+        assert!(lines[4].ends_with(",,0.5"), "{}", lines[4]);
+        let widths: Vec<usize> = lines.iter().map(|l| l.split(',').count()).collect();
+        assert!(widths.iter().all(|&w| w == widths[0]), "ragged CSV: {widths:?}");
+    }
+
+    #[test]
+    fn telemetry_object_in_json() {
+        let mut run = dummy_run();
+        run.faulted_metrics.telemetry = vec![("a".into(), 1.0), ("b".into(), 0.5)];
+        let result = MatrixResult {
+            matrix: crate::experiment::config::ExperimentMatrix::default(),
+            runs: vec![run],
+            summaries: vec![],
+            wall_time_total_ms: 0,
+        };
+        let mut buf = Vec::new();
+        write_matrix_json(&mut buf, &result).unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&buf).unwrap();
+        let telemetry = &json["runs"][0]["faulted"]["telemetry"];
+        assert_eq!(
+            (telemetry["a"].as_f64(), telemetry["b"].as_f64()),
+            (Some(1.0), Some(0.5)),
+            "{json}"
+        );
     }
 
     #[test]

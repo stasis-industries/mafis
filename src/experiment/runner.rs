@@ -152,12 +152,12 @@ pub fn run_single_experiment(config: &ExperimentConfig) -> RunResult {
         analysis.compute_aggregates();
 
         let bl_wall_ms = wall_start.elapsed().as_millis() as u64;
-        let partial_rate = runner.planner().pbs_partial_rate();
+        let telemetry = runner.planner().telemetry();
 
         // Baseline self-metrics (no clone needed — computed directly from engine)
         baseline_metrics =
             super::metrics::compute_baseline_self_metrics(&analysis, &step_times, bl_wall_ms);
-        baseline_metrics.pbs_partial_rate = partial_rate;
+        baseline_metrics.telemetry = telemetry;
         baseline_metrics.forced_waits = runner.forced_waits;
         baseline_metrics.collision_violations = runner.collision_violations;
 
@@ -219,7 +219,7 @@ pub fn run_single_experiment(config: &ExperimentConfig) -> RunResult {
         analysis.compute_aggregates();
 
         let faulted_wall_ms = faulted_start.elapsed().as_millis() as u64;
-        let partial_rate = runner.planner().pbs_partial_rate();
+        let telemetry = runner.planner().telemetry();
 
         let mut fm = compute_run_metrics(
             &baseline_record,
@@ -228,7 +228,7 @@ pub fn run_single_experiment(config: &ExperimentConfig) -> RunResult {
             &step_times,
             faulted_wall_ms,
         );
-        fm.pbs_partial_rate = partial_rate;
+        fm.telemetry = telemetry;
         fm.forced_waits = runner.forced_waits;
         fm.collision_violations = runner.collision_violations;
         cascade.apply(&mut fm);
@@ -478,10 +478,10 @@ fn run_baseline_only(config: &ExperimentConfig) -> CachedBaseline {
     analysis.compute_aggregates();
 
     let bl_wall_ms = wall_start.elapsed().as_millis() as u64;
-    let partial_rate = runner.planner().pbs_partial_rate();
+    let telemetry = runner.planner().telemetry();
     let mut metrics =
         super::metrics::compute_baseline_self_metrics(&analysis, &step_times, bl_wall_ms);
-    metrics.pbs_partial_rate = partial_rate;
+    metrics.telemetry = telemetry;
     metrics.forced_waits = runner.forced_waits;
     metrics.collision_violations = runner.collision_violations;
     let record = analysis.into_baseline_record(0, config.tick_count, actual_agents);
@@ -546,7 +546,7 @@ fn run_faulted_only(config: &ExperimentConfig, cached: &CachedBaseline) -> RunRe
     analysis.compute_aggregates();
 
     let faulted_wall_ms = faulted_start.elapsed().as_millis() as u64;
-    let partial_rate = runner.planner().pbs_partial_rate();
+    let telemetry = runner.planner().telemetry();
 
     let mut fm = compute_run_metrics(
         &cached.record,
@@ -555,7 +555,7 @@ fn run_faulted_only(config: &ExperimentConfig, cached: &CachedBaseline) -> RunRe
         &step_times,
         faulted_wall_ms,
     );
-    fm.pbs_partial_rate = partial_rate;
+    fm.telemetry = telemetry;
     fm.forced_waits = runner.forced_waits;
     fm.collision_violations = runner.collision_violations;
     cascade.apply(&mut fm);

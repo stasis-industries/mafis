@@ -44,6 +44,9 @@ pub struct AgentView {
 // Decision — borrows from the planner's internal buffer
 // ---------------------------------------------------------------------------
 
+/// A planner's own measurements as (key, value) pairs.
+pub type Telemetry = Vec<(String, f64)>;
+
 /// Action plan for one agent: (agent_index, actions).
 pub type AgentPlan = (usize, SmallVec<[crate::core::action::Action; 20]>);
 
@@ -97,24 +100,9 @@ pub trait Planner: Send + Sync + 'static {
         None
     }
 
-    /// Solver-specific telemetry: fraction of replan windows that could not
-    /// close the full fleet plan within the node budget. RHCR-PBS overrides
-    /// this to expose the `WindowResult::Partial` fire rate — used as an
-    /// observatory probe for PBS scalability cliffs. Default: no telemetry.
-    fn pbs_partial_rate(&self) -> Option<f32> {
-        None
-    }
-
-    /// RHCR telemetry: fraction of replan windows in which more than half the
-    /// agents never moved (reference `BasicSystem::congested`, where the
-    /// reference run would stop). Default: no telemetry.
-    fn congested_window_rate(&self) -> Option<f32> {
-        None
-    }
-
-    /// RHCR telemetry: plans made between windows for agents left without a
-    /// plan (new goal, runner-forced wait, fault). Default: no telemetry.
-    fn extra_replan_count(&self) -> Option<usize> {
-        None
+    /// Numbers the planner reports about its own work, under keys it
+    /// chooses. Read at the end of a run. Default: nothing to report.
+    fn telemetry(&self) -> Telemetry {
+        Vec::new()
     }
 }
