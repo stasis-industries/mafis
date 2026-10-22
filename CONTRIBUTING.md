@@ -33,12 +33,38 @@ wasm-bindgen --out-dir web --target web \
 basic-http-server web   # localhost:4000
 ```
 
+## Adding a planner
+
+A planner lives in one folder, `src/planners/<name>/`:
+
+1. Implement `Planner` (`src/planning/planner.rs`). Each tick, `step()` gets
+   an `Observation` (tick, grid, zones, agents) and returns `Decision::Plans`
+   or `Decision::Keep`. Optional hooks: `snapshot`/`restore` for rewind,
+   `telemetry` for numbers exported as `telemetry.<key>` columns, and
+   `task_scheduler` for a planner that assigns its own tasks.
+2. In the folder's `mod.rs`, export `ENTRY: PlannerEntry`: its `PlannerInfo`
+   (id, label, summary, reference, declared parameters, whether it assigns
+   tasks), a `build` function that receives the checked parameters and the
+   fleet size, a `fleet_limit` (`no_fleet_limit` if there is none), and its
+   `type_name`.
+3. Add `<name>::ENTRY` to `REGISTRY` in `src/planners/mod.rs`. A planner that
+   cannot run in the browser goes behind `#[cfg(not(target_arch = "wasm32"))]`,
+   as RHCR does.
+
+The web app, the desktop app and the experiment runner then offer it, and the
+shared tests cover it: the tests that loop over the registry, and the golden
+runs (bless its new lines with `MAFIS_BLESS_GOLDEN=1 cargo test --test
+golden_runs`). Tests of its own behaviour go in its folder;
+`tests/naming_guard.rs` fails if code outside `src/planners/` names it. Shared
+building blocks (A*, the PIBT core, distance maps) are in
+`src/planners/toolkit/` and `src/planning/heuristics.rs`.
+
 ## Pull Requests
 
-1. Fork the repo and branch from `develop`
+1. Fork the repo and branch from `main`
 2. Make sure `cargo check` and `cargo test` pass
 3. If you changed rendering, bridge, or ECS systems, verify the WASM build works
-4. Open a PR against `develop` with a clear description of the change
+4. Open a PR against `main` with a clear description of the change
 
 ## Code Style
 

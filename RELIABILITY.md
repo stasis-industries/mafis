@@ -52,7 +52,7 @@ Last audit: 2026-10-16 (branch `fix/reliability-audit`). Noise-floor figures bel
 |---|---|---|
 | PIBT | green | Matches pibt2 PIBT_MAPD priority semantics: priority starts at 0, order = carrying-a-task, then priority, then seeded per-agent tie-breaker; priorities stored per agent id (no global reset on death). Deviations listed in `docs/solver_fidelity.md`. |
 | RHCR-PBS | yellow | Replans every W=5 ticks with a 10-tick planning window (reference README values); congestion no longer shortens the interval (counted only). **Root cause of the old dense-cell gridlock fixed**: PBS's A\* could end a path on a cell a higher-priority agent crosses later, which PBS cannot resolve; A\* now ends only on holdable cells. SD n=60 baseline 0.684 (0.658–0.698) vs 0.368 (0.066–0.660) before. Deviations: plans agents without a plan between windows (`extra_replan_count`, ~398/500 ticks), hold-endpoint goals, 3n node budget (floor 50). Yellow because SD n=20/40 and DD n=80/120 were not re-measured on the final code, and the null floor shows high chaotic sensitivity. |
-| Token Passing | yellow | Ported from Ma et al. 2017 / pibt2 `tp.cpp`: own task selection (endpoint rule, nearest pickup, index order), parking at non-task endpoints, `checkAstarFin` arrival rule. Cap = parking cells per map (`max_agents(&zones)`): SD-w1 60, SD-w2 66, SD-w3 78, DD 120; other maps 0. **Only SD-w3 satisfies Ma et al.'s well-formedness condition 3** — no completeness guarantee on SD-w1, SD-w2, DD. Throughput 10–35% below the old non-faithful TP; no collapsed seeds. 12 deviations in `docs/solver_fidelity.md`. |
+| Token Passing | yellow | Ported from Ma et al. 2017 / pibt2 `tp.cpp`: own task selection (endpoint rule, nearest pickup, index order), parking at non-task endpoints, `checkAstarFin` arrival rule. Cap = parking cells per map (its registry `fleet_limit`): SD-w1 60, SD-w2 66, SD-w3 78, DD 120; other maps 0. **Only SD-w3 satisfies Ma et al.'s well-formedness condition 3** — no completeness guarantee on SD-w1, SD-w2, DD. Throughput 10–35% below the old non-faithful TP; no collapsed seeds. 12 deviations in `docs/solver_fidelity.md`. |
 
 ---
 
@@ -74,8 +74,8 @@ Last audit: 2026-10-16 (branch `fix/reliability-audit`). Noise-floor figures bel
 |---|---|---|
 | `run_single_experiment` | green | Standalone paired run, tested |
 | `run_matrix` + rayon parallelism | green | Parallel-safe; per-config deterministic given shared baseline key |
-| Name resolution | green | Unknown topology or solver names panic in the experiment runner instead of silently substituting (the old fallback hid the `fullfilment_center` bug). The live observatory baseline (`analysis/baseline.rs`) still falls back to PIBT for an unknown solver. |
-| Fleet caps | green | Matrix expansion drops solver × agent-count combos above `max_agents(&zones)` (TP: parking count). Matrix totals: E1+E2 4,320; aisle-width 4,140; Braess 3,300. |
+| Name resolution | green | Unknown topology names, planner ids and planner parameters are errors instead of silent substitutes (the old fallback hid the `fullfilment_center` bug): matrix expansion and the experiment runner panic, the observatory stops loading and logs the error, the bridge logs it. The live observatory baseline (`analysis/baseline.rs`) builds its planner through the registry and no longer falls back to PIBT. |
+| Fleet caps | green | Matrix expansion drops planner × agent-count combos above the planner's registry `fleet_limit` (Token Passing: parking cells; RHCR: 200). Matrix totals: E1+E2 4,320; aisle-width 4,140; Braess 3,300. |
 | Collision accounting | green | `forced_waits` (moves the resolver turned into Waits) and `collision_violations` exported per run; validator checks vertex and edge-swap conflicts. Fault-free SD-w1 n=40: violations 0 for all solvers; forced waits PIBT 0, RHCR 9, TP 8. |
 | Queues under faults | green | A lane is blocked only when its delivery cell or a lane cell is unwalkable (fault-free ejections 372 → 0); trips to pickups a dead robot blocks are cancelled and never re-issued; join cells count inbound agents (no two agents sent to one slot); slots follow physical lane order (TP-found deadlock fix, affects every solver). |
 | CSV/JSON export | green | New per-run columns appended: `twte_undefined_ticks`, `rapidity_recovered`, `baseline_gridlocked`, `attack_rate_total`, `forced_waits`, `collision_violations`; summary adds `baseline_gridlocked_n`, `rapidity_recovered_n`, `rapidity_censored_n` (summary `rapidity_mean`/`std` renamed `rapidity_recovered_*`). Downstream Python reads by name. |
@@ -87,8 +87,8 @@ Last audit: 2026-10-16 (branch `fix/reliability-audit`). Noise-floor figures bel
 
 Before merging a new solver:
 
-1. Implements `LifelongSolver` trait correctly (`step()` returns `Replan` or `Continue`).
-2. Factory entry in `lifelong_solver_from_name` (`src/solver/mod.rs`).
+1. Implements the `Planner` trait (`src/planning/planner.rs`): `step()` takes an `Observation` and returns `Decision::Plans` or `Decision::Keep`.
+2. Registered: a folder under `src/planners/` exporting `ENTRY`, plus one line in `REGISTRY` (`src/planners/mod.rs`).
 3. Determinism: same seed → same trace. Add a regression test mirroring existing solver tests.
 4. Fidelity note: add an entry to `docs/solver_fidelity.md` listing any deviations from the canonical reference (PIBT, RHCR, Token Passing source papers).
 5. Behavioural test: at least one test exercising the solver against a small canonical scenario.
