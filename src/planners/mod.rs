@@ -1,4 +1,3 @@
-pub mod lifelong;
 pub mod pibt;
 // RHCR is compute-intensive (PBS tree search with O(N × cascade) plan_agent
 // calls per window) and requires rayon parallelism on the root-node build to
@@ -8,26 +7,15 @@ pub mod pibt;
 // RHCR users should run the desktop build.
 #[cfg(not(target_arch = "wasm32"))]
 pub mod rhcr;
-pub mod shared;
-pub mod token;
+pub mod token_passing;
+pub mod toolkit;
 
-// ---------------------------------------------------------------------------
-// Backward-compatible re-exports — external callers keep working
-// ---------------------------------------------------------------------------
+use crate::planning::planner::LifelongSolver;
 
-// `crate::solver::heuristics::*` still works
-pub use shared::heuristics;
-// `crate::solver::traits::*` still works
-pub use shared::traits;
-// `crate::solver::pibt::PibtLifelongSolver` etc. still work (via pibt/mod.rs re-exports)
-
-use bevy::prelude::*;
-
-use self::lifelong::LifelongSolver;
-use self::pibt::{PibtLifelongSolver, default_active_solver};
+use self::pibt::PibtLifelongSolver;
 #[cfg(not(target_arch = "wasm32"))]
 use self::rhcr::{RhcrConfig, RhcrSolver};
-use self::token::TokenPassingSolver;
+use self::token_passing::TokenPassingSolver;
 
 /// Ablation override for RHCR-PBS `RhcrConfig`, applied after auto-computation.
 ///
@@ -143,21 +131,6 @@ pub fn lifelong_solver_from_name_sized(
         }
         "token_passing" => Some(Box::new(TokenPassingSolver::new())),
         _ => None,
-    }
-}
-
-// Re-export for convenience
-pub use self::lifelong::ActiveSolver;
-
-// ---------------------------------------------------------------------------
-// Plugin
-// ---------------------------------------------------------------------------
-
-pub struct SolverPlugin;
-
-impl Plugin for SolverPlugin {
-    fn build(&self, app: &mut App) {
-        app.insert_resource(default_active_solver());
     }
 }
 

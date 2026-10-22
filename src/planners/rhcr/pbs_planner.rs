@@ -98,10 +98,10 @@ use crate::core::grid::GridMap;
 use crate::core::seed::SeededRng;
 
 use super::windowed::{PlanFragment, WindowAgent, WindowContext, WindowResult, WindowedPlanner};
-use crate::solver::shared::astar::{
+use crate::planners::toolkit::astar::{
     FlatCAT, FlatConstraintIndex, SeqGoalGrid, spacetime_astar_sequential,
 };
-use crate::solver::shared::heuristics::{DistanceMap, DistanceMapCache};
+use crate::planning::heuristics::{DistanceMap, DistanceMapCache};
 
 // ---------------------------------------------------------------------------
 // PBS Node
@@ -1864,7 +1864,7 @@ mod tests {
     use super::*;
     use crate::core::grid::GridMap;
     use crate::core::seed::SeededRng;
-    use crate::solver::shared::heuristics::{DistanceMap, DistanceMapCache};
+    use crate::planning::heuristics::{DistanceMap, DistanceMapCache};
     use smallvec::SmallVec;
 
     /// Owns the backing storage that `WindowContext` borrows. Tests build

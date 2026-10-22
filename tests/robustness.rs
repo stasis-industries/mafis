@@ -10,7 +10,7 @@ use proptest::prelude::*;
 
 use mafis::core::grid::GridMap;
 use mafis::core::topology::{TopologyRegistry, ZoneMap, validate_connectivity};
-use mafis::solver::lifelong_solver_from_name;
+use mafis::planners::lifelong_solver_from_name;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Section 1: Property-based fuzzing (proptest)

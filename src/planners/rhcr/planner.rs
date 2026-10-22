@@ -35,10 +35,10 @@ use crate::core::grid::GridMap;
 use crate::core::seed::SeededRng;
 
 use super::windowed::{WindowAgent, WindowContext, WindowResult, WindowedPlanner};
-use crate::solver::lifelong::{AgentPlan, AgentState, LifelongSolver, SolverContext, StepResult};
-use crate::solver::shared::heuristics::DistanceMapCache;
-use crate::solver::shared::pibt_core::PibtCore;
-use crate::solver::shared::traits::{Optimality, Scalability, SolverInfo};
+use crate::planners::toolkit::pibt_core::PibtCore;
+use crate::planning::heuristics::DistanceMapCache;
+use crate::planning::planner::{AgentPlan, AgentState, LifelongSolver, SolverContext, StepResult};
+use crate::planning::traits::{Optimality, Scalability, SolverInfo};
 
 use super::pbs_planner::PbsPlanner;
 
@@ -72,7 +72,7 @@ impl RhcrConfig {
     /// Apply an optional ablation override on top of the auto-computed config.
     pub fn with_override(
         mut self,
-        ov: Option<&crate::solver::RhcrConfigOverride>,
+        ov: Option<&crate::planners::RhcrConfigOverride>,
         num_agents: usize,
     ) -> Self {
         if let Some(o) = ov {
@@ -744,7 +744,7 @@ mod tests {
     use crate::core::seed::SeededRng;
     use crate::core::task::TaskLeg;
     use crate::core::topology::ZoneMap;
-    use crate::solver::shared::heuristics::DistanceMapCache;
+    use crate::planning::heuristics::DistanceMapCache;
     use std::collections::HashMap;
 
     fn test_zones() -> ZoneMap {

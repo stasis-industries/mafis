@@ -175,7 +175,7 @@ fn mr3_collision_free_across_seeds() {
             let mut rng = SeededRng::new(seed);
             let agents = place_agents(15, &grid, &zones, &mut rng);
 
-            let solver_box = mafis::solver::lifelong_solver_from_name(solver, grid_area, 15)
+            let solver_box = mafis::planners::lifelong_solver_from_name(solver, grid_area, 15)
                 .expect("solver creation failed");
             let scheduler = ActiveScheduler::from_name("random");
             let queue_policy = ActiveQueuePolicy::from_name("closest");

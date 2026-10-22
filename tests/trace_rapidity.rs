@@ -121,7 +121,7 @@ fn run_trace(
     // Baseline run (no faults)
     let baseline_tp = {
         let solver =
-            mafis::solver::lifelong_solver_from_name(solver_name, grid_area, num_agents).unwrap();
+            mafis::planners::lifelong_solver_from_name(solver_name, grid_area, num_agents).unwrap();
         let fault_config =
             mafis::fault::config::FaultConfig { enabled: false, ..Default::default() };
         let mut runner = SimulationRunner::new(
@@ -144,7 +144,7 @@ fn run_trace(
     // Faulted run
     let (faulted_tp, first_fault_tick) = {
         let solver =
-            mafis::solver::lifelong_solver_from_name(solver_name, grid_area, num_agents).unwrap();
+            mafis::planners::lifelong_solver_from_name(solver_name, grid_area, num_agents).unwrap();
         let scenario = make_scenario(scenario_name);
         let fault_config = scenario.to_fault_config();
         let fault_schedule = scenario.generate_schedule(TICK_COUNT, num_agents);

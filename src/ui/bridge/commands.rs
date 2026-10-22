@@ -13,11 +13,11 @@ use crate::core::topology::ActiveTopology;
 use crate::export::config::{ExportConfig, ExportRequest};
 use crate::fault::config::FaultConfig;
 use crate::fault::manual::ManualFaultCommand;
+use crate::planning::ActiveSolver;
 use crate::render::animator::RobotOpacity;
 use crate::render::graphics::GraphicsConfig;
 use crate::render::orbit_camera::{CameraMode, OrbitCamera};
 use crate::render::picking::ClickSelection;
-use crate::solver::ActiveSolver;
 
 use crate::ui::controls::UiState;
 
@@ -26,9 +26,9 @@ use crate::core::topology::{CustomMap, ZoneMap, ZoneType};
 #[cfg(target_arch = "wasm32")]
 use crate::export::config::ExportTrigger;
 #[cfg(target_arch = "wasm32")]
-use crate::render::orbit_camera as orbit_camera_fns;
+use crate::planners::lifelong_solver_from_name_sized;
 #[cfg(target_arch = "wasm32")]
-use crate::solver::lifelong_solver_from_name_sized;
+use crate::render::orbit_camera as orbit_camera_fns;
 #[cfg(target_arch = "wasm32")]
 use crate::ui::controls::ImportedScenario;
 #[cfg(target_arch = "wasm32")]

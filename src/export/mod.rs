@@ -22,7 +22,7 @@ use crate::fault::FaultSet;
 use crate::fault::breakdown::{Dead, FaultEvent};
 use crate::fault::config::{FaultConfig, FaultType};
 use crate::fault::heat::HeatState;
-use crate::solver::ActiveSolver;
+use crate::planning::ActiveSolver;
 use crate::ui::controls::UiState;
 
 use self::config::{ExportConfig, ExportRequest, ExportTrigger};

@@ -36,7 +36,7 @@ use crate::{
         topology::ZoneMap,
     },
     fault::{FaultPlugin, breakdown::Dead, config::FaultConfig, heat::HeatState},
-    solver::SolverPlugin,
+    planning::SolverPlugin,
 };
 
 // ---------------------------------------------------------------------------
@@ -137,7 +137,7 @@ impl SimHarness {
                 sa
             })
             .collect();
-        let runner_solver = Box::new(crate::solver::pibt::PibtLifelongSolver::new());
+        let runner_solver = Box::new(crate::planners::pibt::PibtLifelongSolver::new());
         let runner_rng = crate::core::seed::SeededRng::new(42);
         let fault_config = app.world().resource::<FaultConfig>().clone();
         let runner = crate::core::runner::SimulationRunner::new(

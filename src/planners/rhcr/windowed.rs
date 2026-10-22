@@ -11,7 +11,7 @@ use crate::core::action::Action;
 use crate::core::grid::GridMap;
 use crate::core::seed::SeededRng;
 
-use crate::solver::shared::heuristics::{DistanceMap, DistanceMapCache};
+use crate::planning::heuristics::{DistanceMap, DistanceMapCache};
 
 // `WindowAgent.goal_sequence` is a `SmallVec<[IVec2; N]>`. Rust does not let us
 // parameterise the inline-array length by a `const usize` import in a generic

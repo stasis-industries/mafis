@@ -72,12 +72,12 @@ use crate::core::seed::SeededRng;
 use crate::core::task::TaskLeg;
 
 use super::common::{MasterConstraintIndex, Token};
-use crate::solver::lifelong::{
+use crate::planners::toolkit::astar::{ConstraintChecker, SpacetimeGrid, spacetime_astar_fast};
+use crate::planning::heuristics::{DistanceMap, DistanceMapCache};
+use crate::planning::planner::{
     AgentPlan, AgentRestoreState, AgentState, LifelongSolver, SolverContext, StepResult,
 };
-use crate::solver::shared::astar::{ConstraintChecker, SpacetimeGrid, spacetime_astar_fast};
-use crate::solver::shared::heuristics::{DistanceMap, DistanceMapCache};
-use crate::solver::shared::traits::{Optimality, Scalability, SolverInfo};
+use crate::planning::traits::{Optimality, Scalability, SolverInfo};
 
 use crate::constants::{ASTAR_MAX_EXPANSIONS, TOKEN_ASTAR_MAX_TIME, TOKEN_PATH_MAX_TIME};
 
@@ -273,7 +273,7 @@ impl LifelongSolver for TokenPassingSolver {
     }
 
     fn task_scheduler(&self) -> Option<&dyn crate::core::task::TaskScheduler> {
-        Some(&crate::core::task::TokenPassingTaskSelection)
+        Some(&crate::planners::token_passing::TokenPassingTaskSelection)
     }
 
     fn reset(&mut self) {
@@ -487,7 +487,7 @@ impl LifelongSolver for TokenPassingSolver {
                 }
                 let actions: smallvec::SmallVec<[Action; 20]> = positions
                     .windows(2)
-                    .map(|w| crate::solver::shared::heuristics::delta_to_action(w[0], w[1]))
+                    .map(|w| crate::planning::heuristics::delta_to_action(w[0], w[1]))
                     .collect();
 
                 if !actions.is_empty() {
@@ -520,7 +520,7 @@ impl LifelongSolver for TokenPassingSolver {
 
             let path = &self.token.paths[local];
             if path.len() >= 2 {
-                let action = crate::solver::shared::heuristics::delta_to_action(path[0], path[1]);
+                let action = crate::planning::heuristics::delta_to_action(path[0], path[1]);
                 self.plan_buffer.push((a.index, smallvec![action]));
             } else {
                 self.plan_buffer.push((a.index, smallvec![Action::Wait]));
@@ -549,7 +549,7 @@ mod tests {
     use crate::core::grid::GridMap;
     use crate::core::seed::SeededRng;
     use crate::core::topology::ZoneMap;
-    use crate::solver::shared::heuristics::DistanceMapCache;
+    use crate::planning::heuristics::DistanceMapCache;
     use std::collections::HashMap;
 
     fn test_zones() -> ZoneMap {
@@ -849,7 +849,7 @@ mod tests {
         let tp = TokenPassingSolver::new();
         assert_eq!(tp.max_agents(&zones_of("warehouse_single_dock")), Some(60));
         assert_eq!(tp.max_agents(&zones_of("warehouse_dual_dock")), Some(120));
-        let pibt = crate::solver::pibt::PibtLifelongSolver::new();
+        let pibt = crate::planners::pibt::PibtLifelongSolver::new();
         assert_eq!(pibt.max_agents(&zones_of("warehouse_single_dock")), None);
     }
 
@@ -859,7 +859,7 @@ mod tests {
     fn tp_provides_its_own_task_selection() {
         let solver = TokenPassingSolver::new();
         assert_eq!(solver.task_scheduler().map(|s| s.name()), Some("token_passing"));
-        let pibt = crate::solver::pibt::PibtLifelongSolver::new();
+        let pibt = crate::planners::pibt::PibtLifelongSolver::new();
         assert!(pibt.task_scheduler().is_none());
     }
 
@@ -936,7 +936,7 @@ mod tests {
     #[test]
     fn tp_restore_state_rebuilds_token_from_actions() {
         use crate::core::action::{Action, Direction};
-        use crate::solver::lifelong::AgentRestoreState;
+        use crate::planning::planner::AgentRestoreState;
 
         let mut solver = TokenPassingSolver::new();
         solver.reset(); // starts uninitialised
@@ -980,7 +980,7 @@ mod tests {
     /// Empty restore is a no-op (exercises the early-return branch).
     #[test]
     fn tp_restore_state_empty_is_noop() {
-        use crate::solver::lifelong::AgentRestoreState;
+        use crate::planning::planner::AgentRestoreState;
         let mut solver = TokenPassingSolver::new();
         solver.restore_state(&[] as &[AgentRestoreState]);
         assert!(solver.token.paths.is_empty(), "empty restore must not touch tokens");

@@ -8,7 +8,7 @@ use crate::experiment::export::MetricColumn;
 use crate::experiment::runner::{ExperimentProgress as RunnerProgress, MatrixResult, run_matrix};
 
 use crate::core::task::SCHEDULER_NAMES;
-use crate::solver::SOLVER_NAMES;
+use crate::planners::SOLVER_NAMES;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 mod compact;

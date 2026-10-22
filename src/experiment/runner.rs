@@ -122,7 +122,7 @@ pub fn run_single_experiment(config: &ExperimentConfig) -> RunResult {
     let baseline_record;
     let mut baseline_metrics;
     {
-        let solver = crate::solver::lifelong_solver_from_name_with_override(
+        let solver = crate::planners::lifelong_solver_from_name_with_override(
             &config.solver_name,
             grid_area,
             actual_agents,
@@ -178,7 +178,7 @@ pub fn run_single_experiment(config: &ExperimentConfig) -> RunResult {
     // ── Run faulted (same topology + agents, faults enabled) ────────
     let faulted_metrics;
     {
-        let solver = crate::solver::lifelong_solver_from_name_with_override(
+        let solver = crate::planners::lifelong_solver_from_name_with_override(
             &config.solver_name,
             grid_area,
             actual_agents,
@@ -452,7 +452,7 @@ fn run_baseline_only(config: &ExperimentConfig) -> CachedBaseline {
     let mut rng = SeededRng::new(config.seed);
     let agents = place_agents(actual_agents, &grid, &zones, &mut rng);
 
-    let solver = crate::solver::lifelong_solver_from_name_with_override(
+    let solver = crate::planners::lifelong_solver_from_name_with_override(
         &config.solver_name,
         grid_area,
         actual_agents,
@@ -518,7 +518,7 @@ fn run_faulted_only(config: &ExperimentConfig, cached: &CachedBaseline) -> RunRe
     let mut rng = SeededRng::new(config.seed);
     let agents = place_agents(actual_agents, &grid, &zones, &mut rng);
 
-    let solver = crate::solver::lifelong_solver_from_name_with_override(
+    let solver = crate::planners::lifelong_solver_from_name_with_override(
         &config.solver_name,
         grid_area,
         actual_agents,
@@ -1249,7 +1249,7 @@ mod tests {
         let agents = place_agents(num_agents, &grid, &zones, &mut rng);
 
         let solver =
-            crate::solver::lifelong_solver_from_name(solver_name, grid_area, num_agents).unwrap();
+            crate::planners::lifelong_solver_from_name(solver_name, grid_area, num_agents).unwrap();
 
         let mut runner = SimulationRunner::new(
             grid,
@@ -1430,7 +1430,7 @@ mod tests {
         let agents = place_agents(actual_agents, &grid, &zones, &mut rng);
 
         let solver =
-            crate::solver::lifelong_solver_from_name(solver_name, grid_area, actual_agents)
+            crate::planners::lifelong_solver_from_name(solver_name, grid_area, actual_agents)
                 .unwrap();
 
         let fault_config = scenario.to_fault_config();

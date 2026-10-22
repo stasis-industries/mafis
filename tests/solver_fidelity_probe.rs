@@ -24,7 +24,7 @@ fn run(solver: &str, topo: &str, n: usize, seed: u64) -> (f64, bool, f64, Option
     let area = (grid.width * grid.height) as usize;
     let mut rng = SeededRng::new(seed);
     let agents = place_agents(n, &grid, &zones, &mut rng);
-    let s = mafis::solver::lifelong_solver_from_name(solver, area, n).unwrap();
+    let s = mafis::planners::lifelong_solver_from_name(solver, area, n).unwrap();
     let mut runner = SimulationRunner::new(
         grid,
         zones,

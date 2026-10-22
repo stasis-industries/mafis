@@ -222,7 +222,7 @@ pub fn record_tick_snapshot(
     fault_metrics: Res<FaultMetrics>,
     rng: Res<SeededRng>,
     lifelong: Res<LifelongConfig>,
-    solver: Res<crate::solver::ActiveSolver>,
+    solver: Res<crate::planning::ActiveSolver>,
     mut history: ResMut<TickHistory>,
 ) {
     // Skip ticks based on snapshot interval to reduce allocation pressure.

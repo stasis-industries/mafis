@@ -15,12 +15,12 @@ use crate::core::grid::GridMap;
 use crate::core::seed::SeededRng;
 use crate::core::task::TaskLeg;
 
-use crate::solver::lifelong::{
+use crate::planners::toolkit::pibt_core::PibtCore;
+use crate::planning::heuristics::{DistanceMap, DistanceMapCache, compute_distance_maps};
+use crate::planning::planner::{
     ActiveSolver, AgentPlan, AgentState, LifelongSolver, SolverContext, StepResult,
 };
-use crate::solver::shared::heuristics::{DistanceMap, DistanceMapCache, compute_distance_maps};
-use crate::solver::shared::pibt_core::PibtCore;
-use crate::solver::shared::traits::{MAPFSolver, Optimality, Scalability, SolverError, SolverInfo};
+use crate::planning::traits::{MAPFSolver, Optimality, Scalability, SolverError, SolverInfo};
 
 // ---------------------------------------------------------------------------
 // PibtLifelongSolver — implements LifelongSolver
@@ -239,7 +239,7 @@ impl PibtSolver {
                 break;
             }
 
-            let step_actions = crate::solver::shared::pibt_core::pibt_one_step(
+            let step_actions = crate::planners::toolkit::pibt_core::pibt_one_step(
                 &positions,
                 &goals,
                 grid,
@@ -466,14 +466,13 @@ mod tests {
         let mut goals: Vec<IVec2> =
             (0..n).map(|_| walkable[rng.random_range(0..walkable.len())]).collect();
 
-        let mut core = crate::solver::shared::pibt_core::PibtCore::new();
+        let mut core = crate::planners::toolkit::pibt_core::PibtCore::new();
 
         for tick in 0..200 {
             let agent_pairs: Vec<(IVec2, IVec2)> =
                 positions.iter().zip(goals.iter()).map(|(&p, &g)| (p, g)).collect();
-            let dist_maps =
-                crate::solver::shared::heuristics::compute_distance_maps(grid, &agent_pairs);
-            let dist_refs: Vec<&crate::solver::shared::heuristics::DistanceMap> =
+            let dist_maps = crate::planning::heuristics::compute_distance_maps(grid, &agent_pairs);
+            let dist_refs: Vec<&crate::planning::heuristics::DistanceMap> =
                 dist_maps.iter().collect();
 
             let actions = core.one_step(&positions, &goals, grid, &dist_refs);
@@ -502,7 +501,7 @@ mod tests {
     fn straight_dist_maps(
         grid: &GridMap,
         pairs: &[(IVec2, IVec2)],
-    ) -> Vec<crate::solver::shared::heuristics::DistanceMap> {
+    ) -> Vec<crate::planning::heuristics::DistanceMap> {
         compute_distance_maps(grid, pairs)
     }
 
@@ -592,7 +591,7 @@ mod tests {
 
     #[test]
     fn pibt_equal_priority_broken_by_seeded_tie_breaker() {
-        use crate::solver::shared::pibt_core::tie_breaker;
+        use crate::planners::toolkit::pibt_core::tie_breaker;
         let (ga, gb) = (IVec2::new(2, 1), IVec2::new(1, 2));
         for seed in [1u64, 2, 3, 42, 99] {
             let want = if tie_breaker(seed, 0) > tie_breaker(seed, 1) { 0 } else { 1 };
@@ -611,7 +610,7 @@ mod tests {
     #[test]
     fn paper_property_pibt_highest_priority_reaches_goal() {
         use crate::core::topology::ZoneMap;
-        use crate::solver::shared::heuristics::DistanceMapCache;
+        use crate::planning::heuristics::DistanceMapCache;
         use std::collections::HashMap;
 
         let grid = GridMap::new(8, 8);
@@ -640,13 +639,13 @@ mod tests {
                 has_plan: tick > 0,
                 task_leg: crate::core::task::TaskLeg::TravelEmpty(goal),
             }];
-            let ctx = crate::solver::lifelong::SolverContext {
+            let ctx = crate::planning::planner::SolverContext {
                 grid: &grid,
                 zones: &zones,
                 tick,
                 num_agents: 1,
             };
-            if let crate::solver::lifelong::StepResult::Replan(plans) =
+            if let crate::planning::planner::StepResult::Replan(plans) =
                 solver.step(&ctx, &agents, &mut cache, &mut rng)
             {
                 if let Some((_, actions)) = plans.first() {
@@ -670,7 +669,7 @@ mod tests {
     #[test]
     fn paper_property_pibt_liveness_multi_agent() {
         use crate::core::topology::ZoneMap;
-        use crate::solver::shared::heuristics::DistanceMapCache;
+        use crate::planning::heuristics::DistanceMapCache;
         use std::collections::HashMap;
 
         let grid = GridMap::new(8, 8);
@@ -714,13 +713,13 @@ mod tests {
                 })
                 .collect();
 
-            let ctx = crate::solver::lifelong::SolverContext {
+            let ctx = crate::planning::planner::SolverContext {
                 grid: &grid,
                 zones: &zones,
                 tick,
                 num_agents: 5,
             };
-            if let crate::solver::lifelong::StepResult::Replan(plans) =
+            if let crate::planning::planner::StepResult::Replan(plans) =
                 solver.step(&ctx, &agents, &mut cache, &mut rng)
             {
                 for (idx, actions) in plans {
@@ -766,7 +765,7 @@ mod tests {
         let agents = place_agents(num, &grid, &zones, &mut rng);
         let rng_after = rng.clone();
 
-        let solver = crate::solver::lifelong_solver_from_name("pibt", grid_area, num).unwrap();
+        let solver = crate::planners::lifelong_solver_from_name("pibt", grid_area, num).unwrap();
         let mut runner = SimulationRunner::new(
             grid,
             zones,

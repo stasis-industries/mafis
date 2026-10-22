@@ -104,7 +104,7 @@ impl Fnv {
 fn golden_line(planner: &str, map: &str, n: usize, variant: Variant) -> Option<String> {
     let output = ActiveTopology::from_name(map).topology().generate(SEED);
     let area = (output.grid.width * output.grid.height) as usize;
-    let solver = mafis::solver::lifelong_solver_from_name(planner, area, n)
+    let solver = mafis::planners::lifelong_solver_from_name(planner, area, n)
         .unwrap_or_else(|| panic!("unknown planner '{planner}'"));
     if solver.max_agents(&output.zones).is_some_and(|cap| cap < n) {
         return None;

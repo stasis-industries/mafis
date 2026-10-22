@@ -391,7 +391,7 @@ fn all_solvers_no_collisions_500_ticks() {
         let mut rng = SeededRng::new(42);
         let agents = place_agents(40, &output.grid, &output.zones, &mut rng);
 
-        let solver = mafis::solver::lifelong_solver_from_name(solver_name, grid_area, 40)
+        let solver = mafis::planners::lifelong_solver_from_name(solver_name, grid_area, 40)
             .expect("solver creation failed");
         let scheduler = ActiveScheduler::from_name("random");
         let queue_policy = ActiveQueuePolicy::from_name("closest");
@@ -459,7 +459,7 @@ fn token_passing_no_edge_swaps() {
     let mut rng = SeededRng::new(42);
     let agents = place_agents(30, &output.grid, &output.zones, &mut rng);
 
-    let solver = mafis::solver::lifelong_solver_from_name("token_passing", grid_area, 30)
+    let solver = mafis::planners::lifelong_solver_from_name("token_passing", grid_area, 30)
         .expect("solver creation failed");
     let scheduler = ActiveScheduler::from_name("random");
     let queue_policy = ActiveQueuePolicy::from_name("closest");
@@ -528,7 +528,7 @@ fn rhcr_fallback_collision_free() {
     let mut rng = SeededRng::new(42);
     let agents = place_agents(40, &output.grid, &output.zones, &mut rng);
 
-    let solver = mafis::solver::lifelong_solver_from_name("rhcr_pbs", grid_area, 40)
+    let solver = mafis::planners::lifelong_solver_from_name("rhcr_pbs", grid_area, 40)
         .expect("solver creation failed");
     let scheduler = ActiveScheduler::from_name("random");
     let queue_policy = ActiveQueuePolicy::from_name("closest");
@@ -635,7 +635,7 @@ fn baseline_faulted_parity_before_burst() {
     let queue_policy = ActiveQueuePolicy::from_name("closest");
 
     // Baseline runner (no faults)
-    let solver_bl = mafis::solver::lifelong_solver_from_name("pibt", grid_area, 20).unwrap();
+    let solver_bl = mafis::planners::lifelong_solver_from_name("pibt", grid_area, 20).unwrap();
     let mut runner_bl = SimulationRunner::new(
         output.grid.clone(),
         output.zones.clone(),
@@ -654,7 +654,7 @@ fn baseline_faulted_parity_before_burst() {
         burst_at_tick: 100,
         ..Default::default()
     };
-    let solver_f = mafis::solver::lifelong_solver_from_name("pibt", grid_area, 20).unwrap();
+    let solver_f = mafis::planners::lifelong_solver_from_name("pibt", grid_area, 20).unwrap();
     let fc = scenario.to_fault_config();
     let fs = scenario.generate_schedule(200, 20);
     let mut runner_f =
@@ -691,7 +691,7 @@ fn baseline_faulted_parity_before_wear() {
     let queue_policy = ActiveQueuePolicy::from_name("closest");
 
     // Baseline runner (no faults)
-    let solver_bl = mafis::solver::lifelong_solver_from_name("pibt", grid_area, 15).unwrap();
+    let solver_bl = mafis::planners::lifelong_solver_from_name("pibt", grid_area, 15).unwrap();
     let mut runner_bl = SimulationRunner::new(
         output.grid.clone(),
         output.zones.clone(),
@@ -709,7 +709,7 @@ fn baseline_faulted_parity_before_wear() {
         wear_heat_rate: WearHeatRate::High,
         ..Default::default()
     };
-    let solver_f = mafis::solver::lifelong_solver_from_name("pibt", grid_area, 15).unwrap();
+    let solver_f = mafis::planners::lifelong_solver_from_name("pibt", grid_area, 15).unwrap();
     let fc = scenario.to_fault_config();
     let fs = scenario.generate_schedule(200, 15);
     let mut runner_f =
@@ -769,7 +769,7 @@ fn baseline_faulted_parity_before_intermittent() {
     let queue_policy = ActiveQueuePolicy::from_name("closest");
 
     // Baseline runner (no faults)
-    let solver_bl = mafis::solver::lifelong_solver_from_name("pibt", grid_area, 15).unwrap();
+    let solver_bl = mafis::planners::lifelong_solver_from_name("pibt", grid_area, 15).unwrap();
     let mut runner_bl = SimulationRunner::new(
         output.grid.clone(),
         output.zones.clone(),
@@ -788,7 +788,7 @@ fn baseline_faulted_parity_before_intermittent() {
         intermittent_recovery_ticks: 10,
         ..Default::default()
     };
-    let solver_f = mafis::solver::lifelong_solver_from_name("pibt", grid_area, 15).unwrap();
+    let solver_f = mafis::planners::lifelong_solver_from_name("pibt", grid_area, 15).unwrap();
     let fc = scenario.to_fault_config();
     let fs = scenario.generate_schedule(200, 15);
     let mut runner_f =
@@ -1025,7 +1025,7 @@ fn delete_fault_determinism() {
     let baseline_throughput_series: Vec<f64>;
     {
         let solver =
-            mafis::solver::lifelong_solver_from_name(solver_name, grid_area, num_agents).unwrap();
+            mafis::planners::lifelong_solver_from_name(solver_name, grid_area, num_agents).unwrap();
         let fault_config = FaultConfig { enabled: false, ..Default::default() };
         let mut runner = SimulationRunner::new(
             grid.clone(),
@@ -1068,7 +1068,7 @@ fn delete_fault_determinism() {
         let fault_config = FaultConfig { enabled: true, ..Default::default() };
 
         let solver =
-            mafis::solver::lifelong_solver_from_name(solver_name, grid_area, num_agents).unwrap();
+            mafis::planners::lifelong_solver_from_name(solver_name, grid_area, num_agents).unwrap();
         let mut runner = SimulationRunner::new(
             grid.clone(),
             zones.clone(),
@@ -1103,7 +1103,7 @@ fn delete_fault_determinism() {
     let baseline_tasks_at_snap: u64;
     {
         let solver =
-            mafis::solver::lifelong_solver_from_name(solver_name, grid_area, num_agents).unwrap();
+            mafis::planners::lifelong_solver_from_name(solver_name, grid_area, num_agents).unwrap();
         let fault_config = FaultConfig { enabled: false, ..Default::default() };
         let mut runner = SimulationRunner::new(
             grid.clone(),
@@ -1141,7 +1141,7 @@ fn delete_fault_determinism() {
     let resumed_tasks;
     {
         let solver =
-            mafis::solver::lifelong_solver_from_name(solver_name, grid_area, num_agents).unwrap();
+            mafis::planners::lifelong_solver_from_name(solver_name, grid_area, num_agents).unwrap();
         let fault_config = FaultConfig { enabled: false, ..Default::default() };
         let mut runner = SimulationRunner::new(
             grid.clone(),
@@ -1188,7 +1188,7 @@ fn delete_fault_determinism() {
     let mut resumed_series: Vec<f64>;
     {
         let solver =
-            mafis::solver::lifelong_solver_from_name(solver_name, grid_area, num_agents).unwrap();
+            mafis::planners::lifelong_solver_from_name(solver_name, grid_area, num_agents).unwrap();
         let fault_config = FaultConfig { enabled: false, ..Default::default() };
         let mut runner = SimulationRunner::new(
             grid.clone(),
@@ -1249,7 +1249,7 @@ fn delete_fault_double_restore_determinism() {
     let baseline_tasks;
     {
         let solver =
-            mafis::solver::lifelong_solver_from_name(solver_name, grid_area, num_agents).unwrap();
+            mafis::planners::lifelong_solver_from_name(solver_name, grid_area, num_agents).unwrap();
         let fc = FaultConfig { enabled: false, ..Default::default() };
         let mut r = SimulationRunner::new(
             grid.clone(),
@@ -1289,7 +1289,7 @@ fn delete_fault_double_restore_determinism() {
         });
         let fc = FaultConfig { enabled: true, ..Default::default() };
         let solver =
-            mafis::solver::lifelong_solver_from_name(solver_name, grid_area, num_agents).unwrap();
+            mafis::planners::lifelong_solver_from_name(solver_name, grid_area, num_agents).unwrap();
         let mut r = SimulationRunner::new(
             grid.clone(),
             zones.clone(),
@@ -1326,7 +1326,7 @@ fn delete_fault_double_restore_determinism() {
     {
         // --- Restore 1 (DELETE handler creates runner, restores state) ---
         let solver =
-            mafis::solver::lifelong_solver_from_name(solver_name, grid_area, num_agents).unwrap();
+            mafis::planners::lifelong_solver_from_name(solver_name, grid_area, num_agents).unwrap();
         let fc = FaultConfig { enabled: false, ..Default::default() };
         let mut r = SimulationRunner::new(
             grid.clone(),
@@ -1411,7 +1411,7 @@ fn delete_fault_inplace_restore_determinism() {
     let baseline_per_tick: Vec<u64>;
     {
         let solver =
-            mafis::solver::lifelong_solver_from_name(solver_name, grid_area, num_agents).unwrap();
+            mafis::planners::lifelong_solver_from_name(solver_name, grid_area, num_agents).unwrap();
         let fc = FaultConfig { enabled: false, ..Default::default() };
         let mut r = SimulationRunner::new(
             grid.clone(),
@@ -1446,7 +1446,7 @@ fn delete_fault_inplace_restore_determinism() {
         });
         let fc = FaultConfig { enabled: true, ..Default::default() };
         let solver =
-            mafis::solver::lifelong_solver_from_name(solver_name, grid_area, num_agents).unwrap();
+            mafis::planners::lifelong_solver_from_name(solver_name, grid_area, num_agents).unwrap();
         let mut runner = SimulationRunner::new(
             grid.clone(),
             zones.clone(),
@@ -1790,7 +1790,7 @@ fn rewind_determinism_reset_matches_fresh() {
         let agents_fresh = place_agents(15, &output.grid, &output.zones, &mut rng_fresh);
         let rng_after_fresh = rng_fresh.clone();
         let solver_fresh =
-            mafis::solver::lifelong_solver_from_name(solver_name, grid_area, 15).unwrap();
+            mafis::planners::lifelong_solver_from_name(solver_name, grid_area, 15).unwrap();
         let mut runner_fresh = SimulationRunner::new(
             output.grid.clone(),
             output.zones.clone(),
@@ -1811,7 +1811,7 @@ fn rewind_determinism_reset_matches_fresh() {
         let agents_rewind = place_agents(15, &output.grid, &output.zones, &mut rng_rewind);
         let rng_after_rewind = rng_rewind.clone();
         let solver_rewind =
-            mafis::solver::lifelong_solver_from_name(solver_name, grid_area, 15).unwrap();
+            mafis::planners::lifelong_solver_from_name(solver_name, grid_area, 15).unwrap();
         let mut runner_rewind = SimulationRunner::new(
             output.grid.clone(),
             output.zones.clone(),
@@ -1907,7 +1907,7 @@ fn intermittent_respects_start_tick() {
         intermittent_start_tick: start_tick,
         ..Default::default()
     };
-    let solver = mafis::solver::lifelong_solver_from_name("pibt", grid_area, 20).unwrap();
+    let solver = mafis::planners::lifelong_solver_from_name("pibt", grid_area, 20).unwrap();
     let mut runner = SimulationRunner::new(
         output.grid.clone(),
         output.zones.clone(),
@@ -1976,7 +1976,7 @@ fn intermittent_first_fire_median() {
             intermittent_start_tick: 0,
             ..Default::default()
         };
-        let solver = mafis::solver::lifelong_solver_from_name("pibt", grid_area, 1).unwrap();
+        let solver = mafis::planners::lifelong_solver_from_name("pibt", grid_area, 1).unwrap();
         let mut runner = SimulationRunner::new(
             output.grid.clone(),
             output.zones.clone(),
@@ -2069,7 +2069,7 @@ fn no_stuck_loading_on_delivery_corridor() {
     let agents = place_agents(agent_count, &output.grid, &output.zones, &mut rng_seed);
     let rng_after_placement = rng_seed.clone();
 
-    let solver = mafis::solver::lifelong_solver_from_name("pibt", grid_area, agent_count)
+    let solver = mafis::planners::lifelong_solver_from_name("pibt", grid_area, agent_count)
         .expect("pibt solver creation");
     let mut runner = SimulationRunner::new(
         output.grid,
@@ -2132,8 +2132,9 @@ fn diagnose_stuck_tp_sd_w2() {
     let mut rng_seed = SeededRng::new(42);
     let agents = place_agents(agent_count, &output.grid, &output.zones, &mut rng_seed);
     let rng_after = rng_seed.clone();
-    let solver = mafis::solver::lifelong_solver_from_name("token_passing", grid_area, agent_count)
-        .expect("tp");
+    let solver =
+        mafis::planners::lifelong_solver_from_name("token_passing", grid_area, agent_count)
+            .expect("tp");
     let mut runner = SimulationRunner::new(
         output.grid.clone(),
         output.zones.clone(),
@@ -2221,7 +2222,7 @@ fn diagnose_stuck_tp_sd_w2() {
     let agents2 = place_agents(n2, &output2.grid, &output2.zones, &mut rng_seed2);
     let rng_after2 = rng_seed2.clone();
     let solver2 =
-        mafis::solver::lifelong_solver_from_name("token_passing", grid_area2, n2).expect("tp");
+        mafis::planners::lifelong_solver_from_name("token_passing", grid_area2, n2).expect("tp");
     let mut runner2 = SimulationRunner::new(
         output2.grid.clone(),
         output2.zones.clone(),
@@ -2310,7 +2311,7 @@ fn intermittent_rewind_determinism() {
         let rng = SeededRng::new(99);
         // Consume the same RNG as place_agents did
         let solver =
-            mafis::solver::lifelong_solver_from_name("pibt", grid_area, agents.len()).unwrap();
+            mafis::planners::lifelong_solver_from_name("pibt", grid_area, agents.len()).unwrap();
         let fc = FaultConfig {
             enabled: true,
             intermittent_enabled: true,

@@ -2,7 +2,7 @@ use std::sync::atomic::Ordering;
 
 use crate::core::topology::TopologyRegistry;
 use crate::experiment::export::MetricColumn;
-use crate::solver::SOLVER_NAMES;
+use crate::planners::SOLVER_NAMES;
 
 use super::helpers::{
     ExportFormat, PRESETS, TABLE_METRICS, export_button, matrix_result_from_summaries,

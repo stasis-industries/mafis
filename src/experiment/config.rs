@@ -3,7 +3,7 @@
 use crate::core::grid::GridMap;
 use crate::core::topology::ZoneMap;
 use crate::fault::scenario::{FaultScenario, FaultScenarioType, WearHeatRate};
-pub use crate::solver::RhcrConfigOverride;
+pub use crate::planners::RhcrConfigOverride;
 
 /// Identity of a single experiment run.
 #[derive(Debug, Clone)]
@@ -175,7 +175,7 @@ fn solver_agent_cap(solver: &str, topology: &str) -> Option<usize> {
     if let Some(cap) = caps.lock().ok().and_then(|m| m.get(&key).copied()) {
         return cap;
     }
-    let cap = crate::solver::lifelong_solver_from_name(solver, 0, 0)
+    let cap = crate::planners::lifelong_solver_from_name(solver, 0, 0)
         .and_then(|s| s.max_agents(&topology_zones(topology)?));
     if let Ok(mut m) = caps.lock() {
         m.insert(key, cap);

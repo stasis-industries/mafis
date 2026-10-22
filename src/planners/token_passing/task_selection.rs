@@ -16,8 +16,8 @@ use bevy::prelude::IVec2;
 use rand_chacha::ChaCha8Rng;
 use std::collections::HashSet;
 
-use super::super::topology::ZoneMap;
-use super::{ClosestFirstScheduler, TaskScheduler};
+use crate::core::task::{ClosestFirstScheduler, TaskScheduler};
+use crate::core::topology::ZoneMap;
 
 pub struct TokenPassingTaskSelection;
 

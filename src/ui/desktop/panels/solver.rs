@@ -3,7 +3,7 @@ use bevy::prelude::*;
 use super::super::theme;
 use crate::constants;
 use crate::core::state::SimState;
-use crate::solver::SOLVER_NAMES;
+use crate::planners::SOLVER_NAMES;
 use crate::ui::controls::UiState;
 
 struct SolverInfo {

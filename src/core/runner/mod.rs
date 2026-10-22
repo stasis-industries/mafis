@@ -28,8 +28,8 @@ use super::topology::ZoneMap;
 use crate::constants::THROUGHPUT_WINDOW_SIZE;
 use crate::fault::config::{FaultConfig, FaultSource, FaultType};
 use crate::fault::scenario::{FaultSchedule, ScheduledAction};
-use crate::solver::heuristics::DistanceMapCache;
-use crate::solver::lifelong::{
+use crate::planning::heuristics::DistanceMapCache;
+use crate::planning::planner::{
     AgentState as SolverAgentState, LifelongSolver, SolverContext, StepResult,
 };
 
@@ -1341,7 +1341,7 @@ mod tests {
     }
 
     fn test_solver() -> Box<dyn LifelongSolver> {
-        Box::new(crate::solver::pibt::PibtLifelongSolver::new())
+        Box::new(crate::planners::pibt::PibtLifelongSolver::new())
     }
 
     fn disabled_fault_config() -> FaultConfig {

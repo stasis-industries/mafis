@@ -13,8 +13,8 @@ use crate::core::seed::SeededRng;
 use crate::core::task::TaskLeg;
 use crate::core::topology::ZoneMap;
 
-use super::shared::heuristics::DistanceMapCache;
-use super::shared::traits::SolverInfo;
+use super::heuristics::DistanceMapCache;
+use super::traits::SolverInfo;
 
 // ---------------------------------------------------------------------------
 // Context passed to solvers each tick

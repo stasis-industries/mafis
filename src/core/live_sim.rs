@@ -156,7 +156,7 @@ pub fn sync_runner_to_ecs(
     mut lifelong: ResMut<LifelongConfig>,
     mut grid: ResMut<GridMap>,
     mut ecs_rng: ResMut<SeededRng>,
-    mut ecs_solver: ResMut<crate::solver::ActiveSolver>,
+    mut ecs_solver: ResMut<crate::planning::ActiveSolver>,
     mut commands: Commands,
     dead_query: Query<Entity, With<Dead>>,
     latency_query: Query<Entity, With<LatencyFault>>,

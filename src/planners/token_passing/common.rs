@@ -7,7 +7,7 @@
 use bevy::prelude::*;
 use std::collections::VecDeque;
 
-use crate::solver::shared::astar::ConstraintChecker;
+use crate::planners::toolkit::astar::ConstraintChecker;
 
 // ---------------------------------------------------------------------------
 // TOKEN — shared path store

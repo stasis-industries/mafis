@@ -12,7 +12,7 @@ use crate::core::seed::SeededRng;
 use crate::core::task::ActiveScheduler;
 use crate::core::topology::ZoneMap;
 use crate::fault::config::{FaultConfig, FaultSource};
-use crate::solver::pibt::PibtLifelongSolver;
+use crate::planners::pibt::PibtLifelongSolver;
 
 const AGENTS: usize = 12;
 const TICKS: u64 = 60;

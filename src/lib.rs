@@ -4,10 +4,10 @@ pub mod core;
 pub mod experiment;
 pub mod export;
 pub mod fault;
+pub mod planners;
 pub mod planning;
 #[cfg(any(target_arch = "wasm32", not(feature = "headless")))]
 pub mod render;
-pub mod solver;
 pub mod ui;
 
 // Headless ECS integration tests. Lives in `src/` (not `tests/`) so that the
@@ -25,7 +25,7 @@ impl Plugin for MapfFisPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
             core::CorePlugin,
-            solver::SolverPlugin,
+            planning::SolverPlugin,
             fault::FaultPlugin,
             analysis::AnalysisPlugin,
             ui::UiPlugin,

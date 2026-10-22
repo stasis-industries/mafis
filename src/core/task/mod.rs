@@ -5,7 +5,7 @@ use std::collections::{HashSet, VecDeque};
 
 use super::topology::ZoneMap;
 use crate::constants::{PBS_GOAL_SEQUENCE_MAX_LEN, THROUGHPUT_WINDOW_SIZE};
-use crate::solver::heuristics::DistanceMapCache;
+use crate::planning::heuristics::DistanceMapCache;
 
 // `peek_task_chain` returns a `SmallVec<[IVec2; N]>`. Rust does not let us
 // parameterise the inline-array length by a `const usize` import in a generic
@@ -20,8 +20,6 @@ pub mod random;
 pub use random::{RandomScheduler, random_cell_from};
 pub mod recycle;
 pub use recycle::{RecycleResult, TaskAgentSnapshot, TaskUpdate, recycle_goals_core};
-pub mod token_passing;
-pub use token_passing::TokenPassingTaskSelection;
 
 // ---------------------------------------------------------------------------
 // TaskLeg

@@ -382,12 +382,12 @@ pub fn start_headless(config: &BaselineConfig) -> BaselineComputation {
     let actual_agents = config.num_agents.min(grid.walkable_count());
 
     // 3. Create solver + scheduler + rng
-    let solver = crate::solver::lifelong_solver_from_name(
+    let solver = crate::planners::lifelong_solver_from_name(
         &config.solver_name,
         (grid.width * grid.height) as usize,
         actual_agents,
     )
-    .unwrap_or_else(|| Box::new(crate::solver::pibt::PibtLifelongSolver::new()));
+    .unwrap_or_else(|| Box::new(crate::planners::pibt::PibtLifelongSolver::new()));
 
     let scheduler = ActiveScheduler::from_name(&config.scheduler_name);
     let queue_policy = ActiveQueuePolicy::from_name("closest");
@@ -774,7 +774,7 @@ mod tests {
             let grid = output.grid;
             let zones = output.zones;
 
-            let solver = crate::solver::lifelong_solver_from_name(
+            let solver = crate::planners::lifelong_solver_from_name(
                 &config.solver_name,
                 (grid.width * grid.height) as usize,
                 config.num_agents,
@@ -854,7 +854,7 @@ mod tests {
         let grid = output.grid;
         let zones = output.zones;
 
-        let solver = crate::solver::lifelong_solver_from_name(
+        let solver = crate::planners::lifelong_solver_from_name(
             &config.solver_name,
             (grid.width * grid.height) as usize,
             config.num_agents,
@@ -938,7 +938,7 @@ mod tests {
         let grid = output.grid;
         let zones = output.zones;
 
-        let solver = crate::solver::lifelong_solver_from_name(
+        let solver = crate::planners::lifelong_solver_from_name(
             &config.solver_name,
             (grid.width * grid.height) as usize,
             config.num_agents,

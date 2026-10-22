@@ -148,11 +148,11 @@ pub struct RewindResources<'w> {
     fault_schedule: ResMut<'w, super::scenario::FaultSchedule>,
     tick_history: ResMut<'w, crate::analysis::history::TickHistory>,
     config: ResMut<'w, SimulationConfig>,
-    solver: ResMut<'w, crate::solver::ActiveSolver>,
+    solver: ResMut<'w, crate::planning::ActiveSolver>,
     lifelong: ResMut<'w, crate::core::task::LifelongConfig>,
     rng: ResMut<'w, crate::core::seed::SeededRng>,
     ui_state: Res<'w, crate::ui::controls::UiState>,
-    dist_cache: ResMut<'w, crate::solver::heuristics::DistanceMapCache>,
+    dist_cache: ResMut<'w, crate::planning::heuristics::DistanceMapCache>,
     rewind_req: ResMut<'w, RewindRequest>,
     baseline_diff: ResMut<'w, crate::analysis::baseline::BaselineDiff>,
     baseline_store: Res<'w, crate::analysis::baseline::BaselineStore>,
@@ -401,7 +401,7 @@ fn restore_world_state(
     // active at this tick. PIBT and RHCR-PBS default to no-op.
     {
         use crate::core::action::Action;
-        use crate::solver::lifelong::AgentRestoreState;
+        use crate::planning::planner::AgentRestoreState;
         let actions_per_agent: Vec<Vec<Action>> = snapshot
             .agents
             .iter()
@@ -498,7 +498,7 @@ fn restore_runner_state(
     // Rebuild solver-specific planning caches (see comment on the ECS path).
     {
         use crate::core::action::Action;
-        use crate::solver::lifelong::AgentRestoreState;
+        use crate::planning::planner::AgentRestoreState;
         let actions_per_agent: Vec<Vec<Action>> = snapshot
             .agents
             .iter()

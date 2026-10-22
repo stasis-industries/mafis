@@ -36,20 +36,20 @@ use crate::core::topology::{ActiveTopology, ZoneMap, ZoneType};
 #[cfg(any(target_arch = "wasm32", not(feature = "headless")))]
 use crate::fault::heat::HeatState;
 #[cfg(any(target_arch = "wasm32", not(feature = "headless")))]
+use crate::planners::pibt::PibtSolver;
+#[cfg(any(target_arch = "wasm32", not(feature = "headless")))]
+use crate::planning::ActiveSolver;
+#[cfg(any(target_arch = "wasm32", not(feature = "headless")))]
+use crate::planning::heuristics::DistanceMapCache;
+#[cfg(any(target_arch = "wasm32", not(feature = "headless")))]
+use crate::planning::traits::MAPFSolver;
+#[cfg(any(target_arch = "wasm32", not(feature = "headless")))]
 use crate::render::environment::{
     EnvironmentMarker, ObstacleMarker, spawn_floor_and_lines, spawn_queue_arrows,
     spawn_zone_markers,
 };
 #[cfg(any(target_arch = "wasm32", not(feature = "headless")))]
 use crate::render::orbit_camera::OrbitCamera;
-#[cfg(any(target_arch = "wasm32", not(feature = "headless")))]
-use crate::solver::ActiveSolver;
-#[cfg(any(target_arch = "wasm32", not(feature = "headless")))]
-use crate::solver::heuristics::DistanceMapCache;
-#[cfg(any(target_arch = "wasm32", not(feature = "headless")))]
-use crate::solver::pibt::PibtSolver;
-#[cfg(any(target_arch = "wasm32", not(feature = "headless")))]
-use crate::solver::traits::MAPFSolver;
 
 // ---------------------------------------------------------------------------
 // SystemParam bundles (to stay under Bevy's 16-param limit)
@@ -231,7 +231,7 @@ mod observatory_controls {
             Query<Entity, With<EnvironmentMarker>>,
         ),
     ) {
-        if !crate::solver::is_known_planner(&res.ui_state.solver_name) {
+        if !crate::planners::is_known_planner(&res.ui_state.solver_name) {
             error!("unknown planner '{}': loading stopped", res.ui_state.solver_name);
             // A `Done` progress left by the previous load would make `loading_tick`
             // request Running in this same frame, overriding the Idle request.
@@ -263,7 +263,7 @@ mod observatory_controls {
             let grid_w = res.ui_state.grid_width as usize;
             let grid_h = res.ui_state.grid_height as usize;
             let num_agents = res.ui_state.num_agents;
-            let fresh = crate::solver::lifelong_solver_from_name_sized(
+            let fresh = crate::planners::lifelong_solver_from_name_sized(
                 &res.ui_state.solver_name,
                 grid_w,
                 grid_h,
@@ -386,7 +386,7 @@ mod observatory_controls {
             // The *_sized factory pre-allocates RHCR PBS scratch buffers at
             // the real grid dimensions, avoiding the first-tick allocation
             // stall.
-            let runner_solver = crate::solver::lifelong_solver_from_name_sized(
+            let runner_solver = crate::planners::lifelong_solver_from_name_sized(
                 &res.ui_state.solver_name,
                 runner_grid.width as usize,
                 runner_grid.height as usize,
@@ -1011,7 +1011,7 @@ mod observatory_controls {
                 bevy::state::app::StatesPlugin,
                 bevy::asset::AssetPlugin::default(),
                 crate::core::CorePlugin,
-                crate::solver::SolverPlugin,
+                crate::planning::SolverPlugin,
                 crate::fault::FaultPlugin,
                 crate::analysis::AnalysisPlugin,
                 ControlsPlugin,

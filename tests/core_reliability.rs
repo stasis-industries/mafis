@@ -16,9 +16,9 @@ use mafis::fault::config::{FaultConfig, FaultSource};
 use mafis::fault::scenario::{
     FaultScenario, FaultScenarioType, FaultSchedule, ScheduledAction, ScheduledEvent,
 };
-use mafis::solver::heuristics::DistanceMapCache;
-use mafis::solver::lifelong::{AgentState, LifelongSolver, SolverContext, StepResult};
-use mafis::solver::traits::SolverInfo;
+use mafis::planning::heuristics::DistanceMapCache;
+use mafis::planning::planner::{AgentState, LifelongSolver, SolverContext, StepResult};
+use mafis::planning::traits::SolverInfo;
 
 const SOLVERS: [&str; 3] = ["pibt", "rhcr_pbs", "token_passing"];
 const TOPOLOGY: &str = "warehouse_single_dock";
@@ -39,7 +39,7 @@ fn runner_with(
 fn solver(name: &str, n: usize) -> Box<dyn LifelongSolver> {
     let output = ActiveTopology::from_name(TOPOLOGY).topology().generate(0);
     let area = (output.grid.width * output.grid.height) as usize;
-    mafis::solver::lifelong_solver_from_name(name, area, n).expect("known solver")
+    mafis::planners::lifelong_solver_from_name(name, area, n).expect("known solver")
 }
 
 fn no_faults() -> FaultConfig {

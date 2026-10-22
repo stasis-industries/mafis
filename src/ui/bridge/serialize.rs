@@ -22,11 +22,11 @@ use crate::fault::breakdown::{Dead, LatencyFault};
 use crate::fault::config::FaultConfig;
 use crate::fault::heat::HeatState;
 use crate::fault::scenario::{FaultScenario, FaultSchedule, ScheduledAction};
+use crate::planning::ActiveSolver;
 use crate::render::animator::RobotOpacity;
 use crate::render::graphics::GraphicsConfig;
 use crate::render::orbit_camera::{CameraMode, OrbitCamera};
 use crate::render::picking::ClickSelection;
-use crate::solver::ActiveSolver;
 
 use super::FpsTracker;
 use crate::ui::controls::UiState;

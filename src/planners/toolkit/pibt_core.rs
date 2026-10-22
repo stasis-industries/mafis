@@ -9,7 +9,7 @@ use bevy::prelude::*;
 use crate::core::action::{Action, Direction};
 use crate::core::grid::GridMap;
 
-use super::heuristics::{DistanceMap, delta_to_action};
+use crate::planning::heuristics::{DistanceMap, delta_to_action};
 
 // ---------------------------------------------------------------------------
 // Grid-indexed occupation map (replaces HashMap for O(1) with no hashing)

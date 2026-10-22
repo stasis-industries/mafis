@@ -5,8 +5,8 @@ use std::collections::{BinaryHeap, HashMap, HashSet};
 use crate::core::action::{Action, Direction};
 use crate::core::grid::GridMap;
 
-use super::heuristics::{DistanceMap, manhattan};
-use super::traits::SolverError;
+use crate::planning::heuristics::{DistanceMap, manhattan};
+use crate::planning::traits::SolverError;
 
 // ---------------------------------------------------------------------------
 // Legacy constraint types (kept for PBS planner compatibility)
@@ -1174,7 +1174,7 @@ fn reconstruct_path(
 mod tests {
     use super::*;
     use crate::core::grid::GridMap;
-    use crate::solver::shared::heuristics::DistanceMap;
+    use crate::planning::heuristics::DistanceMap;
 
     #[test]
     fn flat_constraint_matches_hashset() {
