@@ -27,8 +27,8 @@ pub fn throughput_chart(
         .y_axis_label("Goals/Tick")
         .legend(egui_plot::Legend::default())
         .show(ui, |plot_ui| {
-            plot_ui.line(Line::new("Per-Tick", raw).color(CHART_PRIMARY).width(1.0));
-            plot_ui.line(Line::new("MVA", mva_points).color(CHART_SECONDARY).width(2.0));
+            plot_ui.line(Line::new("Per-Tick", raw).color(CHART_PRIMARY).width(1.0f32));
+            plot_ui.line(Line::new("MVA", mva_points).color(CHART_SECONDARY).width(2.0f32));
 
             if let Some(bl) = baseline {
                 let bl_mva = compute_mva(&bl.throughput_series, THROUGHPUT_MA_WINDOW);
@@ -37,7 +37,7 @@ pub fn throughput_chart(
                 plot_ui.line(
                     Line::new("Baseline", bl_mva_points)
                         .color(CHART_BASELINE)
-                        .width(1.5)
+                        .width(1.5f32)
                         .style(egui_plot::LineStyle::dashed_dense()),
                 );
             }

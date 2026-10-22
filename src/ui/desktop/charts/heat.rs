@@ -17,6 +17,6 @@ pub fn heat_chart(ui: &mut egui::Ui, analysis: &AnalysisEngine) {
         .y_axis_label("Avg Heat")
         .legend(egui_plot::Legend::default())
         .show(ui, |plot_ui| {
-            plot_ui.line(Line::new("Avg Heat", points).color(CHART_HEAT).width(2.0));
+            plot_ui.line(Line::new("Avg Heat", points).color(CHART_HEAT).width(2.0f32));
         });
 }

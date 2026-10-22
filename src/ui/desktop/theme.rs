@@ -89,26 +89,26 @@ pub fn apply_theme_once(mut contexts: EguiContexts, mut applied: ResMut<ThemeApp
 
     // Widget states
     style.visuals.widgets.noninteractive.bg_fill = BG_PANEL;
-    style.visuals.widgets.noninteractive.fg_stroke = Stroke::new(1.0, TEXT_SECONDARY);
+    style.visuals.widgets.noninteractive.fg_stroke = Stroke::new(1.0f32, TEXT_SECONDARY);
 
     style.visuals.widgets.inactive.bg_fill = BG_INPUT;
-    style.visuals.widgets.inactive.fg_stroke = Stroke::new(1.0, TEXT_SECONDARY);
+    style.visuals.widgets.inactive.fg_stroke = Stroke::new(1.0f32, TEXT_SECONDARY);
 
     style.visuals.widgets.hovered.bg_fill = BG_CARD;
-    style.visuals.widgets.hovered.fg_stroke = Stroke::new(1.0, TEXT_PRIMARY);
+    style.visuals.widgets.hovered.fg_stroke = Stroke::new(1.0f32, TEXT_PRIMARY);
 
     style.visuals.widgets.active.bg_fill = BG_INPUT;
-    style.visuals.widgets.active.fg_stroke = Stroke::new(1.5, TEXT_PRIMARY);
+    style.visuals.widgets.active.fg_stroke = Stroke::new(1.5f32, TEXT_PRIMARY);
 
     style.visuals.widgets.open.bg_fill = BG_CARD;
-    style.visuals.widgets.open.fg_stroke = Stroke::new(1.0, TEXT_PRIMARY);
+    style.visuals.widgets.open.fg_stroke = Stroke::new(1.0f32, TEXT_PRIMARY);
 
     // Selection
     style.visuals.selection.bg_fill = Color32::from_rgba_premultiplied(45, 160, 0, 40);
-    style.visuals.selection.stroke = Stroke::new(1.0, STATE_RUNNING);
+    style.visuals.selection.stroke = Stroke::new(1.0f32, STATE_RUNNING);
 
     // Window stroke
-    style.visuals.window_stroke = Stroke::new(1.0, BORDER_STRONG);
+    style.visuals.window_stroke = Stroke::new(1.0f32, BORDER_STRONG);
 
     // Spacing — dense but readable (matching web)
     style.spacing.item_spacing = egui::vec2(6.0, 4.0);
