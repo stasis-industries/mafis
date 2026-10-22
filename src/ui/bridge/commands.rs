@@ -464,17 +464,16 @@ pub(super) fn process_js_commands(
                         let grid_w = sim_res.grid.width as usize;
                         let grid_h = sim_res.grid.height as usize;
                         let num_agents = sim_res.ui_state.num_agents;
-                        if let Some(new_solver) =
-                            lifelong_solver_from_name_sized(&name, grid_w, grid_h, num_agents)
-                        {
-                            sim_res.ui_state.solver_name = name.clone();
-                            // Clear RHCR overrides when switching solver
-                            sim_res.ui_state.rhcr_horizon = None;
-                            sim_res.ui_state.rhcr_replan_interval = None;
-                            *sim_res.solver = ActiveSolver::new(new_solver);
-                        } else {
-                            error!("unknown planner '{name}'");
+                        match lifelong_solver_from_name_sized(&name, grid_w, grid_h, num_agents) {
+                            Some(new_solver) => *sim_res.solver = ActiveSolver::new(new_solver),
+                            None => error!("unknown planner '{name}'"),
                         }
+                        // Kept even when unknown, so the next start is refused
+                        // (begin_loading) instead of running the previous planner.
+                        sim_res.ui_state.solver_name = name;
+                        // Clear RHCR overrides when switching solver
+                        sim_res.ui_state.rhcr_horizon = None;
+                        sim_res.ui_state.rhcr_replan_interval = None;
                     }
                 }
                 JsCommand::KillAgent(id) => {
