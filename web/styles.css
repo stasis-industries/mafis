@@ -64,7 +64,9 @@
 
     --bg-hover: rgba(5, 5, 5, 0.04);
     --bg-canvas: rgb(255, 255, 255);
-    --bg-overlay: rgba(70, 70, 74, 0.72);
+    /* Canvas overlays: no backdrop blur (it re-blurred every frame of a run), so the
+       scene shows through at half its blurred-era strength (0.28 -> 0.14). */
+    --bg-overlay: rgba(70, 70, 74, 0.86);
 
     /* Timeline (YouTube-style 3-zone) */
     --tl-unloaded: rgba(0, 0, 0, 0.08);
@@ -101,7 +103,7 @@
 
     --bg-hover: rgba(255, 255, 255, 0.06);
     --bg-canvas: rgb(18, 18, 22);
-    --bg-overlay: rgba(30, 30, 36, 0.78);
+    --bg-overlay: rgba(30, 30, 36, 0.89);
 
     /* Timeline (YouTube-style 3-zone) */
     --tl-unloaded: rgba(255, 255, 255, 0.06);
@@ -938,11 +940,6 @@ input[type="range"]:disabled::-webkit-slider-thumb {
     font-size: 18px;
 }
 
-/* Metric change flash animation */
-.metric-value.changed {
-    color: var(--state-delayed);
-}
-
 /* State colors on status value */
 #status-state[data-state="running"] {
     color: var(--state-moving);
@@ -1084,7 +1081,6 @@ input[type="range"]:disabled::-webkit-slider-thumb {
     top: 0;
     height: 100%;
     background: var(--state-delayed);
-    transition: width 200ms ease;
 }
 
 /* --------------------------------------------------------------------------
@@ -1224,7 +1220,6 @@ input[type="range"]:disabled::-webkit-slider-thumb {
     top: 0;
     height: 100%;
     background: var(--state-delayed);
-    transition: width 200ms ease;
 }
 
 /* Popover action buttons row */
@@ -1379,7 +1374,6 @@ input[type="range"]:disabled::-webkit-slider-thumb {
     width: 3px;
     height: 10px;
     background: var(--text-primary);
-    transition: left 300ms ease;
 }
 
 /* --------------------------------------------------------------------------
@@ -1992,7 +1986,6 @@ input[type="range"]:disabled::-webkit-slider-thumb {
     gap: 3px;
     padding: 8px 10px;
     background: var(--bg-overlay);
-    backdrop-filter: blur(8px);
     font-size: 0.72em;
     font-family: 'DM Mono', monospace;
     letter-spacing: 0.3px;
@@ -2049,8 +2042,6 @@ input[type="range"]:disabled::-webkit-slider-thumb {
     color: rgba(244, 241, 237, 0.85);
     cursor: pointer;
     transition: background 150ms ease, color 150ms ease;
-    backdrop-filter: blur(4px);
-    -webkit-backdrop-filter: blur(4px);
 }
 
 .btn-camera:hover {
@@ -2786,7 +2777,6 @@ input[type="range"]:disabled::-webkit-slider-thumb {
 .ctx-metric-fill {
     height: 100%;
     background: var(--text-primary);
-    transition: width 300ms ease;
     min-width: 0;
 }
 
@@ -2797,7 +2787,6 @@ input[type="range"]:disabled::-webkit-slider-thumb {
     height: 8px;
     background: var(--state-delayed);
     opacity: 0.7;
-    transition: left 300ms ease;
 }
 
 .ctx-metric-baseline {
@@ -3138,8 +3127,6 @@ input[type="range"]:disabled::-webkit-slider-thumb {
     width: 192px;
     box-sizing: border-box;
     background: var(--bg-overlay);
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
     padding: 10px 14px;
     z-index: 20;
     opacity: 0;
@@ -3215,8 +3202,6 @@ input[type="range"]:disabled::-webkit-slider-thumb {
     width: 192px;
     box-sizing: border-box;
     background: var(--bg-overlay);
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
     padding: 10px 14px;
     z-index: 20;
     opacity: 0;
@@ -3265,8 +3250,6 @@ input[type="range"]:disabled::-webkit-slider-thumb {
     gap: 8px;
     padding: 6px 12px;
     background: var(--bg-overlay);
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
     border: 1px solid rgba(255, 255, 255, 0.10);
     z-index: 20;
     font-family: 'DM Mono', monospace;
@@ -4449,7 +4432,6 @@ body[data-phase="results"] #panel-right > .view-results-wrapper {
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: width 200ms ease;
 }
 .task-bar-loading {
     background: var(--state-delayed);
@@ -4457,7 +4439,6 @@ body[data-phase="results"] #panel-right > .view-results-wrapper {
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: width 200ms ease;
 }
 .task-bar-idle {
     background: var(--state-idle);
@@ -4465,7 +4446,6 @@ body[data-phase="results"] #panel-right > .view-results-wrapper {
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: width 200ms ease;
 }
 .task-bar-dead {
     background: var(--state-fault);
@@ -4473,7 +4453,6 @@ body[data-phase="results"] #panel-right > .view-results-wrapper {
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: width 200ms ease;
 }
 
 /* --------------------------------------------------------------------------
@@ -5550,8 +5529,6 @@ body.demo-active[data-phase="analyze"] #panel-right {
     transform: translateX(-50%);
     z-index: 100;
     background: var(--bg-overlay);
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
     padding: 16px 32px;
     max-width: 500px;
     text-align: center;

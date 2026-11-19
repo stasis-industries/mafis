@@ -157,6 +157,15 @@ pub const BRIDGE_SYNC_INTERVAL_SLOW: f32 = 0.50;
 /// Bridge sync interval for very large agent counts (400+).
 pub const BRIDGE_SYNC_INTERVAL_XLARGE: f32 = 1.0;
 
+/// Web: seconds the app keeps drawing every frame after the last input, JS command or
+/// running tick before it sleeps. Two of the slowest bridge syncs, so the state a command
+/// produced always reaches JS; this also covers robot/camera easing and shader compiles.
+pub const IDLE_RENDER_GRACE_SECS: f32 = 2.0 * BRIDGE_SYNC_INTERVAL_XLARGE;
+
+/// Web: while asleep, the app still draws one frame this often as a safety net
+/// (input and JS commands wake it at once).
+pub const IDLE_RENDER_WAIT_SECS: f32 = 1.0;
+
 // ── Manual fault injection ──────────────────────────────────────────
 
 /// How often (ticks) to re-invoke the solver when agents are stuck (0 = disabled).

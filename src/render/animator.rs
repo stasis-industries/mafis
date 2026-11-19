@@ -154,26 +154,27 @@ fn spawn_robot_visuals(
     for (entity, agent) in &agents {
         let world_pos = grid_to_world(agent.current_pos);
 
-        commands.entity(entity).with_children(|parent| {
-            // Robot body (flat cylinder)
-            parent.spawn((
-                Mesh3d(body_mesh.clone()),
-                MeshMaterial3d(palette.task_heat[0][0].clone()),
-                Transform::from_xyz(0.0, 0.07, 0.0),
-                RobotVisual,
-            ));
-            // Antenna (thin tall cylinder on top)
-            parent.spawn((
-                Mesh3d(antenna_mesh.clone()),
-                MeshMaterial3d(palette.task_heat[0][0].clone()),
-                Transform::from_xyz(0.0, 0.22, 0.0),
-                RobotVisual,
-            ));
-        });
-
+        // Parent transform/visibility first: children added to a parent without them
+        // trigger a Bevy B0004 warning each (4 per robot, logged to the browser console).
         commands
             .entity(entity)
-            .insert((Transform::from_xyz(world_pos.x, 0.0, world_pos.z), Visibility::default()));
+            .insert((Transform::from_xyz(world_pos.x, 0.0, world_pos.z), Visibility::default()))
+            .with_children(|parent| {
+                // Robot body (flat cylinder)
+                parent.spawn((
+                    Mesh3d(body_mesh.clone()),
+                    MeshMaterial3d(palette.task_heat[0][0].clone()),
+                    Transform::from_xyz(0.0, 0.07, 0.0),
+                    RobotVisual,
+                ));
+                // Antenna (thin tall cylinder on top)
+                parent.spawn((
+                    Mesh3d(antenna_mesh.clone()),
+                    MeshMaterial3d(palette.task_heat[0][0].clone()),
+                    Transform::from_xyz(0.0, 0.22, 0.0),
+                    RobotVisual,
+                ));
+            });
     }
 }
 

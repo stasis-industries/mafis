@@ -17,12 +17,18 @@ pub fn get_version() -> String {
 #[wasm_bindgen]
 pub fn send_command(cmd: &str) {
     if let Some(parsed) = super::parse_command(cmd) {
-        BRIDGE.with(|b| {
+        let waker = BRIDGE.with(|b| {
             let mut inner = b.borrow_mut();
             if inner.incoming.len() < crate::constants::MAX_COMMAND_QUEUE {
                 inner.incoming.push(parsed);
             }
+            inner.command_received = true;
+            inner.waker.clone()
         });
+        // Outside the borrow: the woken update reads BRIDGE. Fails only once the loop has exited.
+        if let Some(waker) = waker {
+            let _ = waker.send_event(bevy::winit::WinitUserEvent::WakeUp);
+        }
     }
 }
 

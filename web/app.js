@@ -1259,7 +1259,9 @@ function updateUI(s) {
     stateEl.textContent = s.state.toUpperCase();
     stateEl.dataset.state = s.state;
 
-    animateMetric('status-tick', s.tick + ' / ' + s.duration);
+    // No change flash: the tick changes every poll, so its colour transition never ended and
+    // repainted the whole page every frame of a run.
+    document.getElementById('status-tick').textContent = s.tick + ' / ' + s.duration;
     // Task leg stacked bar (includes dead agents)
     if (s.task_leg_counts && s.state !== 'idle') {
         const barRow = document.getElementById('task-leg-bar-row');
@@ -3006,11 +3008,12 @@ function redrawChartsForMode() {
 }
 
 function updateChartData(s) {
+    // State check first: idle/loading polls call resetChartData(), so creating charts here would rebuild them every poll.
+    if (s.state !== 'running' && s.state !== 'paused') return;
     if (!chartInsts.throughput && typeof uPlot !== 'undefined') {
         initCharts();
     }
     if (!chartInsts.throughput) return;
-    if (s.state !== 'running' && s.state !== 'paused') return;
     if (s.tick === lastChartTick) return;
     if (s.tick === 0) return; // skip tick 0 — agents haven't been assigned tasks yet
 
@@ -3662,48 +3665,56 @@ let loadedTopologies = [];
 // Separate list for experiment-only imported maps
 let experimentImportedMaps = []; // [{ data, name, id }]
 
-async function loadTopologyManifest() {
-    try {
-        const resp = await fetch('topologies/manifest.json');
-        if (!resp.ok) return;
-        const filenames = await resp.json();
-        if (!Array.isArray(filenames) || filenames.length === 0) return;
-
-        for (const filename of filenames) {
-            try {
-                const r = await fetch('topologies/' + filename);
-                if (!r.ok) continue;
-                const data = await r.json();
-                const name = data.name || filename.replace(/\.json$/, '');
-                const id = filename.replace(/\.json$/, '').replace(/[^a-zA-Z0-9_-]/g, '_');
-                // Compute walkable_cells if not present
-                if (!data.walkable_cells && data.cells) {
-                    const walls = data.cells.filter(c => c.type === 'wall').length;
-                    data.walkable_cells = (data.width * data.height) - walls;
-                }
-                // Normalize agent count: number_agents > suggested_agents (legacy) > robots array > 0
-                if (!data.number_agents) {
-                    data.number_agents = data.suggested_agents || (data.robots ? data.robots.length : 0) || 0;
-                }
-                // Validate minimal setup: needs zones + agents to simulate
-                const hasPickup = data.cells && data.cells.some(c => c.type === 'pickup');
-                const hasDelivery = data.cells && data.cells.some(c => c.type === 'delivery');
-                if (!hasPickup || !hasDelivery) {
-                    // TODO: surface in UI (per-topology errors aggregated in topology-empty when ALL fail)
-                    console.warn(`Topology ${filename}: missing pickup or delivery zones, skipping`);
-                    continue;
-                }
-                if (!data.number_agents) {
-                    console.warn(`Topology ${filename}: no number_agents specified, loading with 0 agents`);
-                }
-                loadedTopologies.push({ filename, data, name, id, imported: false });
-            } catch (e) {
+// Fetched in parallel at module load, so the maps download alongside the WASM binary
+// instead of one after another once the simulator has started.
+// Resolves to null (no manifest), [] (network error) or [{ filename, data|null }].
+const topologyFetch = fetch('topologies/manifest.json')
+    .then(resp => resp.ok ? resp.json() : null)
+    .then(filenames => Array.isArray(filenames) && filenames.length > 0
+        ? Promise.all(filenames.map(filename => fetch('topologies/' + filename)
+            .then(r => r.ok ? r.json() : null)
+            .then(data => ({ filename, data }), e => {
                 // TODO: surface in UI (per-topology errors aggregated in topology-empty when ALL fail)
                 console.warn('Failed to load topology:', filename, e);
+                return { filename, data: null };
+            })))
+        : null)
+    .catch(() => []);
+
+async function loadTopologyManifest() {
+    const entries = await topologyFetch;
+    if (!entries) return;
+
+    for (const { filename, data } of entries) {
+        try {
+            if (!data) continue;
+            const name = data.name || filename.replace(/\.json$/, '');
+            const id = filename.replace(/\.json$/, '').replace(/[^a-zA-Z0-9_-]/g, '_');
+            // Compute walkable_cells if not present
+            if (!data.walkable_cells && data.cells) {
+                const walls = data.cells.filter(c => c.type === 'wall').length;
+                data.walkable_cells = (data.width * data.height) - walls;
             }
+            // Normalize agent count: number_agents > suggested_agents (legacy) > robots array > 0
+            if (!data.number_agents) {
+                data.number_agents = data.suggested_agents || (data.robots ? data.robots.length : 0) || 0;
+            }
+            // Validate minimal setup: needs zones + agents to simulate
+            const hasPickup = data.cells && data.cells.some(c => c.type === 'pickup');
+            const hasDelivery = data.cells && data.cells.some(c => c.type === 'delivery');
+            if (!hasPickup || !hasDelivery) {
+                // TODO: surface in UI (per-topology errors aggregated in topology-empty when ALL fail)
+                console.warn(`Topology ${filename}: missing pickup or delivery zones, skipping`);
+                continue;
+            }
+            if (!data.number_agents) {
+                console.warn(`Topology ${filename}: no number_agents specified, loading with 0 agents`);
+            }
+            loadedTopologies.push({ filename, data, name, id, imported: false });
+        } catch (e) {
+            // TODO: surface in UI (per-topology errors aggregated in topology-empty when ALL fail)
+            console.warn('Failed to load topology:', filename, e);
         }
-    } catch (_) {
-        // No manifest or network error — topologies will be empty
     }
 
     populateTopologyUI();

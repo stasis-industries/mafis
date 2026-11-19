@@ -1,4 +1,5 @@
 mod commands;
+mod pacing;
 mod serialize;
 #[cfg(target_arch = "wasm32")]
 mod wasm_api;
@@ -14,16 +15,13 @@ pub use wasm_api::*;
 // ---------------------------------------------------------------------------
 
 #[cfg(target_arch = "wasm32")]
+#[derive(Default)]
 pub(super) struct BridgeInner {
     pub(super) outgoing: Option<String>,
     pub(super) incoming: Vec<commands::JsCommand>,
-}
-
-#[cfg(target_arch = "wasm32")]
-impl Default for BridgeInner {
-    fn default() -> Self {
-        Self { outgoing: None, incoming: Vec::new() }
-    }
+    /// Set by `send_command`, cleared by `pacing::pace_rendering`.
+    pub(super) command_received: bool,
+    pub(super) waker: Option<bevy::winit::EventLoopProxy<bevy::winit::WinitUserEvent>>,
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -66,9 +64,12 @@ pub struct BridgePlugin;
 
 impl Plugin for BridgePlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<FpsTracker>().add_systems(
-            Update,
-            (serialize::sync_state_to_js, commands::process_js_commands.in_set(BridgeSet)),
-        );
+        app.init_resource::<FpsTracker>()
+            .add_systems(
+                Update,
+                (serialize::sync_state_to_js, commands::process_js_commands.in_set(BridgeSet)),
+            )
+            .add_systems(Startup, pacing::store_waker)
+            .add_systems(Last, pacing::pace_rendering);
     }
 }

@@ -194,9 +194,12 @@ pub fn orbit_mouse_input(
 
     let delta = accumulated_motion.delta;
     let is_ortho = orbit.mode == CameraMode::Orthographic;
+    // A drag starts the frame after the press: motion in the press frame came before it
+    // (on the web, after an idle sleep, the whole page's mouse travel since the last frame).
+    let dragging = |b| mouse_buttons.pressed(b) && !mouse_buttons.just_pressed(b);
 
     // Left-mouse drag: orbit in 3D, pan in 2D
-    if mouse_buttons.pressed(MouseButton::Left) && delta != Vec2::ZERO {
+    if dragging(MouseButton::Left) && delta != Vec2::ZERO {
         orbit.animating = false;
         if is_ortho {
             // Pan in orthographic mode
@@ -211,9 +214,7 @@ pub fn orbit_mouse_input(
     }
 
     // Pan on middle or right drag (both modes)
-    if (mouse_buttons.pressed(MouseButton::Middle) || mouse_buttons.pressed(MouseButton::Right))
-        && delta != Vec2::ZERO
-    {
+    if (dragging(MouseButton::Middle) || dragging(MouseButton::Right)) && delta != Vec2::ZERO {
         orbit.animating = false;
         if is_ortho {
             let pan_scale = orbit.ortho_scale * orbit.pan_sensitivity;
